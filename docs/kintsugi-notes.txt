@@ -1,0 +1,25 @@
+Inspirations
+============
+* Dlang Ranges
+* Phasers
+* Macros/metaprogramming
+* Pattern matching
+* Many datatypes
+* Homoiconic
+* Common Lisp conditions and restarts
+* Compile-time evaluation
+* Flexible type system
+
+Kintsugi/Exports [WASM, JS, native code]
+Kintsugi/Dialects [View, API]
+Kintsugi/Maintenance
+Kintsugi/Standard
+Kintsugi/Foundation
+Raku (Rust in future?)
+
+Dialects:
+* header
+* sequence
+* match
+* parse
+* loop

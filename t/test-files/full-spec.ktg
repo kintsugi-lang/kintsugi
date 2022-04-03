@@ -1,0 +1,53 @@
+Kintsugi [
+  date: 2021-12-21
+  file: %kintsugi.ktg
+  permissions: ['system 'network 'file]
+  modules: ['view 'api]
+  paths: [%extra-modules/] ; This is a test of the comments
+]
+
+variable1: 1
+variable2: 2
+; I should be able to put this anywhere
+range1: range 1 10
+range2: range/by 10 1 -1
+range3: range/by 10 30 2
+sequence1: loop/lazy [
+  for [number1 number2]
+  in range 1 10
+  do [number1 + number2] 
+]
+sequence2: zip [range1 range2 range3]
+sequence3: chain [range1 range2 range3]
+
+list1: sequence
+  |> map [it * 12]
+  |> filter [not none? it]
+
+if variable1 + variable2 = 10 [
+   @enter [
+     variable1: 10
+   ]
+   @exit [
+     unset variable1
+   ]
+   print variable1 + variable2
+]
+
+match [
+   [1 2 3] [print "Leg 1"]
+   [1 testing 4] [print "Leg 2"]
+   [_] [print "Leg 3"]
+   default: [print "Default"]       
+]
+
+#include %other-file.ktg
+#include 'view
+
+#macro [
+  either variable1 + variable2 = 3 [
+    print "Windows"
+  ] [
+    print "Linux"
+  ]
+]
