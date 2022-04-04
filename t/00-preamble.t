@@ -1,7 +1,11 @@
 use Test;
+use lib '../lib';
+use Kintsugi::Foundation::Grammar;
+use Kintsugi::Actions;
+use Kintsugi::AST;
 
 plan 1;
 
-say "This test does nothing.";
-
-True.&is(True);
+subtest 'preamble' => {
+    True.&is(True);
+}

@@ -20,6 +20,10 @@ sequence1: loop/lazy [
 sequence2: zip [range1 range2 range3]
 sequence3: chain [range1 range2 range3]
 
+test-func: function [number1 [integer!] number2 [float!]] [
+  number1 + number2
+]
+
 list1: sequence
   |> map [it * 12]
   |> filter [not none? it]

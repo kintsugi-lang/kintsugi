@@ -8,6 +8,7 @@ grammar Kintsugi::Foundation::Grammar {
     token datatype:sym<block> { <block> }
     token datatype:sym<directive> { <directive> }
     token datatype:sym<file> { <file> }
+    token datatype:sym<function> { <function> }
     token datatype:sym<lit-word> { <lit-word> }
     token datatype:sym<get-word> { <get-word> }
     token datatype:sym<set-word> { <set-word> }
@@ -28,7 +29,8 @@ grammar Kintsugi::Foundation::Grammar {
     }
     
     token file { '%' <any-safe-file-char>+ }
-
+    token function { 'function' <.ws> <block> <.ws> <block> }
+    
     token lit-word { '\'' <any-word-char>+ }
     token get-word { ':' <any-word-char>+ }
     token set-word { <any-word-char>+ ':' }
