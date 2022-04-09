@@ -1,40 +1,35 @@
 class ASTNode {}
 
-class AST::BlockValue is ASTNode {
+role Value[::T] { has T $.value; }
+
+class AST::Block is ASTNode {
     has ASTNode @.items = [];
 }
 
-class AST::TOP is AST::BlockValue {}
+class AST::TOP is AST::Block {}
 
-class AST::WordAssignment is ASTNode {
-    has Str $.name;
-    has ASTNode $.value;
-}
+class AST::None is ASTNode does Value[Nil] {}
+class AST::Integer is ASTNode does Value[Int] {}
+class AST::Float is ASTNode does Value[Rat] {}
+class AST::Logic is ASTNode does Value[Bool] {}
+class AST::String is ASTNode does Value[Str] {}
 
-class AST::NoneValue is ASTNode {}
-
-class AST::IntegerValue is ASTNode {
-    has Int $.value;
-}
-
-class AST::FloatValue is ASTNode {
-    has Rat $.value;
-}
-
-class AST::LogicValue is ASTNode {
-    has Bool $.value;
-}
-
-class AST::StringValue is ASTNode {
-    has Str $.value;
-}
-
-class AST::FileValue is ASTNode {
+class AST::File is ASTNode {
     has Str $.name;
     has IO $.value is rw;
 }
 
-class AST::FunctionValue is ASTNode {
+class AST::Function is ASTNode {
     has @.params = [];
     has ASTNode @.body = [];
 }
+
+
+class AST::Word is ASTNode does Value[ASTNode] {
+    has Str $.name;
+}
+
+class AST::SetWord is AST::Word does Value[Any] {}
+class AST::GetWord is AST::Word does Value[Any] {}
+class AST::LitWord is AST::Word does Value[Str] {}
+class AST::Operator is AST::Word does Value[AST::Function] {}

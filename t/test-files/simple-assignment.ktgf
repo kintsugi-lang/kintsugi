@@ -11,3 +11,6 @@ func1: function [number1 number2] []
 func2: function [number1 number2] [
        number1 + number2
 ]
+
+number3: :number1
+number4: 'number2
