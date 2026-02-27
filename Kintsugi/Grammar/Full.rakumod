@@ -1,14 +1,17 @@
-use Kintsugi::Foundation::Grammar;
+use Kintsugi::Grammar::Systems;
 
-grammar Kintsugi::Standard::Grammar is Kintsugi::Foundation::Grammar {
-    token header { 'Kintsugi' <.ws> <block> }
-
+grammar Kintsugi::Grammar::Full is Kintsugi::Grammar::Systems {
+    rule header { 'Kintsugi' '/Full'? <.ws> <block> }
+    
     token datatype:sym<scope> { <scope> }
     token datatype:sym<operator> { <operator> | <mezzanine> }
     token datatype:sym<date> { <date> }
     token datatype:sym<logic> { <logic> }
     
-    token scope { '@' < enter exit > }
+    token scope {
+        '@'
+        < enter exit >
+    }
 
     token mezzanine {
         | '|>'
@@ -20,5 +23,7 @@ grammar Kintsugi::Standard::Grammar is Kintsugi::Foundation::Grammar {
         | \d ** 2 '-' \d ** 2 '-' \d ** 4
     }
     
-    token logic { < true false on off yes no > }
+    token logic {
+        < true false on off yes no >
+    }
 }

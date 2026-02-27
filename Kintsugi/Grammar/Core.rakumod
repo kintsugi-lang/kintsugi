@@ -1,6 +1,8 @@
-grammar Kintsugi::Foundation::Grammar {
+grammar Kintsugi::Grammar::Core {
     rule TOP { <header> <block-items> }
-    token header { 'Kintsugi/Foundation' <.ws> <block> }
+
+    rule header { 'Kintsugi/Core' <.ws> <block> }
+    
     rule block { '[' ~ ']' <block-items> }
     token block-items { <datatype>* % <.ws> }
 
@@ -13,8 +15,6 @@ grammar Kintsugi::Foundation::Grammar {
     token datatype:sym<lit-word> { <lit-word> }
     token datatype:sym<get-word> { <get-word> }
     token datatype:sym<set-word> { <set-word> }
-    token datatype:sym<string> { <string> }
-    token datatype:sym<logic> { <logic> }
     token datatype:sym<none> { <sym> }
     token datatype:sym<float> { <float> }
     token datatype:sym<integer> { <integer> }
@@ -35,8 +35,6 @@ grammar Kintsugi::Foundation::Grammar {
     token set-word { <word> ':' }
     token word { <any-word-char>+ }
 
-    token string { '"' ~ '"' <string-contents> }
-    token logic { < true false > }
     token float { \d* '.' \d+ }
     token integer { \d+ }
 
