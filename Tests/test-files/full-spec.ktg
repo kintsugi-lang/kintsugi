@@ -28,13 +28,25 @@
 ; ============================================================
 ; Every Kintsugi program begins with a header block.
 ; It declares metadata about the file.
+;
+; The modules: field is syntactic sugar. During evaluation,
+; it expands to something like:
+;
+;   foreach [module modules] [
+;     temp: require module
+;     bind temp/header/name temp
+;   ]
+;
+; Each module is required and bound into the current scope
+; using the name from the module's own header block.
 
 Kintsugi [
+  name: 'full-spec
   date: 2026-02-26
   file: %full-spec.ktg
   version: 0.1.0
   permissions: ['system 'network 'file]
-  modules: ['view 'api 'parse]
+  modules: ['view %api.ktg %parse.ktg]
   paths: [%extra-modules/]
 ]
 
@@ -701,27 +713,82 @@ result: attempt [
 ; --- Conditional includes ---
 
 #if platform = 'windows [
-  #include %windows-support.ktg
+  require %windows-support.ktg
 ]
 
 
 ; ============================================================
-; INCLUDES & MODULES
+; REQUIRE & FILE-BASED MODULES
 ; ============================================================
+; There is no module system. Any valid Kintsugi program can
+; be used as a module. require is a word (not a directive)
+; that loads a file, evaluates it in its own namespace, and
+; returns the resulting block.
+;
+; Access the module's contents via path syntax.
+; The file's header name: field is just metadata — the
+; caller decides what word to bind the module to.
 
-; Include a file (inserts its contents at this point)
-#include %other-file.ktg
+; --- Basic require ---
+; require loads the file and returns its namespace as a block.
 
-; Include a registered module
-#include 'view
-#include 'api
+math-utils: require %lib/math-utils.ktg
+math-utils/add 3 4                     ; => 7
+math-utils/clamp 150 0 100             ; => 100
 
-; Module definition (in the included file)
-module 'my-module [
-  public-func: function/export [x] [x + 1]
-  helper: function/export [x] [x * 2]
-  private-fn: function [x] [x - 1]     ; not exported
+; --- Conditional require ---
+; require is just a word. Use it anywhere you'd use any word.
+
+platform-lib: either platform = 'windows [
+  require %platform/windows.ktg
+] [
+  require %platform/linux.ktg
 ]
+
+platform-lib/init
+
+; --- Requiring dialects ---
+; Dialects are just files. Require them, use them.
+
+csv: require %dialects/csv.ktg
+csv/parse %data/users.csv
+
+html: require %dialects/html.ktg
+html/render [
+  head [title "Hello"]
+  body [p "World"]
+]
+
+; --- What a module file looks like ---
+; It's just a regular Kintsugi program. Nothing special.
+;
+; ; --- lib/math-utils.ktg ---
+; Kintsugi [
+;   name: 'math-utils
+;   date: 2026-02-26
+;   version: 1.0.0
+; ]
+;
+; add: function [a [number!] b [number!]] [a + b]
+; clamp: function [val [number!] lo [number!] hi [number!]] [
+;   min hi max lo val
+; ]
+; _helper: function [x] [x * x]         ; convention: _ prefix = private
+
+; --- Header modules: sugar ---
+; Listing files in modules: is equivalent to requiring each
+; one and binding it to the name in its own header.
+;
+; Kintsugi [
+;   modules: [%view.ktg %api.ktg]
+; ]
+;
+; ...expands to roughly:
+;
+; foreach [module modules] [
+;   temp: require module
+;   bind temp/header/name temp
+; ]
 
 
 ; ============================================================
