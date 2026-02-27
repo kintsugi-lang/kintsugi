@@ -1,57 +1,759 @@
+; ============================================================
+; Learn Kintsugi in Y Minutes
+; ============================================================
+;
+; Kintsugi is a homoiconic, dynamically-typed programming
+; language with rich built-in datatypes, lazy sequences,
+; pattern matching, a condition/restart system, and powerful
+; metaprogramming.
+;
+; Influenced by Rebol/Red, Common Lisp, D, and Raku.
+;
+; Tier hierarchy:
+;
+;   Kintsugi/Core         - core types, words, blocks
+;   Kintsugi/Systems      - adds strings, logic, headers
+;   Kintsugi/Full         - adds scopes, dates, parse, attempt
+;   Kintsugi/Dialects     - view, api, custom DSLs
+;   Kintsugi/Exports      - WASM, JS, native code
+;
+; File extensions:
+;   .ktg - For all source files.
+;
+; ============================================================
+
+
+; ============================================================
+; HEADER
+; ============================================================
+; Every Kintsugi program begins with a header block.
+; It declares metadata about the file.
+
 Kintsugi [
-  date: 2021-12-21
-  file: %kintsugi.ktg
+  date: 2026-02-26
+  file: %full-spec.ktg
+  version: 0.1.0
   permissions: ['system 'network 'file]
-  modules: ['view 'api]
-  paths: [%extra-modules/] ; This is a test of the comments
+  modules: ['view 'api 'parse]
+  paths: [%extra-modules/]
 ]
 
-variable1: 1
-variable2: 2
-; I should be able to put this anywhere
-range1: range 1 10
-range2: range/by 10 1 -1
-range3: range/by 10 30 2
-sequence1: loop/lazy [
-  for [number1 number2]
+
+; ============================================================
+; DATATYPES
+; ============================================================
+; Kintsugi has many built-in datatypes. Every value carries
+; its type at runtime. Type names are suffixed with !
+
+; --- Scalars ---
+
+my-int: 42                              ; integer!
+negative: -7                            ; integer!
+my-float: 3.14                          ; float!
+my-char: #"A"                           ; char!
+my-pair: 100x200                        ; pair! (2D coordinates)
+my-money: $19.99                        ; money!
+my-version: 1.2.3                       ; tuple! (versions, colors, IPs)
+
+; --- Logic ---
+; Multiple aliases for true/false
+
+a: true                                 ; logic!
+b: false
+c: on                                   ; same as true
+d: off                                  ; same as false
+e: yes                                  ; same as true
+f: no                                   ; same as false
+
+; --- None ---
+
+empty: none                             ; none! (null/nil)
+
+; --- Temporal ---
+
+my-date: 2026-02-26                     ; date!
+short-date: 26-02-26                    ; date! (short form)
+my-time: 14:30:00                       ; time!
+
+; --- Text & Markup ---
+
+my-string: "Hello, world"              ; string!
+escaped: "Line one^/Line two"          ; ^/ is newline escape
+my-tag: <div class="main">             ; tag!
+my-binary: #{48656C6C6F}               ; binary! (hex encoded)
+
+; --- Identifiers & Resources ---
+
+my-file: %path/to/file.txt             ; file!
+my-dir: %extra-modules/                ; file!
+my-url: https://example.com/api        ; url!
+my-email: user@example.com             ; email!
+
+; --- Composite ---
+
+my-block: [1 2 "three" 4.0]            ; block! (the universal container)
+nested: [[1 2] [3 4] [5 6]]            ; blocks nest freely
+code-as-data: [print "I am data"]      ; code is just a block
+
+
+; ============================================================
+; WORDS
+; ============================================================
+; Words are the primary identifiers. A prefix or suffix on
+; the word controls how it evaluates.
+
+name: "Kintsugi"                        ; set-word  (bind a value)
+; name                                  ; word      (evaluate / lookup)
+ref: :name                              ; get-word  (get without calling)
+sym: 'name                              ; lit-word  (the symbol itself)
+
+; Words can contain letters, digits, hyphens, ?, !, _
+is-valid?: true
+my-variable!: 42
+
+
+; ============================================================
+; TYPESETS
+; ============================================================
+; Typesets group related types for polymorphism and
+; type checking. They are values themselves.
+;
+; Built-in typesets:
+;   number!     = integer! | float!
+;   any-word!   = word! | set-word! | get-word! | lit-word!
+;   any-block!  = block! | path!
+;   series!     = string! | block! | file! | url!
+;                 | email! | tag! | binary!
+;   scalar!     = integer! | float! | date! | time!
+;                 | money! | pair! | tuple! | char!
+;   any-type!   = all types
+
+; Custom typesets
+coordinate!: typeset [pair! block!]
+response!: typeset [string! block! none!]
+
+; Type introspection
+type? 42                                ; => integer!
+type? "hello"                           ; => string!
+type? [1 2 3]                           ; => block!
+type? :add                              ; => function!
+
+; Type predicates
+integer? 42                             ; => true
+number? 3.14                            ; => true
+series? "abc"                           ; => true
+none? none                              ; => true
+
+; Type conversion (explicit only - no implicit coercion)
+to integer! "42"                        ; => 42
+to string! 42                           ; => "42"
+to float! 7                             ; => 7.0
+to block! "hello"                       ; => ["hello"]
+to logic! 0                             ; => false
+to logic! 1                             ; => true
+
+
+; ============================================================
+; FUNCTIONS
+; ============================================================
+
+; Basic definition
+add: function [a b] [
+  a + b
+]
+
+; Type constraints and return type
+add-typed: function [a [integer!] b [integer!] return: [integer!]] [
+  a + b
+]
+
+; Polymorphic via typesets
+double: function [value [number!]] [
+  value * 2
+]
+
+; Refinements add optional behavior
+greet: function [name [string!] /loud /times count [integer!]] [
+  message: "Hello, " + name
+  if loud [message: uppercase message]
+  either times [
+    repeat count [print message]
+  ] [
+    print message
+  ]
+]
+
+; Calling with refinements
+greet "world"                           ; => Hello, world
+greet/loud "world"                      ; => HELLO, WORLD
+greet/loud/times "world" 3             ; => HELLO, WORLD (x3)
+
+; Functions are first-class values
+operation: :add                         ; get-word grabs the function value
+operation 3 4                           ; => 7
+
+
+; ============================================================
+; LAMBDAS
+; ============================================================
+; Inline anonymous functions using [params -> body].
+; -> is not a special operator. It's just a word.
+; Functions like map, filter, reduce interpret the block:
+; everything before -> is params, everything after is body.
+;
+; Use 'function' for named definitions.
+; Use [params -> body] for inline/anonymous functions.
+
+; Single parameter
+map [n -> n * 2] my-list
+
+; Multiple parameters
+reduce [acc n -> acc + n] 0 my-list
+
+; Lambdas are just blocks - they compose like everything else
+my-transform: [n -> n * 2]
+map my-transform my-list
+
+; Passing lambdas to higher-order functions
+filter [n -> n > 50] my-list
+sort/with [a b -> a - b] my-list
+
+; Lambdas work anywhere a function is expected
+apply [x -> x * x] 5                   ; => 25
+
+
+; ============================================================
+; BLOCKS & HOMOICONICITY
+; ============================================================
+; Code is data. Data is code. Everything is a block.
+
+data: [print "Hello"]
+
+; Inspect code as data
+length? data                            ; => 2
+first data                              ; => 'print (a word)
+second data                             ; => "Hello" (a string)
+
+; Modify code as data
+append data " world"
+
+; Execute data as code
+do [print "I was data, now I am running"]
+
+; Compose - insert evaluated expressions into a template
+; Parenthesized expressions inside compose are evaluated,
+; everything else is kept as literal data.
+target: "Alice"
+code: compose [greet (target) 42]       ; => [greet "Alice" 42]
+do code
+
+
+; ============================================================
+; RANGES & SEQUENCES
+; ============================================================
+; Inspired by D language ranges. Sequences can be lazy
+; (computed on demand) or eager (materialized).
+
+; Basic ranges
+r1: range 1 10                          ; 1 through 10
+r2: range/by 10 1 -1                   ; 10 down to 1, step -1
+r3: range/by 0 100 5                   ; 0, 5, 10, ... 100
+
+; Lazy sequences (nothing computed until consumed)
+squares: loop/lazy [
+  for [x]
+  in range 1 1000000
+  do [x * x]
+]
+
+; Materialize only what you need
+take squares 5                          ; => [1 4 9 16 25]
+
+; Sequence combinators
+zipped: zip [r1 r2]                     ; [[1 10] [2 9] [3 8] ...]
+chained: chain [r1 r2 r3]              ; concatenates end-to-end
+
+; Zip operator (infix)
+test-case1: [1 2 3 4]
+test-case2: [5 6 7 8]
+print test-case1 Z test-case2           ; zips pairs
+
+; Lazy with guard clause
+evens: loop/lazy [
+  for [x]
+  in range 1 100
+  when [x % 2 = 0]
+  do [x]
+]
+
+; Multi-variable iteration
+products: loop/lazy [
+  for [a b]
   in range 1 10
-  do [number1 + number2] 
-]
-sequence2: zip [range1 range2 range3]
-sequence3: chain [range1 range2 range3]
-
-test-func: function [number1 [integer!] number2 [float!]] [
-  number1 + number2
+  do [a * b]
 ]
 
-list1: sequence
-  |> map [it * 12]
-  |> filter [not none? it]
 
-if variable1 + variable2 = 10 [
-   @enter [
-     variable1: 10
-   ]
-   @exit [
-     unset variable1
-   ]
-   print variable1 + variable2
+
+; ============================================================
+; CONTROL FLOW
+; ============================================================
+
+; --- Conditionals ---
+
+; if (single branch - returns result or none)
+if x > 10 [print "big"]
+
+; either (two branches - always returns a value)
+either x > 10 [
+  print "big"
+] [
+  print "small"
 ]
 
-match [
-   [1 2 3] [print "Leg 1"]
-   [1 testing 4] [print "Leg 2"]
-   [_] [print "Leg 3"]
-   default: [print "Default"]       
+; unless (negated if)
+unless empty? collection [
+  process collection
 ]
 
-#include %other-file.ktg
-#include 'view
+; --- Loops ---
+
+; for-each over a series
+loop [
+  for [item]
+  in [1 2 3 4 5]
+  do [print item]
+]
+
+; for-each with index
+loop [
+  for [item index]
+  in ["a" "b" "c"]
+  do [print index + ": " + item]
+]
+
+; while
+while [x > 0] [
+  print x
+  x: x - 1
+]
+
+; repeat (fixed count)
+repeat 5 [print "hello"]
+
+; forever (infinite loop - break to exit)
+forever [
+  data: read-input
+  if data = "quit" [break]
+  process data
+]
+
+
+; ============================================================
+; PATTERN MATCHING
+; ============================================================
+; match tests a value against a series of patterns.
+; First match wins. Patterns can destructure and bind.
+;
+; Pattern binding rules:
+;   bare word  - captures/binds the value at this position
+;   :word      - matches against that word's current value
+;   'word      - matches the literal word (useful for errors)
+;   literal    - matches exactly (integers, strings, etc.)
+;   _          - wildcard (matches anything, doesn't bind)
+;   default:   - fallback if nothing matched
+
+; Literal matching
+match value [
+  [1 2 3]  [print "got 1 2 3"]
+  [1 _ 3]  [print "1, anything, 3"]    ; _ is wildcard
+  [_]      [print "catch-all"]
+  default: [print "nothing matched"]
+]
+
+; Destructuring - bare words capture values
+match point [
+  [0 0]   [print "origin"]
+  [x 0]   [print "x-axis at " + x]     ; x captures, 0 is literal
+  [0 y]   [print "y-axis at " + y]     ; 0 is literal, y captures
+  [x y]   [print x + ", " + y]         ; both capture
+]
+
+; Get-words match against a variable's value
+expected: 42
+match result [
+  [:expected] [print "got what we expected"]
+  [x]         [print "got " + x + " instead"]
+]
+
+; Lit-words match the word itself (useful for error names)
+match error-name [
+  ['division-by-zero]  [print "math error"]
+  ['unreachable]       [print "network error"]
+  [_]                  [print "unknown error"]
+]
+
+; Guards - additional conditions on a match
+match age [
+  [n] when [n < 13]  [print "child"]
+  [n] when [n < 20]  [print "teenager"]
+  [n] when [n < 65]  [print "adult"]
+  [_]                [print "senior"]
+]
+
+
+; ============================================================
+; PHASERS
+; ============================================================
+; Lifecycle hooks that fire at specific scope boundaries.
+; Kintsugi uses a simplified set:
+;
+;   @enter  - runs when entering a scope
+;   @exit   - runs when leaving a scope
+;   @first  - runs before the first loop iteration
+;   @last   - runs after the last loop iteration
+;
+
+; --- Scope phasers ---
+
+if condition [
+  @enter [
+    resource: acquire-lock "database"
+  ]
+  @exit [
+    release-lock resource
+  ]
+
+  ; Body runs between @enter and @exit
+  result: query resource "SELECT * FROM users"
+  print result
+]
+
+; @exit always runs, even on error.
+; Phasers compose across nested scopes.
+
+; --- Loop phasers ---
+
+loop [
+  for [item]
+  in collection
+  @first [print "=== Begin Processing ==="]
+  @last  [print "=== Done Processing ==="]
+  do [process item]
+]
+
+
+; ============================================================
+; PARSE DIALECT
+; ============================================================
+; Rebol-style rule-based parsing. Parse operates on series
+; (strings, blocks) using grammar rules defined as blocks.
+
+; --- String parsing ---
+
+email-text: "user@example.com"
+
+parse email-text [
+  copy name some [alpha | digit | "." | "-"]
+  "@"
+  copy domain some [alpha | digit | "." | "-"]
+]
+; name => "user", domain => "example.com"
+
+; --- Block parsing ---
+
+data: [name "Alice" age 25 role "admin"]
+
+parse data [
+  some [
+    'name copy who string!
+    | 'age copy years integer!
+    | 'role copy job string!
+  ]
+]
+; who => "Alice", years => 25, job => "admin"
+
+; --- Composable rules ---
+; Rules are blocks. Blocks are data. So rules compose.
+
+digit-run: [some digit]
+
+date-rule: [
+  copy year digit-run "-"
+  copy month digit-run "-"
+  copy day digit-run
+]
+
+parse "2026-02-26" date-rule
+; year => "2026", month => "02", day => "26"
+
+; Parse keywords:
+;   some   - one or more matches
+;   any    - zero or more matches
+;   opt    - zero or one match
+;   copy   - capture matched input into a word
+;   to     - advance to (not past) a match
+;   thru   - advance through (past) a match
+;   not    - fail if the rule matches
+;   ahead  - lookahead without consuming input
+;   end    - match end of input
+;   skip   - match any single element
+;   |      - ordered alternative
+
+
+; ============================================================
+; ERROR HANDLING
+; ============================================================
+; Lua-style protected calls. Simple and predictable.
+;
+;   try         - call a block safely, get back [logic! result]
+;   try/handle  - same, but with a custom error handler
+;
+; Errors are raised with 'error'. Unprotected errors
+; crash the runtime.
+
+; --- Raising errors ---
+; error takes a lit-word (the error name) and an optional
+; string message. The lit-word gives you something matchable.
+
+safe-divide: function [x [number!] y [number!]] [
+  if y = 0 [error 'division-by-zero "cannot divide by zero"]
+  x / y
+]
+
+validate: function [age [integer!]] [
+  if age < 0 [error 'invalid-age "age cannot be negative"]
+  if age > 150 [error 'invalid-age "age seems unrealistic"]
+  age
+]
+
+; Message is optional - the lit-word alone is enough
+check-connection: function [host [url!]] [
+  if not reachable? host [error 'unreachable]
+]
+
+; --- try (protected call) ---
+; Calls a block in protected mode. Returns a block:
+;   [true result]        on success
+;   [false name message] on failure (name is the lit-word)
+
+result: try [safe-divide 10 2]
+; result => [true 5]
+
+result: try [safe-divide 10 0]
+; result => [false 'division-by-zero "cannot divide by zero"]
+
+; Check and use the result
+either first result [
+  print "Got: " + second result
+] [
+  print "Error: " + second result + " - " + third result
+]
+
+; --- try/handle (protected call with handler) ---
+; Like try, but with a custom error handler function.
+; The handler receives the error name and message.
+
+log-handler: function [name [lit-word!] message [string!]] [
+  print "Caught " + name + ": " + message
+  0
+]
+
+result: try/handle [safe-divide 10 0] :log-handler
+; prints "Caught division-by-zero: cannot divide by zero"
+; result => [false 0]
+
+; --- Nested protection ---
+
+result: try [
+  inner: try [risky-operation]
+  either first inner [
+    process second inner
+  ] [
+    error 'inner-failure "inner operation failed"
+  ]
+]
+
+; However, this can be a more verbose way of handling this.
+; For that reason, we have...
+
+; ============================================================
+; ATTEMPT DIALECT
+; ============================================================
+; A dialect for chaining operations and handling errors.
+; Use do/then to build pipelines. Add error handling
+; when you need it. then takes a lambda — no implicit variables.
+;
+; Attempt keywords:
+;   do       - the initial operation
+;   then     - chain the next step (takes a lambda)
+;   on       - handle a named error
+;   retries  - how many times to retry on error
+;   delay    - ms between retries
+;   fallback - last resort if everything fails
+
+; --- Simple pipeline (no error handling) ---
+; do/then chains operations. then receives the previous
+; result via a lambda — name it whatever you want.
+
+result: attempt [
+  do   [range 1 100]
+  then [nums -> map [n -> n * 2] nums]
+  then [nums -> filter [n -> n > 50] nums]
+  then [nums -> take nums 10]
+  then [nums -> reduce [acc n -> acc + n] 0 nums]
+]
+
+cleaned: attempt [
+  do   ["  Hello, World  "]
+  then [s -> trim s]
+  then [s -> lowercase s]
+  then [s -> split s ", "]
+]
+
+; The nested try example from above becomes...
+
+result: attempt [
+  do   [risky-operation]
+  then [r -> process r]
+  on 'inner-failure [print "inner operation failed"]
+]
+
+; --- With error handling ---
+
+result: attempt [
+  do    [http/get my-url]
+  on 'unreachable [print "host down" none]
+]
+
+; --- Retry policies ---
+
+result: attempt [
+  do      [http/get my-url]
+  retries 3
+  delay   1000                          ; ms between retries
+  on 'unreachable [
+    print "retrying..."
+  ]
+  fallback [none]
+]
+
+; --- Multiple handlers ---
+
+result: attempt [
+  do [
+    response: http/get my-url
+    parse-json response/body
+  ]
+  retries 2
+  on 'unreachable   [print "network down" none]
+  on 'parse-error   [print "bad json" []]
+  fallback [error 'fetch-failed "all retries exhausted"]
+]
+
+; --- Full pipeline with error handling ---
+; Each step only runs if the previous succeeded.
+
+result: attempt [
+  do    [connect database-url]
+  then  [conn -> query conn "SELECT * FROM users"]
+  then  [rows -> map [row -> parse-user row] rows]
+  on 'connection-failed [print "db down" []]
+  on 'query-error       [print "bad query" []]
+  fallback [[]]
+]
+
+
+; ============================================================
+; MACROS & COMPILE-TIME EVALUATION
+; ============================================================
+; Macros operate on code-as-data at compile time.
+; They receive blocks and emit blocks.
+
+; --- Conditional compilation ---
 
 #macro [
-  either variable1 + variable2 = 3 [
-    print "Windows"
+  either platform = 'windows [
+    print "Running on Windows"
   ] [
-    print "Linux"
+    print "Running on Linux"
+  ]
+]
+
+; --- Compile-time constants ---
+
+#macro [
+  max-connections: 100
+  build-date: 2026-02-26
+]
+
+; --- Code generation ---
+; Macros can generate repetitive code from data.
+
+#macro [
+  for-each field [name age email] [
+    emit [
+      get-(field): function [obj] [obj/(field)]
+    ]
+  ]
+]
+
+; --- Conditional includes ---
+
+#if platform = 'windows [
+  #include %windows-support.ktg
+]
+
+
+; ============================================================
+; INCLUDES & MODULES
+; ============================================================
+
+; Include a file (inserts its contents at this point)
+#include %other-file.ktg
+
+; Include a registered module
+#include 'view
+#include 'api
+
+; Module definition (in the included file)
+module 'my-module [
+  public-func: function/export [x] [x + 1]
+  helper: function/export [x] [x * 2]
+  private-fn: function [x] [x - 1]     ; not exported
+]
+
+
+; ============================================================
+; PUTTING IT ALL TOGETHER
+; ============================================================
+; A small program that exercises several features at once.
+
+fetch-users: function [url [url!] /max limit [integer!]] [
+  attempt [
+    do      [http/get url]
+    then    [resp -> parse resp/body [some [copy user to "^/" skip]]]
+    then    [users -> map [u -> trim u] users]
+    then    [users -> filter [u -> not empty? u] users]
+    then    [users -> either max [take users limit] [users]]
+    retries 3
+    delay   500
+    on 'unreachable [print "retrying..." none]
+    fallback [error 'fetch-failed "could not reach server"]
+  ]
+]
+
+result: fetch-users https://example.com/users/max 10
+
+loop [
+  for [user index]
+  in result
+  @first [print "=== User List ==="]
+  @last  [print "=== " + index + " users total ==="]
+  do [
+    match user [
+      ["admin" _] [print "  * " + user + " (admin)"]
+      [name]      [print "  - " + name]
+    ]
   ]
 ]
