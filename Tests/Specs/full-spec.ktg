@@ -2,20 +2,20 @@
 ; Learn Kintsugi in Y Minutes
 ; ============================================================
 ;
-; Kintsugi is a homoiconic, dynamically-typed programming
-; language with rich built-in datatypes, lazy sequences,
-; pattern matching, a condition/restart system, and powerful
-; metaprogramming.
 ;
-; Influenced by Rebol/Red, Common Lisp, D, and Raku.
+; Kintsugi is a homoiconic, dynamically-typed programming
+; language with rich built-in datatypes, compile-time
+; evaluation, and a number of useful facilities powered by
+; DSLs called "dialects".
+;
+; Influenced by REBOL, Red, Ren-C, Common Lisp, D, and Raku.
 ;
 ; Tier hierarchy:
 ;
 ;   Kintsugi/Core         - core types, words, blocks
 ;   Kintsugi/Systems      - adds strings, logic, headers
-;   Kintsugi/Full         - adds scopes, dates, parse, attempt
-;   Kintsugi/Dialects     - view, api, custom DSLs
-;   Kintsugi/Exports      - WASM, JS, native code
+;   Kintsugi/Full         - adds dialects
+;   Kintsugi/Exports      - adds AST to (WASM, JS, native code)
 ;
 ; File extensions:
 ;   .ktg - For all source files.
@@ -24,21 +24,27 @@
 
 
 ; ============================================================
-; HEADER
+; HEADER DIALECT
 ; ============================================================
 ; Every Kintsugi program begins with a header block.
-; It declares metadata about the file.
+; The header word is the tier: Kintsugi (short for
+; Kintsugi/Full), Kintsugi/Core, Kintsugi/Systems, etc.
 ;
-; The modules: field is syntactic sugar. During evaluation,
-; it expands to something like:
+; Dialect keywords:
+;   name:         - module name (lit-word)
+;   date:         - creation or last-modified date
+;   file:         - the source file
+;   version:      - semantic version (tuple!)
+;   permissions:  - required system permissions
+;   modules:      - dependencies (see below)
+;   paths:        - additional module search paths
 ;
-;   foreach [module modules] [
-;     temp: require module
-;     bind temp/header/name temp
-;   ]
+; The modules: field lists dependencies. Two forms:
+;   'lit-word  - a built-in dialect (required from standard library)
+;   %file      - a module entrypoint (required from file path)
 ;
-; Each module is required and bound into the current scope
-; using the name from the module's own header block.
+; Each entry is required and bound into the current scope
+; using the name from its header block.
 
 Kintsugi [
   name: 'full-spec
@@ -106,6 +112,10 @@ my-email: user@example.com             ; email!
 my-block: [1 2 "three" 4.0]            ; block! (the universal container)
 nested: [[1 2] [3 4] [5 6]]            ; blocks nest freely
 code-as-data: [print "I am data"]      ; code is just a block
+my-paren: (1 + 2)                       ; paren! (forces evaluation)
+                                        ; parens erase themselves — the
+                                        ; result is the evaluated value (3),
+                                        ; not a paren! you can hold onto
 
 
 ; ============================================================
@@ -125,6 +135,37 @@ my-variable!: 42
 
 
 ; ============================================================
+; BINDING & CONTEXTS
+; ============================================================
+; Kintsugi uses Rebol-style context binding.
+; Every word carries a binding to a specific context.
+; There is no lexical scope — words are bound, not scoped.
+;
+; Contexts are created by:
+;   function  - parameters and local words
+;   object    - named fields
+;   use       - anonymous local context
+;
+; bind explicitly rebinds words to a different context.
+
+; object creates a context
+point: object [x: 10 y: 20]
+point/x                                 ; => 10
+
+; use creates an anonymous local context
+use [temp] [
+  temp: expensive-computation
+  process temp
+]
+; temp is not visible here
+
+; bind rebinds words to a context
+code: [x + y]
+bind code point                         ; x and y now resolve in point
+do code                                 ; => 30
+
+
+; ============================================================
 ; TYPESETS
 ; ============================================================
 ; Typesets group related types for polymorphism and
@@ -133,7 +174,7 @@ my-variable!: 42
 ; Built-in typesets:
 ;   number!     = integer! | float!
 ;   any-word!   = word! | set-word! | get-word! | lit-word!
-;   any-block!  = block! | path!
+;   any-block!  = block! | paren! | path!
 ;   series!     = string! | block! | file! | url!
 ;                 | email! | tag! | binary!
 ;   scalar!     = integer! | float! | date! | time!
@@ -166,8 +207,15 @@ to logic! 1                             ; => true
 
 
 ; ============================================================
-; FUNCTIONS
+; FUNCTION DIALECT
 ; ============================================================
+; The spec block inside 'function' is a dialect. Words,
+; type blocks, refinements, and return: have special meaning.
+;
+; Dialect keywords:
+;   [type!]    - type constraint on the preceding parameter
+;   /refine    - refinement (optional named behavior)
+;   return:    - declares the return type
 
 ; Basic definition
 add: function [a b] [
@@ -208,36 +256,51 @@ operation 3 4                           ; => 7
 ; ============================================================
 ; LAMBDAS
 ; ============================================================
-; Inline anonymous functions using [params -> body].
-; -> is not a special operator. It's just a word.
-; Functions like map, filter, reduce interpret the block:
-; everything before -> is params, everything after is body.
+; -> is an infix operator that creates a function.
+; Left side: parameter word(s). Right side: body.
+; The enclosing paren delimits the body and forces evaluation,
+; yielding a function! value.
 ;
-; Use 'function' for named definitions.
-; Use [params -> body] for inline/anonymous functions.
+; Use 'function' for named definitions with type constraints.
+; Use (params -> body) for inline/anonymous functions.
 
-; Single parameter
-map [n -> n * 2] my-list
+; Single parameter — paren forces evaluation, delimits body
+map (n -> n * 2) my-list
 
 ; Multiple parameters
-reduce [acc n -> acc + n] 0 my-list
+reduce (acc n -> acc + n) 0 my-list
 
-; Lambdas are just blocks - they compose like everything else
-my-transform: [n -> n * 2]
+; Named lambda
+my-transform: (n -> n * 2)
 map my-transform my-list
 
 ; Passing lambdas to higher-order functions
-filter [n -> n > 50] my-list
-sort/with [a b -> a - b] my-list
+filter (n -> n > 50) my-list
+sort/with (a b -> a - b) my-list
 
 ; Lambdas work anywhere a function is expected
-apply [x -> x * x] 5                   ; => 25
+apply (x -> x * x) 5                   ; => 25
+
+; Multi-line bodies — the paren spans multiple lines
+process: (item ->
+  cleaned: trim item
+  validated: validate cleaned
+  store validated
+)
 
 
 ; ============================================================
 ; BLOCKS & HOMOICONICITY
 ; ============================================================
 ; Code is data. Data is code. Everything is a block.
+;
+; Blocks [ ] are inert — they hold code or data without
+; evaluating it. Parens ( ) force evaluation — the expression
+; inside is evaluated immediately and the result is used.
+;
+; This distinction is what makes compose work naturally:
+; parens in a compose template are evaluated because parens
+; *always* mean "evaluate now". No special syntax needed.
 
 data: [print "Hello"]
 
@@ -252,9 +315,13 @@ append data " world"
 ; Execute data as code
 do [print "I was data, now I am running"]
 
+; Blocks vs parens
+inert: [1 + 2]                          ; block! — held as data: [1 + 2]
+eager: (1 + 2)                          ; paren! — evaluated immediately: 3
+
 ; Compose - insert evaluated expressions into a template
-; Parenthesized expressions inside compose are evaluated,
-; everything else is kept as literal data.
+; Parens are "evaluate now", so compose just follows the rule:
+; everything in [ ] stays as data, everything in ( ) evaluates.
 target: "Alice"
 code: compose [greet (target) 42]       ; => [greet "Alice" 42]
 do code
@@ -311,8 +378,6 @@ products: loop/lazy [
 ; CONTROL FLOW
 ; ============================================================
 
-; --- Conditionals ---
-
 ; if (single branch - returns result or none)
 if x > 10 [print "big"]
 
@@ -326,22 +391,6 @@ either x > 10 [
 ; unless (negated if)
 unless empty? collection [
   process collection
-]
-
-; --- Loops ---
-
-; for-each over a series
-loop [
-  for [item]
-  in [1 2 3 4 5]
-  do [print item]
-]
-
-; for-each with index
-loop [
-  for [item index]
-  in ["a" "b" "c"]
-  do [print index + ": " + item]
 ]
 
 ; while
@@ -362,17 +411,46 @@ forever [
 
 
 ; ============================================================
-; PATTERN MATCHING
+; LOOP DIALECT
+; ============================================================
+; The block inside 'loop' is a dialect. These words have
+; special meaning inside the loop block:
+;
+; Dialect keywords:
+;   for    - declare iteration variable(s)
+;   in     - the series to iterate over
+;   when   - guard clause (filter)
+;   do     - the loop body
+
+; for-each over a series
+loop [
+  for [item]
+  in [1 2 3 4 5]
+  do [print item]
+]
+
+; for-each with index
+loop [
+  for [item index]
+  in ["a" "b" "c"]
+  do [print index + ": " + item]
+]
+
+
+; ============================================================
+; MATCH DIALECT
 ; ============================================================
 ; match tests a value against a series of patterns.
 ; First match wins. Patterns can destructure and bind.
+; The pattern block is a dialect with its own binding rules.
 ;
-; Pattern binding rules:
+; Dialect keywords:
 ;   bare word  - captures/binds the value at this position
-;   :word      - matches against that word's current value
+;   (expr)     - evaluate expression, match against result
 ;   'word      - matches the literal word (useful for errors)
 ;   literal    - matches exactly (integers, strings, etc.)
 ;   _          - wildcard (matches anything, doesn't bind)
+;   when       - guard clause (additional condition)
 ;   default:   - fallback if nothing matched
 
 ; Literal matching
@@ -391,11 +469,12 @@ match point [
   [x y]   [print x + ", " + y]         ; both capture
 ]
 
-; Get-words match against a variable's value
+; Parens evaluate and match against the result
 expected: 42
 match result [
-  [:expected] [print "got what we expected"]
-  [x]         [print "got " + x + " instead"]
+  [(expected)]   [print "got what we expected"]
+  [(x + 1)]     [print "matched x + 1"]
+  [x]           [print "got " + x + " instead"]
 ]
 
 ; Lit-words match the word itself (useful for error names)
@@ -415,42 +494,42 @@ match age [
 
 
 ; ============================================================
-; PHASERS
+; SCOPE DIALECT
 ; ============================================================
 ; Lifecycle hooks that fire at specific scope boundaries.
-; Kintsugi uses a simplified set:
+; scope is a dialect accessed via path syntax.
 ;
-;   @enter  - runs when entering a scope
-;   @exit   - runs when leaving a scope
-;   @first  - runs before the first loop iteration
-;   @last   - runs after the last loop iteration
-;
+; Dialect keywords:
+;   scope/enter  - runs when entering a scope
+;   scope/exit   - runs when leaving a scope
+;   scope/first  - runs before the first loop iteration
+;   scope/last   - runs after the last loop iteration
 
-; --- Scope phasers ---
+; --- Scope hooks ---
 
 if condition [
-  @enter [
+  scope/enter [
     resource: acquire-lock "database"
   ]
-  @exit [
+  scope/exit [
     release-lock resource
   ]
 
-  ; Body runs between @enter and @exit
+  ; Body runs between scope/enter and scope/exit
   result: query resource "SELECT * FROM users"
   print result
 ]
 
-; @exit always runs, even on error.
-; Phasers compose across nested scopes.
+; scope/exit always runs, even on error.
+; Scope hooks compose across nested scopes.
 
-; --- Loop phasers ---
+; --- Loop hooks ---
 
 loop [
   for [item]
   in collection
-  @first [print "=== Begin Processing ==="]
-  @last  [print "=== Done Processing ==="]
+  scope/first [print "=== Begin Processing ==="]
+  scope/last  [print "=== Done Processing ==="]
   do [process item]
 ]
 
@@ -499,7 +578,7 @@ date-rule: [
 parse "2026-02-26" date-rule
 ; year => "2026", month => "02", day => "26"
 
-; Parse keywords:
+; Dialect keywords:
 ;   some   - one or more matches
 ;   any    - zero or more matches
 ;   opt    - zero or one match
@@ -594,40 +673,41 @@ result: try [
 ; ============================================================
 ; A dialect for chaining operations and handling errors.
 ; Use do/then to build pipelines. Add error handling
-; when you need it. then takes a lambda — no implicit variables.
+; when you need to. then binds the previous result to 'it'.
 ;
-; Attempt keywords:
+; Dialect keywords:
 ;   do       - the initial operation
-;   then     - chain the next step (takes a lambda)
+;   then     - chain the next step (previous result is 'it')
+;   it       - the previous step's result
 ;   on       - handle a named error
 ;   retries  - how many times to retry on error
 ;   delay    - ms between retries
 ;   fallback - last resort if everything fails
 
 ; --- Simple pipeline (no error handling) ---
-; do/then chains operations. then receives the previous
-; result via a lambda — name it whatever you want.
+; do starts the chain. Each then block receives the
+; previous result as 'it'.
 
 result: attempt [
   do   [range 1 100]
-  then [nums -> map [n -> n * 2] nums]
-  then [nums -> filter [n -> n > 50] nums]
-  then [nums -> take nums 10]
-  then [nums -> reduce [acc n -> acc + n] 0 nums]
+  then [map (n -> n * 2) it]
+  then [filter (n -> n > 50) it]
+  then [take it 10]
+  then [reduce (acc n -> acc + n) 0 it]
 ]
 
 cleaned: attempt [
   do   ["  Hello, World  "]
-  then [s -> trim s]
-  then [s -> lowercase s]
-  then [s -> split s ", "]
+  then [trim it]
+  then [lowercase it]
+  then [split it ", "]
 ]
 
 ; The nested try example from above becomes...
 
 result: attempt [
   do   [risky-operation]
-  then [r -> process r]
+  then [process it]
   on 'inner-failure [print "inner operation failed"]
 ]
 
@@ -668,8 +748,8 @@ result: attempt [
 
 result: attempt [
   do    [connect database-url]
-  then  [conn -> query conn "SELECT * FROM users"]
-  then  [rows -> map [row -> parse-user row] rows]
+  then  [query it "SELECT * FROM users"]
+  then  [map (row -> parse-user row) it]
   on 'connection-failed [print "db down" []]
   on 'query-error       [print "bad query" []]
   fallback [[]]
@@ -677,14 +757,14 @@ result: attempt [
 
 
 ; ============================================================
-; MACROS & COMPILE-TIME EVALUATION
+; COMPILE-TIME EVALUATION
 ; ============================================================
-; Macros operate on code-as-data at compile time.
-; They receive blocks and emit blocks.
+; #comptime evaluates a block at compile time.
+; The block receives code-as-data and emits code-as-data.
 
 ; --- Conditional compilation ---
 
-#macro [
+#comptime [
   either platform = 'windows [
     print "Running on Windows"
   ] [
@@ -694,15 +774,15 @@ result: attempt [
 
 ; --- Compile-time constants ---
 
-#macro [
+#comptime [
   max-connections: 100
   build-date: 2026-02-26
 ]
 
 ; --- Code generation ---
-; Macros can generate repetitive code from data.
+; Comptime can be used to generate repetitive code from data.
 
-#macro [
+#comptime [
   for-each field [name age email] [
     emit [
       get-(field): function [obj] [obj/(field)]
@@ -712,8 +792,10 @@ result: attempt [
 
 ; --- Conditional includes ---
 
-#if platform = 'windows [
-  require %windows-support.ktg
+#comptime [
+  if platform = 'windows [
+    require %windows-support.ktg
+  ]
 ]
 
 
@@ -776,19 +858,17 @@ html/render [
 ; _helper: function [x] [x * x]         ; convention: _ prefix = private
 
 ; --- Header modules: sugar ---
-; Listing files in modules: is equivalent to requiring each
-; one and binding it to the name in its own header.
+; Lit-words require built-in dialects. Files require modules.
+; Each is bound to the name from its own header.
 ;
 ; Kintsugi [
-;   modules: [%view.ktg %api.ktg]
+;   modules: ['view %api.ktg]
 ; ]
 ;
 ; ...expands to roughly:
 ;
-; foreach [module modules] [
-;   temp: require module
-;   bind temp/header/name temp
-; ]
+; view: require 'view          ; built-in dialect
+; api: require %api.ktg        ; file module
 
 
 ; ============================================================
@@ -799,10 +879,10 @@ html/render [
 fetch-users: function [url [url!] /max limit [integer!]] [
   attempt [
     do      [http/get url]
-    then    [resp -> parse resp/body [some [copy user to "^/" skip]]]
-    then    [users -> map [u -> trim u] users]
-    then    [users -> filter [u -> not empty? u] users]
-    then    [users -> either max [take users limit] [users]]
+    then    [parse it/body [some [copy user to "^/" skip]]]
+    then    [map (u -> trim u) it]
+    then    [filter (u -> not empty? u) it]
+    then    [either max [take it limit] [it]]
     retries 3
     delay   500
     on 'unreachable [print "retrying..." none]
@@ -815,8 +895,8 @@ result: fetch-users https://example.com/users/max 10
 loop [
   for [user index]
   in result
-  @first [print "=== User List ==="]
-  @last  [print "=== " + index + " users total ==="]
+  scope/first [print "=== User List ==="]
+  scope/last  [print "=== " + index + " users total ==="]
   do [
     match user [
       ["admin" _] [print "  * " + user + " (admin)"]
