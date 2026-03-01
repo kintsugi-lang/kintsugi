@@ -15,12 +15,12 @@ grammar Kintsugi::Grammar::Core {
     token datatype:sym<lit-word> { <lit-word> }
     token datatype:sym<get-word> { <get-word> }
     token datatype:sym<set-word> { <set-word> }
+    token datatype:sym<float> { <float> }
+    token datatype:sym<integer> { <integer> }
+    token datatype:sym<none> { <sym> }
     token datatype:sym<word> { <word> }
     token datatype:sym<function> { <function> }
     token datatype:sym<operator> { <operator> }
-    token datatype:sym<none> { <sym> }
-    token datatype:sym<float> { <float> }
-    token datatype:sym<integer> { <integer> }
     token datatype:sym<char> { <char> }
     token datatype:sym<binary> { <binary> }
     token datatype:sym<paren> { <paren> }
@@ -53,6 +53,6 @@ grammar Kintsugi::Grammar::Core {
     token string-contents { <-["]>* }
     token strictly-word-char { <[\w\-]> }
     token any-safe-file-char { <[\w\-\/\.]> }
-    token any-word-char { <[\w\-/?_!]> }
+    token any-word-char { <[\w\-/?_!~]> }
     token any-char { . }
 }

@@ -3,6 +3,7 @@ use Kintsugi::Grammar::Core;
 use Kintsugi::Grammar::Systems;
 use Kintsugi::Grammar::Full;
 use Kintsugi::Actions;
+use Kintsugi::Evaluator;
 
 role X::Kintsugi {
     has Str $.message;
@@ -32,8 +33,10 @@ sub MAIN(IO(Str) $file where *.f) {
     
     my $parsed-file = $grammar.parse($file.slurp, actions => Kintsugi::Actions);
     die X::Kintsugi::ParseError.new(message => "Could not parse file.") if not so $parsed-file;
-    say $parsed-file;
 
+    my $evaluator = Kintsugi::Evaluator.new;
+    $evaluator.run($parsed-file.made);
+    
     CATCH {
         when X::Kintsugi {
             .gist.say;

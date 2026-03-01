@@ -1,17 +1,59 @@
 use Kintsugi::AST;
 
 class Kintsugi::Actions {
-    method datatype:sym<get-word>($/) {
-        $/.make(AST::GetWord.new(name => ~$/.substr(1)));
+
+    # --- Rule-level actions (called before their parent rules) ---
+
+    method block($/) {
+        my $block = AST::Block.new;
+        for $<block-items><datatype> {
+            $block.items.push(.made) if .made.defined;
+        }
+        $/.make($block);
+    }
+
+    method paren($/) {
+        my $paren = AST::Paren.new;
+        for $<block-items><datatype> {
+            $paren.items.push(.made) if .made.defined;
+        }
+        $/.make($paren);
+    }
+
+    method header($/) {
+        $/.make(AST::Header.new(
+            tier  => (~$/).split('[')[0].trim,
+            block => $<block>.made,
+        ));
+    }
+
+    method TOP($/) {
+        my @items;
+        for $<block-items><datatype> {
+            @items.push(.made) if .made.defined;
+        }
+        $/.make(AST::TOP.new(header => $<header>.made, items => @items));
+    }
+
+    # --- Words ---
+
+    method datatype:sym<word>($/) {
+        $/.make(AST::Word.new(value => ~$/));
     }
 
     method datatype:sym<set-word>($/) {
-        $/.make(AST::SetWord.new(name => ~$/.chop));
+        $/.make(AST::SetWord.new(value => ~$/.chop));
     }
-    
+
+    method datatype:sym<get-word>($/) {
+        $/.make(AST::GetWord.new(value => ~$/.substr(1)));
+    }
+
     method datatype:sym<lit-word>($/) {
-        $/.make(AST::LitWord.new(name => ~$/.substr(1)));
+        $/.make(AST::LitWord.new(value => ~$/.substr(1)));
     }
+
+    # --- Scalars ---
 
     method datatype:sym<integer>($/) {
         $/.make(AST::Integer.new(value => +$/));
@@ -22,38 +64,89 @@ class Kintsugi::Actions {
     }
 
     method datatype:sym<logic>($/) {
-        $/.make(AST::Logic.new(value => $/ ~~ 'true' | 'on' | 'yes'));
-    }
-
-    method datatype:sym<string>($/) {
-        $/.make(AST::String.new(value => ~$/));
+        my $v = ~$/;
+        $/.make(AST::Logic.new(value => $v eq 'true' || $v eq 'on' || $v eq 'yes'));
     }
 
     method datatype:sym<none>($/) {
         $/.make(AST::None.new);
     }
 
-    method datatype:sym<file>($/) {
-        $/.make(AST::File.new(name => ~$/.substr(1)));
+    method datatype:sym<char>($/) {
+        $/.make(AST::Char.new(value => (~$/).substr(2, 1)));
     }
 
+    method datatype:sym<pair>($/) {
+        my ($x, $y) = (~$/).split('x');
+        $/.make(AST::Pair.new(x => +$x, y => +$y));
+    }
+
+    method datatype:sym<money>($/) {
+        $/.make(AST::Money.new(value => +(~$/).substr(1)));
+    }
+
+    method datatype:sym<date>($/) {
+        $/.make(AST::Date.new(value => ~$/));
+    }
+
+    method datatype:sym<time>($/) {
+        $/.make(AST::Time.new(value => ~$/));
+    }
+
+    method datatype:sym<tuple>($/) {
+        $/.make(AST::Tuple.new(value => ~$/));
+    }
+
+    # --- Text ---
+
+    method datatype:sym<string>($/) {
+        $/.make(AST::String.new(value => ~$<string><string-contents>));
+    }
+
+    method datatype:sym<binary>($/) {
+        my $hex = (~$/).substr(2, *-1);
+        $/.make(AST::Binary.new(value => $hex));
+    }
+
+    # --- Resources ---
+
+    method datatype:sym<file>($/) {
+        $/.make(AST::File.new(value => (~$/).substr(1)));
+    }
+
+    method datatype:sym<url>($/) {
+        $/.make(AST::URL.new(value => ~$/));
+    }
+
+    method datatype:sym<email>($/) {
+        $/.make(AST::Email.new(value => ~$/));
+    }
+
+    # --- Composites ---
+
     method datatype:sym<block>($/) {
-        my $block = AST::Block.new;
-        $block.items.push(.made) for $<block-items><datatype>;
-        $/.make($block);
+        $/.make($<block>.made);
+    }
+
+    method datatype:sym<paren>($/) {
+        $/.make($<paren>.made);
     }
 
     method datatype:sym<function>($/) {
-        $/.make(AST::Function.new(params => $<block>[0], body => $<block>[1]));
+        $/.make(AST::Function.new(
+            params => $<function><block>[0].made,
+            body   => $<function><block>[1].made,
+        ));
     }
-    
+
     method datatype:sym<operator>($/) {
-        $/.make(AST::Word.new(params => $<block>[0], body => $<block>[1]));
+        $/.make(AST::Operator.new(value => ~$/));
     }
-    
-    method TOP($/) {
-        my $top = AST::TOP.new;
-        $top.items.push(.made) for $<block-items><datatype>;
-        $/.make($top);
+
+    method datatype:sym<directive>($/) {
+        $/.make(AST::Directive.new(value => (~$/).substr(1)));
     }
+
+    # Comments produce no AST node
+    method datatype:sym<comment>($/) { }
 }

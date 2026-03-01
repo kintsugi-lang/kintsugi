@@ -1,0 +1,6 @@
+Kintsugi []
+
+number1: 213
+number2: 342
+
+print number1 + number2

@@ -1,6 +1,4 @@
 use Kintsugi::Grammar::Systems;
-use Grammar::Tracer;
-
 grammar Kintsugi::Grammar::Full is Kintsugi::Grammar::Systems {
     rule header { 'Kintsugi' '/Full'? <.ws> <block> }
 

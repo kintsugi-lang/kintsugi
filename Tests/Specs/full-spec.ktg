@@ -106,15 +106,22 @@ my-dir: %extra-modules/                ; file!
 my-url: https://example.com/api        ; url!
 my-email: user@example.com             ; email!
 
+; --- I/O ---
+; port! is a runtime-only type — no literal syntax.
+; open a url! to get a port!. The url scheme determines
+; the port behavior (tcp, http, file, etc.)
+
+my-port: open tcp://localhost:8080      ; port!
+
 ; --- Composite ---
 
 my-block: [1 2 "three" 4.0]            ; block! (the universal container)
 nested: [[1 2] [3 4] [5 6]]            ; blocks nest freely
 code-as-data: [print "I am data"]      ; code is just a block
-my-paren: (1 + 2)                       ; paren! (forces evaluation)
-                                        ; parens erase themselves — the
-                                        ; result is the evaluated value (3),
-                                        ; not a paren! you can hold onto
+my-paren: (1 + 2)                       ; paren! — evaluates at top level
+                                        ; result is 3, not a paren! value
+                                        ; inside a block, parens are inert
+                                        ; data like everything else
 
 
 ; ============================================================
@@ -128,7 +135,7 @@ name: "Kintsugi"                        ; set-word  (bind a value)
 ref: :name                              ; get-word  (get without calling)
 sym: 'name                              ; lit-word  (the symbol itself)
 
-; Words can contain letters, digits, hyphens, ?, !, _
+; Words can contain letters, digits, hyphens, ?, !, _, ~
 is-valid?: true
 my-variable!: 42
 
@@ -178,6 +185,7 @@ do code                                 ; => 30
 ;                 | email! | binary!
 ;   scalar!     = integer! | float! | date! | time!
 ;                 | money! | pair! | tuple! | char!
+;   port!       = live I/O handle (runtime only, no literal)
 ;   any-type!   = all types
 
 ; Custom typesets
@@ -189,6 +197,7 @@ type? 42                                ; => integer!
 type? "hello"                           ; => string!
 type? [1 2 3]                           ; => block!
 type? :add                              ; => function!
+type? my-port                           ; => port!
 
 ; Type predicates
 integer? 42                             ; => true
@@ -264,21 +273,21 @@ operation 3 4                           ; => 7
 ; Use (params -> body) for inline/anonymous functions.
 
 ; Single parameter — paren forces evaluation, delimits body
-map (n -> n * 2) my-list
+map my-list (n -> n * 2)
 
 ; Multiple parameters
-reduce (acc n -> acc + n) 0 my-list
+reduce my-list 0 (acc n -> acc + n)
 
 ; Named lambda
 my-transform: (n -> n * 2)
-map my-transform my-list
+map my-list my-transform
 
 ; Passing lambdas to higher-order functions
-filter (n -> n > 50) my-list
-sort/with (a b -> a - b) my-list
+filter my-list (n -> n > 50)
+sort/with my-list (a b -> a - b)
 
 ; Lambdas work anywhere a function is expected
-apply (x -> x * x) 5                   ; => 25
+(x -> x * x) 5                         ; => 25
 
 ; Multi-line bodies — the paren spans multiple lines
 process: (item ->
@@ -293,12 +302,13 @@ process: (item ->
 ; Code is data. Data is code. Everything is a block.
 ;
 ; Blocks [ ] are inert — they hold code or data without
-; evaluating it. Parens ( ) force evaluation — the expression
-; inside is evaluated immediately and the result is used.
+; evaluating it. Nothing inside a block evaluates, not even
+; parens. Parens ( ) evaluate at the top level or inside do,
+; but inside a block literal they are just data.
 ;
-; This distinction is what makes compose work naturally:
-; parens in a compose template are evaluated because parens
-; *always* mean "evaluate now". No special syntax needed.
+; compose walks a block and selectively evaluates parens,
+; replacing them with the results. Everything else stays as
+; data. This is how you build code from templates.
 
 data: [print "Hello"]
 
@@ -315,11 +325,11 @@ do [print "I was data, now I am running"]
 
 ; Blocks vs parens
 inert: [1 + 2]                          ; block! — held as data: [1 + 2]
-eager: (1 + 2)                          ; paren! — evaluated immediately: 3
+eager: (1 + 2)                          ; evaluates here (top level): 3
 
-; Compose - insert evaluated expressions into a template
-; Parens are "evaluate now", so compose just follows the rule:
-; everything in [ ] stays as data, everything in ( ) evaluates.
+; Compose - build blocks from templates
+; compose evaluates parens and substitutes the results.
+; Everything else in the block stays as inert data.
 target: "Alice"
 code: compose [greet (target) 42]       ; => [greet "Alice" 42]
 do code
@@ -591,6 +601,58 @@ parse "2026-02-26" date-rule
 
 
 ; ============================================================
+; SHAPES & VALIDATION
+; ============================================================
+; Shapes are parse rules used as lightweight data contracts.
+; By convention, shape names use the ~ suffix to distinguish
+; them from built-in runtime types (!).
+;
+; is? takes any value and a parse rule, returns logic!.
+; It's just sugar for parse — no new type system, no overhead
+; beyond a single parse call.
+
+; --- Defining shapes ---
+
+user~: ['name string! 'age integer! 'roles block!]
+account~: ['name string! 'balance number!]
+
+; --- Validating with is? ---
+
+is? [name "Alice" age 25 roles ["admin"]] user~
+; => true
+
+is? [name "Alice"] user~
+; => false (missing fields)
+
+; --- Composable shapes ---
+; Shapes are blocks. Blocks are data. So shapes compose.
+
+base~: ['name string! 'age integer!]
+admin~: [base~ 'permissions block!]
+
+; --- Guard patterns ---
+
+process-user: function [u [block!]] [
+  unless is? u user~ [
+    error 'invalid-shape "expected user"
+  ]
+  print u/name
+]
+
+; --- is? works on any value and any parse rule ---
+
+is? "2026-02-26" [some digit "-" some digit "-" some digit]
+; => true
+
+is? email-text [
+  some [alpha | digit | "." | "-"]
+  "@"
+  some [alpha | digit | "." | "-"]
+]
+; => true
+
+
+; ============================================================
 ; ERROR HANDLING
 ; ============================================================
 ; Lua-style protected calls. Simple and predictable.
@@ -688,10 +750,10 @@ result: try [
 
 result: attempt [
   do   [range 1 100]
-  then [map (n -> n * 2) it]
-  then [filter (n -> n > 50) it]
+  then [map it (n -> n * 2)]
+  then [filter it (n -> n > 50)]
   then [take it 10]
-  then [reduce (acc n -> acc + n) 0 it]
+  then [reduce it 0 (acc n -> acc + n)]
 ]
 
 cleaned: attempt [
@@ -747,7 +809,7 @@ result: attempt [
 result: attempt [
   do    [connect database-url]
   then  [query it "SELECT * FROM users"]
-  then  [map (row -> parse-user row) it]
+  then  [map it (row -> parse-user row)]
   on 'connection-failed [print "db down" []]
   on 'query-error       [print "bad query" []]
   fallback [[]]
@@ -782,8 +844,10 @@ result: attempt [
 
 #comptime [
   for-each field [name age email] [
-    emit [
-      get-(field): function [obj] [obj/(field)]
+    emit compose [
+      (to set-word! join "get-" field) function [obj] [
+        select obj (to lit-word! field)
+      ]
     ]
   ]
 ]
@@ -802,19 +866,31 @@ result: attempt [
 ; ============================================================
 ; There is no module system. Any valid Kintsugi program can
 ; be used as a module. require is a word (not a directive)
-; that loads a file, evaluates it in its own namespace, and
-; returns the resulting block.
+; that reads a file, resolves its header dependencies,
+; evaluates the body in an isolated context, and returns
+; the resulting namespace as a block.
 ;
-; Access the module's contents via path syntax.
-; The file's header name: field is just metadata — the
-; caller decides what word to bind the module to.
+; The header is consumed by require — it is not part of
+; the returned namespace. Access module contents via path
+; syntax. The caller decides what word to bind the module to.
+;
+; Refinements:
+;   /header  - return the header block instead of the namespace
 
 ; --- Basic require ---
-; require loads the file and returns its namespace as a block.
 
 math-utils: require %lib/math-utils.ktg
 math-utils/add 3 4                     ; => 7
 math-utils/clamp 150 0 100             ; => 100
+
+; --- Header introspection ---
+; require/header returns the header block for inspection.
+; The namespace is pure — no hidden words injected.
+
+info: require/header %lib/math-utils.ktg
+info/name                               ; => 'math-utils
+info/version                            ; => 1.0.0
+info/date                               ; => 2026-02-26
 
 ; --- Conditional require ---
 ; require is just a word. Use it anywhere you'd use any word.
@@ -841,6 +917,8 @@ html/render [
 
 ; --- What a module file looks like ---
 ; It's just a regular Kintsugi program. Nothing special.
+; require reads the header, resolves modules:, then
+; evaluates the rest in its own context.
 ;
 ; ; --- lib/math-utils.ktg ---
 ; Kintsugi [
@@ -878,8 +956,8 @@ fetch-users: function [url [url!] /max limit [integer!]] [
   attempt [
     do      [http/get url]
     then    [parse it/body [some [copy user to "^/" skip]]]
-    then    [map (u -> trim u) it]
-    then    [filter (u -> not empty? u) it]
+    then    [map it (u -> trim u)]
+    then    [filter it (u -> not empty? u)]
     then    [either max [take it limit] [it]]
     retries 3
     delay   500
