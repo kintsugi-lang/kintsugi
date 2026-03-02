@@ -4,18 +4,7 @@ use Kintsugi::Grammar::Systems;
 use Kintsugi::Grammar::Full;
 use Kintsugi::Actions;
 use Kintsugi::Evaluator;
-
-role X::Kintsugi {
-    has Str $.message;
-
-    method gist {
-        "{self.^name} — {$.message}"
-    }
-}
-
-class X::Kintsugi::StartupError is Exception does X::Kintsugi {}
-class X::Kintsugi::UnknownDialectError is Exception does X::Kintsugi {}
-class X::Kintsugi::ParseError is Exception does X::Kintsugi {}
+use X::Kintsugi::Errors;
 
 sub MAIN(IO(Str) $file where *.f) {
     say "=== Kintsugi Interpreter v0.0.1 ===";
@@ -34,7 +23,7 @@ sub MAIN(IO(Str) $file where *.f) {
     my $parsed-file = $grammar.parse($file.slurp, actions => Kintsugi::Actions);
     die X::Kintsugi::ParseError.new(message => "Could not parse file.") if not so $parsed-file;
 
-    my $evaluator = Kintsugi::Evaluator.new;
+    my $evaluator = Kintsugi::Evaluator.new(source => $file.slurp);
     $evaluator.run($parsed-file.made);
     
     CATCH {

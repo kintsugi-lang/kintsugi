@@ -32,10 +32,7 @@ grammar Kintsugi::Grammar::Core {
     
     token file { '%' <any-safe-file-char>+ }
     token function { 'function' <.ws> <block> <.ws> <block> }
-    token operator { <unary-op> | <binary-op> }
-    token unary-op { <[+\-*/\^=\<\>%|]> }
-    token binary-op { '->' }
-    
+    token operator { '->' | '<=' | '>=' | '<>' | <[+\-*/\^=\<\>%]> }
     
     token lit-word { '\'' <word> }
     token get-word { ':' <word> }

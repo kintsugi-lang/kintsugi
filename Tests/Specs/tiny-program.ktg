@@ -1,6 +1,34 @@
+
+; This comment should be ignored
+
 Kintsugi []
 
-number1: 213
-number2: 342
+message: "Hello, this is a test"
+print message
 
-print number1 + number2
+number1: 214
+number2: 341
+
+add-numbers: function [num1 num2] [num1 + num2]
+
+result: add-numbers number1 number2
+print result
+print (1 + 2)
+
+outer: function [num1] [
+  inner: function [num2] [
+    num1 + num2
+  ]
+  inner 21
+]
+
+print outer 21
+
+test-func: function [
+  a
+  b
+  a
+]
+[a +
+  b +
+  a]
