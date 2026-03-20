@@ -46,7 +46,7 @@
                     ;; Loop dialect keywords
                     "for" "in" "from" "to" "by" "when"
                     ;; Attempt/match dialect keywords
-                    "source" "then" "fallback" "retries" "default"))
+                    "source" "then" "fallback" "retries" "default" "on"))
         (builtins '("print" "probe" "compose" "reduce" "apply"
                      "select" "first" "second" "last" "pick"
                      "append" "insert" "remove" "copy"

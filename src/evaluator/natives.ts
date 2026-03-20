@@ -745,7 +745,7 @@ export function registerNatives(ctx: KtgContext, evaluator: Evaluator): void {
     'pair!', 'tuple!', 'date!', 'time!', 'file!',
     'url!', 'email!', 'word!', 'set-word!', 'get-word!', 'lit-word!', 'meta-word!',
     'path!', 'block!', 'paren!', 'map!', 'context!', 'function!',
-    'native!', 'op!', 'type!',
+    'native!', 'op!', 'type!', 'any-type!',
   ];
 
   for (const name of typeNames) {
@@ -892,6 +892,7 @@ function tryMatchPattern(
 
 function matchesType(value: KtgValue, typeName: string, ctx: KtgContext, ev?: Evaluator): boolean {
   // Direct type match
+  if (typeName === 'any-type!') return true;
   if (value.type === typeName) return true;
   // function! matches native! too
   if (typeName === 'function!' && value.type === 'native!') return true;

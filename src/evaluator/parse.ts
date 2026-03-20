@@ -13,7 +13,22 @@ const TYPE_NAMES = new Set([
   'url!', 'email!', 'word!', 'set-word!', 'get-word!', 'lit-word!', 'meta-word!',
   'path!', 'block!', 'paren!', 'map!', 'context!', 'function!',
   'native!', 'op!', 'type!', 'operator!',
+  'any-type!', 'number!', 'any-word!', 'scalar!',
 ]);
+
+const TYPE_UNIONS: Record<string, string[]> = {
+  'number!': ['integer!', 'float!'],
+  'any-word!': ['word!', 'set-word!', 'get-word!', 'lit-word!', 'meta-word!'],
+  'scalar!': ['integer!', 'float!', 'date!', 'time!', 'pair!', 'tuple!'],
+};
+
+function typeMatches(value: KtgValue, typeName: string): boolean {
+  if (typeName === 'any-type!') return true;
+  if (value.type === typeName) return true;
+  if (typeName === 'function!' && value.type === 'native!') return true;
+  const union = TYPE_UNIONS[typeName];
+  return union ? union.includes(value.type) : false;
+}
 
 const CHAR_CLASSES: Record<string, (ch: string) => boolean> = {
   'alpha': (ch) => /^[a-zA-Z]$/.test(ch),
@@ -366,7 +381,7 @@ function matchOneRule(
         // Block mode: type match (word ending in !)
         if (input.mode === 'block' && name.endsWith('!') && TYPE_NAMES.has(name)) {
           if (iPos >= len) return null;
-          return input.values[iPos].type === name ? [iPos + 1, rPos + 1] : null;
+          return typeMatches(input.values[iPos], name) ? [iPos + 1, rPos + 1] : null;
         }
 
         // Composable rule: look up word in context
