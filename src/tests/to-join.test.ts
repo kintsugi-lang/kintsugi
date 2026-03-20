@@ -63,20 +63,20 @@ describe('to — new conversions', () => {
     expect(eval_('to float! false')).toEqual({ type: 'float!', value: 0 });
   });
 
-  test('to integer! from char (codepoint)', () => {
-    expect(eval_('to integer! #"A"')).toEqual({ type: 'integer!', value: 65 });
+  test('codepoint from string', () => {
+    expect(eval_('codepoint "A"')).toEqual({ type: 'integer!', value: 65 });
   });
 
-  test('to char! from integer (codepoint)', () => {
-    expect(eval_('to char! 65')).toEqual({ type: 'char!', value: 'A' });
+  test('from-codepoint to string', () => {
+    expect(eval_('from-codepoint 65')).toEqual({ type: 'string!', value: 'A' });
   });
 
   test('to string! from block (space-separated)', () => {
     expect(eval_('to string! [1 2 3]')).toEqual({ type: 'string!', value: '1 2 3' });
   });
 
-  test('to string! from char', () => {
-    expect(eval_('to string! #"A"')).toEqual({ type: 'string!', value: 'A' });
+  test('#"A" is sugar for string "A"', () => {
+    expect(eval_('#"A"')).toEqual({ type: 'string!', value: 'A' });
   });
 
   test('to word! from lit-word', () => {

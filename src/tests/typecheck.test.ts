@@ -23,7 +23,7 @@ describe('parameter type checking', () => {
   });
 });
 
-describe('typeset checking', () => {
+describe('built-in type union checking', () => {
   test('number! accepts integer', () => {
     expect(eval_('double: function [x [number!]] [x * 2] double 5'))
       .toEqual({ type: 'integer!', value: 10 });
@@ -70,5 +70,35 @@ describe('refinement param type checking', () => {
     ev.evalString('greet: function [name [string!] /loud /times count [integer!]] [name]');
     expect(ev.evalString('greet "Ray"')).toEqual({ type: 'string!', value: 'Ray' });
     expect(() => ev.evalString('greet 42')).toThrow('name expects string!, got integer!');
+  });
+});
+
+describe('structural types as constraints', () => {
+  test('accepts matching block', () => {
+    const ev = new Evaluator();
+    ev.evalString("point!: @type ['x integer! 'y integer!]");
+    ev.evalString('get-x: function [p [point!]] [select p \'x]');
+    expect(ev.evalString('get-x [x 10 y 20]')).toEqual({ type: 'integer!', value: 10 });
+  });
+
+  test('rejects non-matching block', () => {
+    const ev = new Evaluator();
+    ev.evalString("point!: @type ['x integer! 'y integer!]");
+    ev.evalString('get-x: function [p [point!]] [select p \'x]');
+    expect(() => ev.evalString('get-x [name "Alice"]')).toThrow('p expects point!, got block!');
+  });
+
+  test('rejects non-block value', () => {
+    const ev = new Evaluator();
+    ev.evalString("point!: @type ['x integer! 'y integer!]");
+    ev.evalString('get-x: function [p [point!]] [select p \'x]');
+    expect(() => ev.evalString('get-x 42')).toThrow('p expects point!, got integer!');
+  });
+
+  test('structural types compose', () => {
+    const ev = new Evaluator();
+    ev.evalString("base!: @type ['name string! 'age integer!]");
+    ev.evalString('check: function [data [base!]] [select data \'name]');
+    expect(ev.evalString('check [name "Alice" age 25]')).toEqual({ type: 'string!', value: 'Alice' });
   });
 });

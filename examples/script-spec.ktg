@@ -38,7 +38,7 @@
 my-int: 42                              ; integer!
 negative: -7                            ; integer!
 my-float: 3.14                          ; float!
-my-char: #"A"                           ; char!
+my-char: "A"                           ; string! (single-character sugar)
 my-pair: 100x200                        ; pair! (2D coordinates)
 my-version: 1.2.3                       ; tuple! (versions, colors, IPs)
 
@@ -66,8 +66,7 @@ my-time: 14:30:00                       ; time!
 ; --- Text ---
 
 my-string: "Hello, world"              ; string!
-escaped: "Line one^/Line two"          ; ^/ is newline escape
-my-binary: #{48656C6C6F}               ; binary! (hex encoded)
+escaped: "Line one\nLine two"          ; \n is newline escape
 
 ; --- Identifiers & Resources ---
 
@@ -93,6 +92,7 @@ my-paren: (1 + 2)                       ; paren! evaluates immediately: 3
 ;   word:   - set-word (bind a value)
 ;   :word   - get-word (get without calling)
 ;   'word   - lit-word (the symbol itself)
+;   @word   - meta-word (lifecycle hooks / metamethods)
 ;
 ; The same system applies to paths:
 ;   path/to          - evaluate / lookup
@@ -108,6 +108,26 @@ sym: 'name                              ; lit-word  (the symbol itself)
 ; Words can contain letters, digits, hyphens, ?, !, _, ~
 is-valid?: true
 my-variable!: 42
+
+; --- Sigils ---
+; Every prefix, suffix, and punctuation character in Kintsugi
+; has a fixed meaning. Nothing is arbitrary.
+;
+; Word prefixes (change how the word evaluates):
+;   :    - get-word   (retrieve value without calling)
+;   '    - lit-word   (the symbol itself, unevaluated)
+;   @    - meta-word  (lifecycle hooks, runtime metadata)
+;
+; Word suffixes (naming conventions enforced by type):
+;   :    - set-word   (bind a value)
+;   !    - type name  (integer!, string!, user!, etc.)
+;   ?    - predicate  (returns logic! — empty?, none?, odd?)
+;
+; Other sigils:
+;   #    - preprocessor / compile-time (#preprocess, #[expr])
+;   %    - file path  (%path/to/file.txt)
+;   $    - money      ($19.99)
+;   /    - path separator or refinement (obj/field, func/refine)
 
 
 ; ============================================================
@@ -349,9 +369,9 @@ print lowercase "HELLO"                 ; hello
 print replace "hello world" "world" "Ray" ; hello Ray
 
 ; --- Escape sequences ---
-; ^/ = newline, ^" = quote, ^^ = caret, ^- = tab
+; \n = newline, \" = quote, \\ = backslash, \t = tab
 
-print "line one^/line two"
+print "line one\nline two"
 
 
 ; ============================================================
@@ -378,9 +398,14 @@ print length? m                         ; number of key-value pairs
 ; ============================================================
 ; TYPE SYSTEM
 ; ============================================================
-; Gradual typing. Type introspection, conversion, and custom
-; typesets. No implicit coercion. Type annotations on function
-; params are enforced at runtime.
+; Gradual typing. No implicit coercion. Three operations:
+;
+;   is?  type! value  — check (returns logic!)
+;   to   type! value  — convert (scalars only, throws on failure)
+;   [param [type!]]   — constrain (in function specs, enforced at call time)
+;
+; Type annotations on function params are enforced at runtime.
+; A future compiler can trust these annotations for optimization.
 
 ; --- Introspection ---
 type? 42                                ; => integer!
@@ -393,7 +418,15 @@ string? "hello"                         ; => true
 none? none                              ; => true
 function? :add                          ; => true
 
-; --- Type conversion (explicit only) ---
+; --- Type checking (is?) ---
+; is? checks whether a value matches a type. Works with
+; built-in types, @type values, and raw parse rule blocks.
+is? integer! 42                         ; => true
+is? string! 42                          ; => false
+
+; --- Type conversion (to) ---
+; to converts between scalar types. It does not apply to
+; composite or structural types — those are checked, not converted.
 to integer! "42"                        ; => 42
 to string! 42                           ; => "42"
 to float! 7                             ; => 7.0
@@ -401,23 +434,26 @@ to block! "hello"                       ; => ["hello"]
 to word! "hello"                        ; => word
 to set-word! "x"                        ; => set-word
 to lit-word! "name"                     ; => lit-word
-to integer! #"A"                        ; => 65 (codepoint)
-to char! 65                             ; => #"A"
+to meta-word! "add"                     ; => meta-word
+codepoint "A"                           ; => 65
+from-codepoint 65                       ; => "A"
 to integer! true                        ; => 1
 to float! false                         ; => 0.0
 
-; --- Built-in typesets ---
+; --- Built-in type unions ---
 ; number!     = integer! | float!
-; any-word!   = word! | set-word! | get-word! | lit-word!
-; scalar!     = integer! | float! | date! | time! | pair! | tuple! | char!
+; any-word!   = word! | set-word! | get-word! | lit-word! | meta-word!
+; scalar!     = integer! | float! | date! | time! | pair! | tuple!
 ; any-type!   = matches any type
 
-; --- Custom typesets ---
-coordinate!: typeset [pair! block!]
-response!: typeset [string! block! none!]
+; --- Custom types (@type) ---
+; @type defines types via parse rules. Union types use |.
+; Structural types use parse rule syntax (lit-words + types).
+coordinate!: @type [pair! | block!]
+response!: @type [string! | block! | none!]
 
-; --- Where clauses (guarded typesets) ---
-positive!: typeset/where [integer!] [it > 0]
+; --- Where clauses (@type/where) ---
+positive!: @type/where [integer!] [it > 0]
 ; f: function [x [positive!]] [x * 2]
 ; f 5                                   ; 10
 ; f -3                                  ; ERROR: x fails where clause
@@ -631,8 +667,9 @@ words-of point                          ; => [x y]
 ; ============================================================
 ; LIFECYCLE HOOKS
 ; ============================================================
-; @enter and @exit fire at scope boundaries inside any
-; evaluated block.
+; @enter and @exit are meta-words (type: meta-word!) that
+; fire at scope boundaries inside any evaluated block.
+; Meta-words are a distinct word type with the @ prefix.
 ;
 ;   @enter  - runs when entering a scope (once)
 ;   @exit   - runs when leaving a scope (once, always runs,
@@ -720,20 +757,25 @@ parse [1 "a" 2 "b" 3] [
 
 
 ; ============================================================
-; SHAPES & VALIDATION
+; STRUCTURAL TYPES
 ; ============================================================
-; Shapes are parse rules used as data contracts.
-; Convention: ~ suffix for shape names.
+; A type name (word!) bound to a parse rule block defines a
+; structural type. Use it anywhere a type constraint is expected.
 ; is? is sugar for parse — returns logic!
 
-user~: ['name string! 'age integer! 'roles block!]
+user!: @type ['name string! 'age integer! 'roles block!]
 
-is? [name "Alice" age 25 roles ["admin"]] user~   ; => true
-is? [name "Alice"] user~                           ; => false
+is? user! [name "Alice" age 25 roles ["admin"]]   ; => true
+is? user! [name "Alice"]                           ; => false
 
-; Shapes compose — they're just blocks.
-; base~: ['name string! 'age integer!]
-; admin~: [base~ 'permissions block!]
+; Structural types work in function params
+greet-user: function [u [user!]] [
+  print select u 'name
+]
+
+; Structural types compose — they're just blocks.
+; base!: ['name string! 'age integer!]
+; admin!: [base! 'permissions block!]
 
 
 ; ============================================================
@@ -810,6 +852,7 @@ reduce [1 + 2 3 * 4 "hello"]           ; => [3 12 "hello"]
 to word! "hello"                        ; => word
 to set-word! "x"                        ; => set-word
 to lit-word! "name"                     ; => lit-word
+to meta-word! "add"                     ; => meta-word
 
 ; Generate code dynamically
 do compose [(to set-word! "greeting") "hello world"]

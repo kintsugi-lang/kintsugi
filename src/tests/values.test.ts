@@ -51,9 +51,9 @@ describe('astToValue', () => {
     expect(val).toEqual({ type: 'none!' });
   });
 
-  test('char', () => {
-    const val = convert('#"A"');
-    expect(val).toEqual({ type: 'char!', value: 'A' });
+  test('char syntax is sugar for string', () => {
+    const val = convert('"A"');
+    expect(val).toEqual({ type: 'string!', value: 'A' });
   });
 
   test('pair', () => {
@@ -114,6 +114,11 @@ describe('astToValue', () => {
   test('lit-word', () => {
     const val = convert("'name");
     expect(val).toEqual({ type: 'lit-word!', name: 'name' });
+  });
+
+  test('meta-word', () => {
+    const val = convert('@enter');
+    expect(val).toEqual({ type: 'meta-word!', name: 'enter' });
   });
 
   test('path', () => {

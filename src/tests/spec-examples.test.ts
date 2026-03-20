@@ -84,12 +84,12 @@ describe('spec examples', () => {
     expect(ev.evalString('factorial')).toEqual({ type: 'integer!', value: 120 });
   });
 
-  test('shape validation with is?', () => {
+  test('structural type validation with is?', () => {
     const ev = new Evaluator();
-    ev.evalString("user-shape: ['name string! 'age integer!]");
-    expect(ev.evalString('is? [name "Alice" age 25] user-shape')).toEqual({ type: 'logic!', value: true });
-    expect(ev.evalString('is? [name "Alice"] user-shape')).toEqual({ type: 'logic!', value: false });
-    expect(ev.evalString('is? [name 42 age 25] user-shape')).toEqual({ type: 'logic!', value: false });
+    ev.evalString("user!: @type ['name string! 'age integer!]");
+    expect(ev.evalString('is? user! [name "Alice" age 25]')).toEqual({ type: 'logic!', value: true });
+    expect(ev.evalString('is? user! [name "Alice"]')).toEqual({ type: 'logic!', value: false });
+    expect(ev.evalString('is? user! [name 42 age 25]')).toEqual({ type: 'logic!', value: false });
   });
 
   test('code generation with preprocess', () => {

@@ -114,17 +114,14 @@ export class Evaluator {
       case 'string!':
       case 'logic!':
       case 'none!':
-      case 'char!':
       case 'pair!':
       case 'tuple!':
       case 'date!':
       case 'time!':
-      case 'binary!':
       case 'file!':
       case 'url!':
       case 'email!':
       case 'type!':
-      case 'typeset!':
       case 'map!':
       case 'context!':
       case 'function!':
@@ -180,6 +177,17 @@ export class Evaluator {
 
       case 'lit-word!':
         return [val, pos + 1];
+
+      case 'meta-word!': {
+        const parts = val.name.split('/');
+        const baseName = `@${parts[0]}`;
+        const bound = ctx.get(baseName);
+        if (bound && isCallable(bound)) {
+          const refinements = parts.slice(1);
+          return this.callCallable(bound, values, pos + 1, ctx, refinements);
+        }
+        return [val, pos + 1];
+      }
 
       case 'operator!':
         // Operators should be consumed by infix handling, not appear here
@@ -466,10 +474,10 @@ function extractLifecycleHooks(values: KtgValue[]): {
   let i = 0;
   while (i < values.length) {
     const v = values[i];
-    if (v.type === 'word!' && v.name === '@enter' && i + 1 < values.length && values[i + 1].type === 'block!') {
+    if (v.type === 'meta-word!' && v.name === 'enter' && i + 1 < values.length && values[i + 1].type === 'block!') {
       enter = values[i + 1] as KtgBlock;
       i += 2;
-    } else if (v.type === 'word!' && v.name === '@exit' && i + 1 < values.length && values[i + 1].type === 'block!') {
+    } else if (v.type === 'meta-word!' && v.name === 'exit' && i + 1 < values.length && values[i + 1].type === 'block!') {
       exit = values[i + 1] as KtgBlock;
       i += 2;
     } else {
@@ -487,33 +495,37 @@ function extractLifecycleHooks(values: KtgValue[]): {
 
 const TYPESETS: Record<string, string[]> = {
   'number!': ['integer!', 'float!'],
-  'any-word!': ['word!', 'set-word!', 'get-word!', 'lit-word!'],
+  'any-word!': ['word!', 'set-word!', 'get-word!', 'lit-word!', 'meta-word!'],
   'any-block!': ['block!', 'paren!', 'path!'],
-  'scalar!': ['integer!', 'float!', 'date!', 'time!', 'pair!', 'tuple!', 'char!'],
+  'scalar!': ['integer!', 'float!', 'date!', 'time!', 'pair!', 'tuple!'],
   'any-type!': [], // matches everything
 };
 
 function checkType(value: KtgValue, constraint: string, paramName: string, ctx?: KtgContext, evaluator?: Evaluator, elementType?: string): void {
   if (constraint === 'any-type!') return;
 
-  // Check built-in typesets
-  const typesetTypes = TYPESETS[constraint];
-  if (typesetTypes) {
-    if (!typesetTypes.includes(value.type)) {
+  // Check built-in type unions (number!, any-word!, etc.)
+  const builtinUnion = TYPESETS[constraint];
+  if (builtinUnion) {
+    if (!builtinUnion.includes(value.type)) {
       throw new KtgError('type', `${paramName} expects ${constraint}, got ${value.type}`);
     }
     return;
   }
 
-  // Check user-defined typesets from context
+  // Check user-defined types (@type) from context
   if (ctx) {
     const resolved = ctx.get(constraint);
-    if (resolved && resolved.type === 'typeset!') {
-      if (!resolved.types.includes(value.type)) {
+    if (resolved && resolved.type === 'type!' && resolved.rule && evaluator) {
+      const { parseBlock } = require('./parse');
+      const input = value.type === 'block!'
+        ? value
+        : { type: 'block!' as const, values: [value] };
+      if (!parseBlock(input as any, resolved.rule, ctx, evaluator)) {
         throw new KtgError('type', `${paramName} expects ${constraint}, got ${value.type}`);
       }
       // Check where clause if present
-      if (resolved.guard && evaluator) {
+      if (resolved.guard) {
         const guardCtx = new KtgContext(ctx);
         guardCtx.set('it', value);
         const guardResult = evaluator.evalBlock(resolved.guard, guardCtx);
@@ -551,9 +563,9 @@ function valuesEqual(a: KtgValue, b: KtgValue): boolean {
   if (isNumeric(a) && isNumeric(b)) return numVal(a) === numVal(b);
   if (a.type === 'string!' && b.type === 'string!') return a.value === b.value;
   if (a.type === 'logic!' && b.type === 'logic!') return a.value === b.value;
-  if (a.type === 'char!' && b.type === 'char!') return a.value === b.value;
   if (a.type === 'word!' && b.type === 'word!') return a.name === b.name;
   if (a.type === 'lit-word!' && b.type === 'lit-word!') return a.name === b.name;
+  if (a.type === 'meta-word!' && b.type === 'meta-word!') return a.name === b.name;
   return false;
 }
 

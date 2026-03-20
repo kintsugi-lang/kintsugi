@@ -33,7 +33,6 @@ export type IRType =
   | 'string!'
   | 'logic!'
   | 'none!'
-  | 'char!'
   | 'block!'
   | 'context!'
   | 'function!'
@@ -41,13 +40,13 @@ export type IRType =
   | 'tuple!'
   | 'date!'
   | 'time!'
-  | 'binary!'
   | 'file!'
   | 'url!'
   | 'email!'
   | 'map!'
   | 'word!'
-  | 'lit-word!';
+  | 'lit-word!'
+  | 'meta-word!';
 
 export type IRParam = { name: string; type: IRType };
 

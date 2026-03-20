@@ -34,17 +34,15 @@ describe('dates', () => {
 describe('strings', () => {
   test('double-quoted string', () => expectSingleToken('"hello"', TOKEN_TYPES.STRING, 'hello'));
   test('curly-brace string', () => expectSingleToken('{hello}', TOKEN_TYPES.STRING, 'hello'));
-  test('string with escape', () => expectSingleToken('"line one^/line two"', TOKEN_TYPES.STRING, 'line one/line two'));
-  test('curly string with escape', () => expectSingleToken('{She said ^"hello^"}', TOKEN_TYPES.STRING, 'She said "hello"'));
+  test('escaped quote in string', () => expectSingleToken('"She said \\"hello\\""', TOKEN_TYPES.STRING, 'She said "hello"'));
+  test('escaped backslash', () => expectSingleToken('"a\\\\b"', TOKEN_TYPES.STRING, 'a\\b'));
+  test('\\n produces newline', () => expectSingleToken('"line one\\nline two"', TOKEN_TYPES.STRING, 'line one\nline two'));
 });
 
 describe('chars', () => {
-  test('char literal', () => expectSingleToken('#"A"', TOKEN_TYPES.CHAR, 'A'));
+  test('char literal', () => expectSingleToken('"A"', TOKEN_TYPES.CHAR, 'A'));
 });
 
-describe('binary', () => {
-  test('binary literal', () => expectSingleToken('#{48656C6C6F}', TOKEN_TYPES.BINARY, '48656C6C6F'));
-});
 
 describe('files', () => {
   test('file path', () => expectSingleToken('%path/to/file.txt', TOKEN_TYPES.FILE, 'path/to/file.txt'));
@@ -123,9 +121,10 @@ describe('directives', () => {
   test('preprocess', () => expectSingleToken('#preprocess', TOKEN_TYPES.DIRECTIVE, 'preprocess'));
 });
 
-describe('lifecycle', () => {
-  test('enter hook', () => expectSingleToken('@enter', TOKEN_TYPES.LIFECYCLE, 'enter'));
-  test('exit hook', () => expectSingleToken('@exit', TOKEN_TYPES.LIFECYCLE, 'exit'));
+describe('meta-words', () => {
+  test('enter hook', () => expectSingleToken('@enter', TOKEN_TYPES.META_WORD, 'enter'));
+  test('exit hook', () => expectSingleToken('@exit', TOKEN_TYPES.META_WORD, 'exit'));
+  test('meta-word for metamethods', () => expectSingleToken('@add', TOKEN_TYPES.META_WORD, 'add'));
 });
 
 describe('urls', () => {

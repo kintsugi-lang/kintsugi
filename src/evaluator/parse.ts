@@ -8,9 +8,9 @@ import type { Evaluator } from './evaluator';
 class ParseBreak {}
 
 const TYPE_NAMES = new Set([
-  'integer!', 'float!', 'string!', 'logic!', 'none!', 'char!',
-  'pair!', 'tuple!', 'date!', 'time!', 'binary!', 'file!',
-  'url!', 'email!', 'word!', 'set-word!', 'get-word!', 'lit-word!',
+  'integer!', 'float!', 'string!', 'logic!', 'none!',
+  'pair!', 'tuple!', 'date!', 'time!', 'file!',
+  'url!', 'email!', 'word!', 'set-word!', 'get-word!', 'lit-word!', 'meta-word!',
   'path!', 'block!', 'paren!', 'map!', 'context!', 'function!',
   'native!', 'op!', 'type!', 'operator!',
 ]);

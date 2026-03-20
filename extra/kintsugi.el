@@ -36,14 +36,8 @@
   "Syntax table for `kintsugi-mode'.")
 
 (defconst kintsugi--syntax-propertize
-  (syntax-propertize-rules
-   ("#\\(\"\\).\\(\"\\)"
-    (1 ".")
-    (2 "."))
-   ("#\\({\\)[^}]*\\(}\\)"
-    (1 ".")
-    (2 ".")))
-  "Syntax propertize rules for char literals and binary literals.")
+  (syntax-propertize-rules)
+  "Syntax propertize rules.")
 
 (defconst kintsugi-font-lock-keywords
   (let ((control '("if" "either" "unless" "loop" "break" "return"
@@ -59,15 +53,16 @@
                      "has?" "index?"
                      "length?" "empty?" "type?"
                      "none?" "integer?" "float?" "logic?"
-                     "char?" "block?" "function?" "string?"
+                     "block?" "function?" "string?"
                      "context?" "pair?" "tuple?" "date?" "time?"
-                     "binary?" "file?" "url?" "email?" "word?" "map?"
+                     "file?" "url?" "email?" "word?" "meta-word?" "map?"
                      "min" "max" "abs" "negate" "round" "odd?" "even?"
+                     "codepoint" "from-codepoint"
                      "join" "rejoin" "replace" "split" "trim"
                      "uppercase" "lowercase"
                      "context" "bind" "words-of" "set"
                      "require" "make" "to"
-                     "is?" "typeset" "error"
+                     "is?" "error"
                      ;; Preprocess
                      "emit" "platform")))
     `(
@@ -75,12 +70,8 @@
       ("#\\(?:preprocess\\|inline\\)" . font-lock-preprocessor-face)
       ;; Inline preprocess #[expr]
       ("#\\[" . font-lock-preprocessor-face)
-      ;; Lifecycle hooks
-      ("@\\(?:enter\\|exit\\)\\b" . font-lock-preprocessor-face)
-      ;; Char literals #"x"
-      ("#\".\""  . font-lock-constant-face)
-      ;; Binary literals #{...}
-      ("#{[^}]*}" . font-lock-constant-face)
+      ;; Meta-words (@enter, @exit, etc.)
+      ("@[[:alpha:]][[:alnum:]_?!-]*" . font-lock-preprocessor-face)
       ;; URL literals (before email and file to avoid partial matches)
       ("[[:alpha:]][[:alnum:]+-]*://[^] \t\n[()]*" . font-lock-string-face)
       ;; Email literals
@@ -96,8 +87,6 @@
       ("\\_<[[:alpha:]][[:alnum:]_?!-]*:" . font-lock-variable-name-face)
       ;; Type names (word!)
       ("\\_<[[:alpha:]][[:alnum:]_-]*!" . font-lock-type-face)
-      ;; Shape names (word~)
-      ("\\_<[[:alpha:]][[:alnum:]_-]*~" . font-lock-type-face)
       ;; Lit-words ('word)
       ("'[[:alpha:]][[:alnum:]_?!-]*" . font-lock-constant-face)
       ;; Get-words (:word)

@@ -29,12 +29,12 @@ const BUILTINS: Record<string, number> = {
   'context': 1,
   'error': 3, 'try': 1,
   'match': 2, 'parse': 2, 'is?': 2,
-  'function': 2, 'attempt': 1, 'typeset': 1, 'require': 1,
+  'function': 2, 'attempt': 1, 'require': 1,
   // Type predicates
   'none?': 1, 'integer?': 1, 'float?': 1, 'string?': 1, 'logic?': 1,
-  'char?': 1, 'block?': 1, 'context?': 1, 'function?': 1,
-  'pair?': 1, 'tuple?': 1, 'date?': 1, 'time?': 1, 'binary?': 1,
-  'file?': 1, 'url?': 1, 'email?': 1, 'word?': 1, 'map?': 1,
+  'block?': 1, 'context?': 1, 'function?': 1,
+  'pair?': 1, 'tuple?': 1, 'date?': 1, 'time?': 1,
+  'file?': 1, 'url?': 1, 'email?': 1, 'word?': 1, 'meta-word?': 1, 'map?': 1,
 };
 
 const INFIX_OPS = new Set(['+', '-', '*', '/', '%', '=', '<>', '<', '>', '<=', '>=']);
@@ -308,8 +308,6 @@ function lowerAtom(values: KtgValue[], pos: number, scope: Scope): [IRExpr, numb
       return [{ tag: 'literal', type: 'logic!', value: val.value }, pos + 1];
     case 'none!':
       return [{ tag: 'none', type: 'none!' }, pos + 1];
-    case 'char!':
-      return [{ tag: 'literal', type: 'char!', value: val.value }, pos + 1];
     case 'lit-word!':
       return [{ tag: 'literal', type: 'lit-word!', value: val.name }, pos + 1];
 
@@ -1664,10 +1662,10 @@ function extractHooksFromValues(values: KtgValue[]): {
 
   while (i < values.length) {
     const v = values[i];
-    if (v.type === 'word!' && v.name === '@enter' && i + 1 < values.length && values[i + 1].type === 'block!') {
+    if (v.type === 'meta-word!' && v.name === 'enter' && i + 1 < values.length && values[i + 1].type === 'block!') {
       enter = (values[i + 1] as KtgBlock).values;
       i += 2;
-    } else if (v.type === 'word!' && v.name === '@exit' && i + 1 < values.length && values[i + 1].type === 'block!') {
+    } else if (v.type === 'meta-word!' && v.name === 'exit' && i + 1 < values.length && values[i + 1].type === 'block!') {
       exit = (values[i + 1] as KtgBlock).values;
       i += 2;
     } else {
@@ -1689,6 +1687,7 @@ function lowerBlockLiteral(block: KtgBlock, scope: Scope): IRBlockLiteral {
       case 'word!': return { tag: 'literal', type: 'word!', value: v.name } as IRLiteral;
       case 'set-word!': return { tag: 'literal', type: 'word!', value: v.name } as IRLiteral;
       case 'lit-word!': return { tag: 'literal', type: 'lit-word!', value: v.name } as IRLiteral;
+      case 'meta-word!': return { tag: 'literal', type: 'meta-word!', value: v.name } as IRLiteral;
       case 'none!': return { tag: 'none', type: 'none!' } as IRNone;
       default: return { tag: 'none', type: 'none!' } as IRNone;
     }

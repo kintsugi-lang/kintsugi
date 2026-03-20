@@ -2,6 +2,7 @@ import { Predicate, Token, TOKEN_TYPES } from '@types';
 
 const LOGIC_WORDS = ['true', 'false'];
 const OPERATOR_CHARACTERS = '+-*=<>/%|';
+const ESCAPE_MAP = { n: '\n', t: '\t' };
 
 export function* createLexerFromString(input: string): Generator<Token, null, unknown> {
   let currentPos = 0;
@@ -31,8 +32,13 @@ export function* createLexerFromString(input: string): Generator<Token, null, un
     let value = '';
     advance();
     while (!isAtEnd() && peek() !== closingCharacter) {
-      // REBOL-style escape character...
-      if (peek() === '^') advance();
+      if (peek() === '\\') {
+        advance();
+        const ch = advance();
+        value += ESCAPE_MAP[ch] ?? ch;
+        continue;
+      }
+      
       value += advance();
     }
     advance();
@@ -145,11 +151,11 @@ export function* createLexerFromString(input: string): Generator<Token, null, un
       continue;
     }
 
-    // Lifecycle
+    // Meta-word (@enter, @exit, @add, etc.)
     if (currentChar === '@') {
       advance();
       const { value } = consumeWordOrPath();
-      yield { type: TOKEN_TYPES.LIFECYCLE, value };
+      yield { type: TOKEN_TYPES.META_WORD, value };
       continue;
     }
 
@@ -162,15 +168,11 @@ export function* createLexerFromString(input: string): Generator<Token, null, un
         // #[expr] — inline preprocess
         token.type = TOKEN_TYPES.DIRECTIVE;
         token.value = 'inline';
-      } else if (isAlpha(peek())) {
+      }
+
+      if (isAlpha(peek())) {
         token.type = TOKEN_TYPES.DIRECTIVE;
         token.value = consumeWhile(isAlpha);
-      } else if (peek() === '"') {
-        token.type = TOKEN_TYPES.CHAR;
-        token.value = consumeUntil('"');
-      } else if (peek() === '{') {
-        token.type = TOKEN_TYPES.BINARY;
-        token.value = consumeUntil('}');
       }
 
       yield token;
@@ -192,7 +194,8 @@ export function* createLexerFromString(input: string): Generator<Token, null, un
     // Strings
     if (currentChar === '"' || currentChar === '{') {
       const value = currentChar === '{' ? consumeUntil('}') : consumeUntil('"');
-      yield { type: TOKEN_TYPES.STRING, value };
+      const type = value.length === 1 ? TOKEN_TYPES.CHAR : TOKEN_TYPES.STRING;
+      yield { type, value };
       continue;
     }
 

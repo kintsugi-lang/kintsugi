@@ -31,12 +31,10 @@ export type KtgFloat    = { type: 'float!';   value: number };
 export type KtgString   = { type: 'string!';  value: string };
 export type KtgLogic    = { type: 'logic!';   value: boolean };
 export type KtgNone     = { type: 'none!' };
-export type KtgChar     = { type: 'char!';    value: string };
 export type KtgPair     = { type: 'pair!';    x: number; y: number };
 export type KtgTuple    = { type: 'tuple!';   parts: number[] };
 export type KtgDate     = { type: 'date!';    value: string };
 export type KtgTime     = { type: 'time!';    value: string };
-export type KtgBinary   = { type: 'binary!';  value: Uint8Array };
 export type KtgFile     = { type: 'file!';    value: string };
 export type KtgUrl      = { type: 'url!';     value: string };
 export type KtgEmail    = { type: 'email!';   value: string };
@@ -45,6 +43,7 @@ export type KtgWord     = { type: 'word!';     name: string; bound?: KtgContext 
 export type KtgSetWord  = { type: 'set-word!'; name: string; bound?: KtgContext };
 export type KtgGetWord  = { type: 'get-word!'; name: string; bound?: KtgContext };
 export type KtgLitWord  = { type: 'lit-word!'; name: string };
+export type KtgMetaWord = { type: 'meta-word!'; name: string };
 export type KtgPath     = { type: 'path!';     segments: string[] };
 export type KtgSetPath  = { type: 'set-path!'; segments: string[] };
 export type KtgGetPath  = { type: 'get-path!'; segments: string[] };
@@ -69,19 +68,18 @@ export type KtgFunction = { type: 'function!'; spec: FuncSpec; body: KtgBlock; c
 export type KtgNative   = { type: 'native!';   name: string; arity: number; refinementArgs?: Record<string, number>; fn: NativeFn };
 export type KtgOp       = { type: 'op!';       name: string; fn: (l: KtgValue, r: KtgValue) => KtgValue };
 
-export type KtgTypeName = { type: 'type!';     name: string };
-export type KtgTypeset  = { type: 'typeset!';  name: string; types: string[]; guard?: KtgBlock };
+export type KtgTypeName = { type: 'type!';     name: string; rule?: KtgBlock; guard?: KtgBlock };
 export type KtgOperator = { type: 'operator!'; symbol: string };
 
 export type KtgValue =
   | KtgInteger | KtgFloat | KtgString | KtgLogic | KtgNone
-  | KtgChar | KtgPair | KtgTuple | KtgDate | KtgTime
-  | KtgBinary | KtgFile | KtgUrl | KtgEmail
-  | KtgWord | KtgSetWord | KtgGetWord | KtgLitWord
+  | KtgPair | KtgTuple | KtgDate | KtgTime
+  | KtgFile | KtgUrl | KtgEmail
+  | KtgWord | KtgSetWord | KtgGetWord | KtgLitWord | KtgMetaWord
   | KtgPath | KtgSetPath | KtgGetPath | KtgLitPath
   | KtgBlock | KtgParen | KtgMap | KtgCtxValue
   | KtgFunction | KtgNative | KtgOp
-  | KtgTypeName | KtgTypeset | KtgOperator;
+  | KtgTypeName | KtgOperator;
 
 // --- Constants ---
 
@@ -92,15 +90,6 @@ export const FALSE: KtgLogic = { type: 'logic!', value: false };
 // --- Conversion ---
 
 const LOGIC_TRUE = new Set(['true']);
-
-function hexToUint8Array(hex: string): Uint8Array {
-  const clean = hex.replace(/\s/g, '');
-  const bytes = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < clean.length; i += 2) {
-    bytes[i / 2] = parseInt(clean.substring(i, i + 2), 16);
-  }
-  return bytes;
-}
 
 export function astToValue(node: AstNode): KtgValue {
   if ('children' in node) {
@@ -119,7 +108,7 @@ export function astToValue(node: AstNode): KtgValue {
     case TOKEN_TYPES.STRING:   return { type: 'string!',  value: v };
     case TOKEN_TYPES.LOGIC:    return { type: 'logic!',   value: LOGIC_TRUE.has(v) };
     case TOKEN_TYPES.NONE:     return NONE;
-    case TOKEN_TYPES.CHAR:     return { type: 'char!',    value: v };
+    case TOKEN_TYPES.CHAR:     return { type: 'string!',  value: v };
     case TOKEN_TYPES.PAIR: {
       const [x, y] = v.split('x').map(Number);
       return { type: 'pair!', x, y };
@@ -128,7 +117,6 @@ export function astToValue(node: AstNode): KtgValue {
     case TOKEN_TYPES.MONEY:    return { type: 'float!', value: parseFloat(v) };
     case TOKEN_TYPES.DATE:     return { type: 'date!',  value: v };
     case TOKEN_TYPES.TIME:     return { type: 'time!',  value: v };
-    case TOKEN_TYPES.BINARY:   return { type: 'binary!', value: hexToUint8Array(v) };
     case TOKEN_TYPES.FILE:     return { type: 'file!',   value: v };
     case TOKEN_TYPES.URL:      return { type: 'url!',    value: v };
     case TOKEN_TYPES.EMAIL:    return { type: 'email!',  value: v };
@@ -143,7 +131,7 @@ export function astToValue(node: AstNode): KtgValue {
     case TOKEN_TYPES.OPERATOR: return { type: 'operator!', symbol: v };
     case TOKEN_TYPES.FUNCTION: return { type: 'word!', name: 'function' };
     case TOKEN_TYPES.DIRECTIVE: return { type: 'word!', name: `#${v}` };
-    case TOKEN_TYPES.LIFECYCLE: return { type: 'word!', name: `@${v}` };
+    case TOKEN_TYPES.META_WORD: return { type: 'meta-word!', name: v };
     case TOKEN_TYPES.COMMENT:  return NONE; // comments are discarded
     case TOKEN_TYPES.STUB:     return NONE;
     default:
@@ -172,12 +160,10 @@ export function valueToString(val: KtgValue): string {
     case 'string!':    return val.value;
     case 'logic!':     return val.value ? 'true' : 'false';
     case 'none!':      return 'none';
-    case 'char!':      return val.value;
     case 'pair!':      return `${val.x}x${val.y}`;
     case 'tuple!':     return val.parts.join('.');
     case 'date!':      return val.value;
     case 'time!':      return val.value;
-    case 'binary!':    return `#{${Array.from(val.value).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join('')}}`;
     case 'file!':      return `%${val.value}`;
     case 'url!':       return val.value;
     case 'email!':     return val.value;
@@ -185,6 +171,7 @@ export function valueToString(val: KtgValue): string {
     case 'set-word!':  return `${val.name}:`;
     case 'get-word!':  return `:${val.name}`;
     case 'lit-word!':  return `'${val.name}`;
+    case 'meta-word!': return `@${val.name}`;
     case 'path!':      return val.segments.join('/');
     case 'set-path!':  return `${val.segments.join('/')}:`;
     case 'get-path!':  return `:${val.segments.join('/')}`;
@@ -201,7 +188,6 @@ export function valueToString(val: KtgValue): string {
     case 'native!':    return `native!:${val.name}`;
     case 'op!':        return `op!:${val.name}`;
     case 'type!':      return val.name;
-    case 'typeset!':   return val.name;
     case 'operator!':  return val.symbol;
   }
 }

@@ -146,11 +146,20 @@ describe('parse block — composable rules', () => {
 });
 
 describe('is?', () => {
-  test('sugar for parse', () => {
+  test('type-first argument order', () => {
     const ev = new Evaluator();
-    ev.evalString("user-shape: ['name string! 'age integer!]");
-    expect(ev.evalString('is? [name "Alice" age 25] user-shape')).toEqual({ type: 'logic!', value: true });
-    expect(ev.evalString('is? [name "Alice"] user-shape')).toEqual({ type: 'logic!', value: false });
+    ev.evalString("user!: @type ['name string! 'age integer!]");
+    expect(ev.evalString('is? user! [name "Alice" age 25]')).toEqual({ type: 'logic!', value: true });
+    expect(ev.evalString('is? user! [name "Alice"]')).toEqual({ type: 'logic!', value: false });
+  });
+
+  test('works with built-in type names', () => {
+    expect(eval_('is? integer! 42')).toEqual({ type: 'logic!', value: true });
+    expect(eval_('is? string! 42')).toEqual({ type: 'logic!', value: false });
+  });
+
+  test('works with raw parse rule blocks', () => {
+    expect(eval_("is? ['x integer!] [x 10]")).toEqual({ type: 'logic!', value: true });
   });
 });
 

@@ -150,7 +150,7 @@ export function registerNatives(ctx: KtgContext, evaluator: Evaluator): void {
   native('first', 1, (args) => {
     const v = args[0];
     if (v.type === 'block!') return v.values[0] ?? NONE;
-    if (v.type === 'string!') return v.value.length > 0 ? { type: 'char!', value: v.value[0] } : NONE;
+    if (v.type === 'string!') return v.value.length > 0 ? { type: 'string!', value: v.value[0] } : NONE;
     throw new KtgError('type', `first not supported for ${v.type}`);
   });
 
@@ -163,7 +163,7 @@ export function registerNatives(ctx: KtgContext, evaluator: Evaluator): void {
   native('last', 1, (args) => {
     const v = args[0];
     if (v.type === 'block!') return v.values.length > 0 ? v.values[v.values.length - 1] : NONE;
-    if (v.type === 'string!') return v.value.length > 0 ? { type: 'char!', value: v.value[v.value.length - 1] } : NONE;
+    if (v.type === 'string!') return v.value.length > 0 ? { type: 'string!', value: v.value[v.value.length - 1] } : NONE;
     throw new KtgError('type', `last not supported for ${v.type}`);
   });
 
@@ -173,7 +173,7 @@ export function registerNatives(ctx: KtgContext, evaluator: Evaluator): void {
     if (series.type === 'block!') return series.values[index.value - 1] ?? NONE;
     if (series.type === 'string!') {
       const ch = series.value[index.value - 1];
-      return ch ? { type: 'char!', value: ch } : NONE;
+      return ch ? { type: 'string!', value: ch } : NONE;
     }
     throw new KtgError('type', `pick not supported for ${series.type}`);
   });
@@ -286,7 +286,6 @@ export function registerNatives(ctx: KtgContext, evaluator: Evaluator): void {
       case 'integer!':
         if (value.type === 'string!') return { type: 'integer!', value: parseInt(value.value, 10) };
         if (value.type === 'logic!') return { type: 'integer!', value: value.value ? 1 : 0 };
-        if (value.type === 'char!') return { type: 'integer!', value: value.value.codePointAt(0) ?? 0 };
         if (isNumeric(value)) return { type: 'integer!', value: Math.trunc(numVal(value)) };
         break;
       case 'float!':
@@ -297,10 +296,6 @@ export function registerNatives(ctx: KtgContext, evaluator: Evaluator): void {
       case 'string!':
         if (value.type === 'block!') return { type: 'string!', value: value.values.map(valueToString).join(' ') };
         return { type: 'string!', value: valueToString(value) };
-      case 'char!':
-        if (value.type === 'integer!') return { type: 'char!', value: String.fromCodePoint(value.value) };
-        if (value.type === 'string!' && value.value.length > 0) return { type: 'char!', value: value.value[0] };
-        break;
       case 'logic!':
         return { type: 'logic!', value: isTruthy(value) };
       case 'word!': {
@@ -321,6 +316,11 @@ export function registerNatives(ctx: KtgContext, evaluator: Evaluator): void {
       case 'get-word!': {
         const n = wordNameOf(value);
         if (n !== null) return { type: 'get-word!', name: n };
+        break;
+      }
+      case 'meta-word!': {
+        const n = wordNameOf(value);
+        if (n !== null) return { type: 'meta-word!', name: n };
         break;
       }
       case 'block!':
@@ -450,6 +450,16 @@ export function registerNatives(ctx: KtgContext, evaluator: Evaluator): void {
 
   native('even?', 1, (args) => {
     return { type: 'logic!', value: numVal(args[0]) % 2 === 0 };
+  });
+
+  native('codepoint', 1, (args) => {
+    if (args[0].type !== 'string!' || args[0].value.length === 0) throw new KtgError('type', 'codepoint expects a non-empty string');
+    return { type: 'integer!', value: args[0].value.codePointAt(0) ?? 0 };
+  });
+
+  native('from-codepoint', 1, (args) => {
+    if (args[0].type !== 'integer!') throw new KtgError('type', 'from-codepoint expects an integer');
+    return { type: 'string!', value: String.fromCodePoint(args[0].value) };
   });
 
   // === Group H: Code-as-data ===
@@ -638,19 +648,16 @@ export function registerNatives(ctx: KtgContext, evaluator: Evaluator): void {
     return NONE;
   });
 
-  // === Typesets ===
+  // === @type — define types via parse rules ===
 
-  // typeset [types] — creates a type union
-  // typeset/where [types] [guard] — with a guard clause
-  native('typeset', 1, (args, _ev, _callerCtx, refinements) => {
+  // @type [rule]          — type from parse rule
+  // @type/where [rule] [guard] — with a guard clause
+  native('@type', 1, (args, _ev, _callerCtx, refinements) => {
     const block = args[0];
-    if (block.type !== 'block!') throw new KtgError('type', 'typeset expects a block of types');
-    const types: string[] = [];
-    for (const v of block.values) {
-      if (v.type === 'word!' && v.name.endsWith('!')) types.push(v.name);
-    }
+    if (block.type !== 'block!') throw new KtgError('type', '@type expects a block');
+    const rule = block as KtgBlock;
     const guard = refinements.includes('where') && args[1]?.type === 'block!' ? args[1] as KtgBlock : undefined;
-    return { type: 'typeset!', name: '', types, guard } as any;
+    return { type: 'type!', name: '', rule, guard } as any;
   }, { where: 1 });
 
   // === Header ===
@@ -699,18 +706,44 @@ export function registerNatives(ctx: KtgContext, evaluator: Evaluator): void {
   });
 
   native('is?', 2, (args, ev, callerCtx) => {
-    const [input, rules] = args;
-    if (input.type !== 'block!') throw new KtgError('type', 'is? expects a block');
-    if (rules.type !== 'block!') throw new KtgError('type', 'is? expects a rule block');
-    return { type: 'logic!', value: parseBlock(input, rules, callerCtx, ev) };
+    const [typeArg, value] = args;
+
+    // Resolve the type constraint
+    let rule: KtgBlock;
+    let guard: KtgBlock | undefined;
+
+    if (typeArg.type === 'type!' && typeArg.rule) {
+      rule = typeArg.rule;
+      guard = typeArg.guard;
+    } else if (typeArg.type === 'type!') {
+      // Built-in type name like integer! — wrap as a parse rule
+      rule = { type: 'block!', values: [{ type: 'word!', name: typeArg.name }] };
+    } else if (typeArg.type === 'block!') {
+      // Raw parse rule block
+      rule = typeArg;
+    } else {
+      throw new KtgError('type', 'is? expects a type, @type value, or rule block');
+    }
+
+    const input = value.type === 'block!'
+      ? value
+      : { type: 'block!' as const, values: [value] };
+
+    if (!parseBlock(input as any, rule, callerCtx, ev)) return FALSE;
+    if (guard) {
+      const guardCtx = new KtgContext(callerCtx);
+      guardCtx.set('it', value);
+      if (!isTruthy(ev.evalBlock(guard, guardCtx))) return FALSE;
+    }
+    return TRUE;
   });
 
   // === Type Names ===
 
   const typeNames = [
-    'integer!', 'float!', 'string!', 'logic!', 'none!', 'char!',
-    'pair!', 'tuple!', 'date!', 'time!', 'binary!', 'file!',
-    'url!', 'email!', 'word!', 'set-word!', 'get-word!', 'lit-word!',
+    'integer!', 'float!', 'string!', 'logic!', 'none!',
+    'pair!', 'tuple!', 'date!', 'time!', 'file!',
+    'url!', 'email!', 'word!', 'set-word!', 'get-word!', 'lit-word!', 'meta-word!',
     'path!', 'block!', 'paren!', 'map!', 'context!', 'function!',
     'native!', 'op!', 'type!',
   ];
@@ -734,12 +767,12 @@ export function registerNatives(ctx: KtgContext, evaluator: Evaluator): void {
 
   const typePredicates: [string, string][] = [
     ['none?', 'none!'], ['integer?', 'integer!'], ['float?', 'float!'],
-    ['string?', 'string!'], ['logic?', 'logic!'], ['char?', 'char!'],
+    ['string?', 'string!'], ['logic?', 'logic!'],
     ['block?', 'block!'], ['context?', 'context!'],
     ['pair?', 'pair!'], ['tuple?', 'tuple!'], ['date?', 'date!'],
-    ['time?', 'time!'], ['binary?', 'binary!'], ['file?', 'file!'],
+    ['time?', 'time!'], ['file?', 'file!'],
     ['url?', 'url!'], ['email?', 'email!'], ['word?', 'word!'],
-    ['map?', 'map!'],
+    ['meta-word?', 'meta-word!'], ['map?', 'map!'],
   ];
 
   for (const [name, typeName] of typePredicates) {
@@ -764,12 +797,12 @@ function makeResult(ok: boolean, value: KtgValue, kind: KtgValue, message: KtgVa
 
 function wordNameOf(v: KtgValue): string | null {
   if (v.type === 'string!') return v.value;
-  if (v.type === 'word!' || v.type === 'set-word!' || v.type === 'get-word!' || v.type === 'lit-word!') return v.name;
+  if (v.type === 'word!' || v.type === 'set-word!' || v.type === 'get-word!' || v.type === 'lit-word!' || v.type === 'meta-word!') return v.name;
   return null;
 }
 
 function wordName(v: KtgValue): string | null {
-  if (v.type === 'word!' || v.type === 'set-word!' || v.type === 'get-word!' || v.type === 'lit-word!') return v.name;
+  if (v.type === 'word!' || v.type === 'set-word!' || v.type === 'get-word!' || v.type === 'lit-word!' || v.type === 'meta-word!') return v.name;
   return null;
 }
 
@@ -797,7 +830,7 @@ function tryMatchPattern(
 
   // Single type match [integer!] — match single value by type
   if (pattern.length === 1 && pattern[0].type === 'word!' && (pattern[0] as any).name.endsWith('!')) {
-    if (values.length === 1 && matchesType(values[0], (pattern[0] as any).name, ctx)) {
+    if (values.length === 1 && matchesType(values[0], (pattern[0] as any).name, ctx, ev)) {
       return new Map();
     }
     return null;
@@ -826,7 +859,7 @@ function tryMatchPattern(
 
     // Type match: word ending in !
     if (p.type === 'word!' && (p as any).name.endsWith('!')) {
-      if (!matchesType(v, (p as any).name, ctx)) return null;
+      if (!matchesType(v, (p as any).name, ctx, ev)) return null;
       continue;
     }
 
@@ -857,21 +890,27 @@ function tryMatchPattern(
   return bindings;
 }
 
-function matchesType(value: KtgValue, typeName: string, ctx: KtgContext): boolean {
+function matchesType(value: KtgValue, typeName: string, ctx: KtgContext, ev?: Evaluator): boolean {
   // Direct type match
   if (value.type === typeName) return true;
   // function! matches native! too
   if (typeName === 'function!' && value.type === 'native!') return true;
-  // Built-in typesets
+  // Built-in type unions
   const builtinSets: Record<string, string[]> = {
     'number!': ['integer!', 'float!'],
-    'any-word!': ['word!', 'set-word!', 'get-word!', 'lit-word!'],
-    'scalar!': ['integer!', 'float!', 'date!', 'time!', 'pair!', 'tuple!', 'char!'],
+    'any-word!': ['word!', 'set-word!', 'get-word!', 'lit-word!', 'meta-word!'],
+    'scalar!': ['integer!', 'float!', 'date!', 'time!', 'pair!', 'tuple!'],
   };
   if (builtinSets[typeName]) return builtinSets[typeName].includes(value.type);
-  // User-defined typesets from context
+  // User-defined types (@type) from context
   const resolved = ctx.get(typeName);
-  if (resolved && resolved.type === 'typeset!') return resolved.types.includes(value.type);
+  if (resolved && resolved.type === 'type!' && resolved.rule && ev) {
+    const { parseBlock } = require('./parse');
+    const input = value.type === 'block!'
+      ? value
+      : { type: 'block!' as const, values: [value] };
+    return parseBlock(input as any, resolved.rule, ctx, ev);
+  }
   return false;
 }
 
@@ -881,9 +920,9 @@ function matchValuesEqual(a: KtgValue, b: KtgValue): boolean {
   if (a.type === 'float!' && b.type === 'float!') return a.value === b.value;
   if (a.type === 'string!' && b.type === 'string!') return a.value === b.value;
   if (a.type === 'logic!' && b.type === 'logic!') return a.value === b.value;
-  if (a.type === 'char!' && b.type === 'char!') return a.value === b.value;
   if (a.type === 'lit-word!' && b.type === 'lit-word!') return a.name === b.name;
   if (a.type === 'word!' && b.type === 'word!') return a.name === b.name;
+  if (a.type === 'meta-word!' && b.type === 'meta-word!') return a.name === b.name;
   // Cross-type word matching
   if (a.type === 'lit-word!' && b.type === 'word!') return a.name === b.name;
   if (a.type === 'word!' && b.type === 'lit-word!') return a.name === b.name;

@@ -373,10 +373,9 @@ function emitLiteral(lit: IRLiteral): string {
       return `"${String(lit.value).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
     case 'logic!':
       return lit.value ? 'true' : 'false';
-    case 'char!':
-      return `"${lit.value}"`;
     case 'lit-word!':
     case 'word!':
+    case 'meta-word!':
       return `"${lit.value}"`;
     default:
       return String(lit.value);
@@ -470,10 +469,6 @@ function emitBuiltin(expr: IRBuiltinCall): string {
     case 'require':
       requireRuntime('require');
       return `__require(${args[0]})`;
-    case 'typeset':
-      requireRuntime('type-predicates');
-      return `__typeset(${args[0]})`;
-
     default: {
       // Type predicates: integer?, string?, etc.
       if (expr.name.endsWith('?') && expr.args.length === 1) {
@@ -820,9 +815,5 @@ local function __type_check(value, expected)
     return actual == "function!" or type(value) == "function"
   end
   return actual == expected
-end
-
-local function __typeset(types)
-  return {__ktg_type = "typeset!", types = types}
 end`,
 };
