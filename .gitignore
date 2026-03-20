@@ -1,2 +1,4 @@
-.precomp/
-lib/.precomp/
+.claude/
+bin/
+node_modules/
+docs/superpowers/

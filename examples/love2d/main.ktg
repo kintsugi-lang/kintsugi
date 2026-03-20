@@ -1,0 +1,25 @@
+; Minimal LÖVE2D game in Kintsugi
+; Compile: bun run compile.ts examples/love2d/main.ktg
+; Run:     love examples/love2d/
+
+x: 400
+y: 300
+speed: 200
+
+love/load: function [] [
+  love/window/setTitle "Kintsugi + LOVE2D"
+]
+
+love/update: function [dt] [
+  if love/keyboard/isDown "left"  [x: x - (speed * dt)]
+  if love/keyboard/isDown "right" [x: x + (speed * dt)]
+  if love/keyboard/isDown "up"    [y: y - (speed * dt)]
+  if love/keyboard/isDown "down"  [y: y + (speed * dt)]
+]
+
+love/draw: function [] [
+  love/graphics/setColor 1 0.5 0.2
+  love/graphics/circle "fill" x y 20
+  love/graphics/setColor 1 1 1
+  love/graphics/print "Move with arrow keys" 10 10
+]
