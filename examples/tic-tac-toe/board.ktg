@@ -1,0 +1,71 @@
+Kintsugi [
+  name: 'board
+  exports: [Board]
+]
+
+; --- Board ---
+; A 3x3 grid. Cells are 'x, 'o, or none.
+; Positions are 1-9, mapped to row/col:
+;   1 | 2 | 3
+;   ---------
+;   4 | 5 | 6
+;   ---------
+;   7 | 8 | 9
+
+Board: object [
+  field [cells [block!]]
+
+  cells: [none none none none none none none none none]
+
+  cell-at: function [pos [integer!]] [
+    pick self/cells pos
+  ]
+
+  place: function [pos [integer!] mark [any-word!]] [
+    if none? pick self/cells pos [
+      ; blocks are mutable — direct mutation via pick index
+      ; we need to rebuild since we can't mutate by index directly
+      state: context [new-cells: copy self/cells]
+      remove state/new-cells pos
+      insert state/new-cells mark pos
+      self/cells: state/new-cells
+      true
+    ]
+  ]
+
+  full?: does [
+    state: context [found-empty: false]
+    loop [for [c] in self/cells [
+      if none? c [state/found-empty: true]
+    ]]
+    not state/found-empty
+  ]
+
+  clear: does [
+    self/cells: [none none none none none none none none none]
+  ]
+
+  check-line: function [a [integer!] b [integer!] c [integer!]] [
+    va: pick self/cells a
+    vb: pick self/cells b
+    vc: pick self/cells c
+    if none? va [return none]
+    if va = vb and vb = vc [return va]
+    none
+  ]
+
+  winner: does [
+    ; rows
+    lines: [
+      [1 2 3] [4 5 6] [7 8 9]
+      [1 4 7] [2 5 8] [3 6 9]
+      [1 5 9] [3 5 7]
+    ]
+    state: context [result: none]
+    loop [for [line] in lines [
+      w: self/check-line (pick line 1) (pick line 2) (pick line 3)
+      if not none? w [state/result: w]
+    ]]
+    state/result
+  ]
+]

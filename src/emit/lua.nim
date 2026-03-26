@@ -22,8 +22,9 @@ type
     indent: int
     output: string
     ## Track known function arities so we can consume the right number of args.
-    ## Populated from: native arity table, user-defined function specs.
     arities: Table[string, int]
+    ## Track locally declared names. Undeclared names emit as globals.
+    locals: HashSet[string]
 
   EmitError* = ref object of CatchableError
 
@@ -90,11 +91,19 @@ proc initNativeArities(): Table[string, int] =
   result["break"] = 0
   # Type introspection (erased in compiled output, but arity needed for parsing)
   result["type"] = 1
+  # Type predicates — all arity 1
+  for name in ["integer", "float", "string", "logic", "none", "money",
+               "pair", "tuple", "date", "time", "file", "url", "email",
+               "block", "paren", "map", "set", "context", "object",
+               "function", "native", "word", "type", "number"]:
+    result[name & "?"] = 1
+  result["is?"] = 2
   # Series
   result["size?"] = 1
   result["length?"] = 1
   result["empty?"] = 1
   result["first"] = 1
+  result["second"] = 1
   result["last"] = 1
   result["pick"] = 2
   result["append"] = 2
@@ -102,6 +111,8 @@ proc initNativeArities(): Table[string, int] =
   result["select"] = 2
   result["has?"] = 2
   result["index?"] = 2
+  result["insert"] = 3
+  result["remove"] = 2
   # String ops
   result["join"] = 2
   result["rejoin"] = 1
@@ -110,6 +121,9 @@ proc initNativeArities(): Table[string, int] =
   result["lowercase"] = 1
   result["split"] = 2
   result["replace"] = 3
+  result["substring"] = 3
+  result["starts-with?"] = 2
+  result["ends-with?"] = 2
   # Math
   result["abs"] = 1
   result["negate"] = 1
@@ -122,6 +136,8 @@ proc initNativeArities(): Table[string, int] =
   # Homoiconic — do/compose/bind are compile errors in Lua mode
   result["do"] = 1
   result["reduce"] = 1
+  result["all"] = 1
+  result["any"] = 1
   # Function creation
   result["function"] = 2
   result["does"] = 1
@@ -129,6 +145,7 @@ proc initNativeArities(): Table[string, int] =
   result["context"] = 1
   result["freeze"] = 1
   result["frozen?"] = 1
+  result["words-of"] = 1
   # Type conversion
   result["to"] = 2
   # Apply
@@ -142,6 +159,19 @@ proc initNativeArities(): Table[string, int] =
   result["try"] = 1
   # Match
   result["match"] = 2
+  # Make
+  result["make"] = 2
+  # IO
+  result["read-file"] = 1
+  result["write-file"] = 2
+  result["load"] = 1
+  result["save"] = 2
+  result["require"] = 1
+  result["exports"] = 1
+  # Set operations
+  result["charset"] = 1
+  result["union"] = 2
+  result["intersect"] = 2
   # Loop is a dialect — handled specially, not via arity
 
 # ---------------------------------------------------------------------------
@@ -168,6 +198,8 @@ proc luaName(name: string): string =
 proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string
 proc emitBody(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false)
 proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue])
+proc emitMatchExpr(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValue]): string
+proc emitEitherExpr(e: var LuaEmitter, cond: string, trueBlock, falseBlock: seq[KtgValue]): string
 
 # ---------------------------------------------------------------------------
 # Infix operators
@@ -185,6 +217,16 @@ proc luaOp(op: string): string =
   of "and": "and"
   of "or": "or"
   else: op  # +, -, *, /, <, >, <=, >= are the same
+
+# ---------------------------------------------------------------------------
+# Path helper
+# ---------------------------------------------------------------------------
+
+proc emitPath(name: string): string =
+  let parts = name.split('/')
+  result = luaName(parts[0])
+  for i in 1 ..< parts.len:
+    result &= "." & luaName(parts[i])
 
 # ---------------------------------------------------------------------------
 # Emit a single literal value as a Lua expression string
@@ -224,10 +266,16 @@ proc emitLiteral(val: KtgValue): string =
 proc emitBlockLiteral(e: var LuaEmitter, vals: seq[KtgValue]): string =
   ## Emit a block's contents as a Lua table.
   ## Each element is emitted as a literal or word reference.
+  ## Uses _NONE instead of nil to preserve array indices.
   var parts: seq[string] = @[]
   var pos = 0
   while pos < vals.len:
-    parts.add(e.emitExpr(vals, pos))
+    let expr = e.emitExpr(vals, pos)
+    # Replace nil with _NONE in array contexts so Lua preserves the element
+    if expr == "nil":
+      parts.add("_NONE")
+    else:
+      parts.add(expr)
   "{" & parts.join(", ") & "}"
 
 # ---------------------------------------------------------------------------
@@ -274,12 +322,22 @@ proc emitFuncDef(e: var LuaEmitter, specBlock, bodyBlock: seq[KtgValue]): string
   let paramStr = params.join(", ")
   var funcStr = "function(" & paramStr & ")\n"
 
+  # Save and reset locals for the new function scope
+  let savedLocals = e.locals
+  e.locals = initHashSet[string]()
+  # Parameters are locals in the function scope
+  for p in params:
+    e.locals.incl(p)
+
   e.indent += 1
   # Emit body — last expression is implicit return
   e.emitBody(bodyBlock, asReturn = true)
   let bodyStr = e.output
   e.output = ""
   e.indent -= 1
+
+  # Restore outer locals
+  e.locals = savedLocals
 
   # Record arity for this function (caller will associate with name)
   funcStr &= bodyStr
@@ -402,6 +460,8 @@ proc emitLoop(e: var LuaEmitter, blk: seq[KtgValue]) =
 
   else:
     # Infinite loop: while true do ... end
+    # But first check if the content itself starts with control flow
+    # (the outer block IS the loop body)
     if blk.len > 0:
       e.ln("while true do")
       e.indent += 1
@@ -410,13 +470,11 @@ proc emitLoop(e: var LuaEmitter, blk: seq[KtgValue]) =
       e.ln("end")
 
 # ---------------------------------------------------------------------------
-# Emit match as if-chain
+# Emit match as if-chain (statement form)
 # ---------------------------------------------------------------------------
 
-proc emitMatch(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValue]) =
-  ## match value [...rules...]
-  ## Each rule is: [pattern] [handler] or [pattern] when [guard] [handler]
-  ## default: [handler]
+proc emitMatchStmt(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValue]) =
+  ## match value [...rules...] as a statement (no value produced)
   var pos = 0
   var first = true
 
@@ -535,6 +593,153 @@ proc emitMatch(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValue]) 
     e.ln("end")
 
 # ---------------------------------------------------------------------------
+# Emit match as expression (returns a value via IIFE)
+# ---------------------------------------------------------------------------
+
+proc emitMatchExpr(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValue]): string =
+  ## match value [...rules...] as an expression that produces a value.
+  ## Emits as (function() if ... return ... elseif ... return ... end end)()
+  var pos = 0
+  var first = true
+  var code = "(function()\n"
+  let baseIndent = e.pad
+
+  while pos < rulesBlock.len:
+    let current = rulesBlock[pos]
+
+    if current.kind == vkWord and current.wordKind == wkSetWord and
+       current.wordName == "default":
+      pos += 1
+      if pos < rulesBlock.len and rulesBlock[pos].kind == vkBlock:
+        if first:
+          # no condition needed
+          discard
+        else:
+          code &= baseIndent & "  else\n"
+        # emit handler body with return on last expr
+        let saved = e.output
+        e.output = ""
+        let savedIndent = e.indent
+        e.indent = e.indent + 2
+        e.emitBody(rulesBlock[pos].blockVals, asReturn = true)
+        code &= e.output
+        e.output = saved
+        e.indent = savedIndent
+        pos += 1
+      if not first:
+        code &= baseIndent & "  end\n"
+      continue
+
+    if current.kind != vkBlock:
+      pos += 1
+      continue
+
+    let pattern = current.blockVals
+    pos += 1
+
+    # Optional 'when' guard
+    var guardExpr = ""
+    if pos < rulesBlock.len and rulesBlock[pos].kind == vkWord and
+       rulesBlock[pos].wordKind == wkWord and rulesBlock[pos].wordName == "when":
+      pos += 1
+      if pos < rulesBlock.len and rulesBlock[pos].kind == vkBlock:
+        var gpos = 0
+        guardExpr = e.emitExpr(rulesBlock[pos].blockVals, gpos)
+        pos += 1
+
+    if pos >= rulesBlock.len or rulesBlock[pos].kind != vkBlock:
+      continue
+    let handler = rulesBlock[pos].blockVals
+    pos += 1
+
+    # Build condition
+    var conditions: seq[string] = @[]
+    var bindings: seq[(string, string)] = @[]
+
+    if pattern.len == 1:
+      let p = pattern[0]
+      case p.kind
+      of vkInteger, vkFloat, vkString, vkLogic, vkNone, vkMoney:
+        conditions.add(valueExpr & " == " & emitLiteral(p))
+      of vkWord:
+        if p.wordKind == wkWord and p.wordName == "_":
+          discard
+        elif p.wordKind == wkWord:
+          bindings.add((luaName(p.wordName), valueExpr))
+        elif p.wordKind == wkLitWord:
+          conditions.add(valueExpr & " == \"" & p.wordName & "\"")
+      else:
+        discard
+
+    if guardExpr.len > 0:
+      conditions.add(guardExpr)
+
+    let keyword = if first: "if" else: "elseif"
+    let condStr = if conditions.len > 0: conditions.join(" and ") else: "true"
+    code &= baseIndent & "  " & keyword & " " & condStr & " then\n"
+
+    # Emit bindings
+    for (name, expr) in bindings:
+      code &= baseIndent & "    local " & name & " = " & expr & "\n"
+
+    # Emit handler body with return
+    let saved = e.output
+    e.output = ""
+    let savedIndent = e.indent
+    e.indent = e.indent + 2
+    e.emitBody(handler, asReturn = true)
+    code &= e.output
+    e.output = saved
+    e.indent = savedIndent
+    first = false
+
+  if not first:
+    code &= baseIndent & "  end\n"
+  code &= baseIndent & "end)()"
+  result = code
+
+# ---------------------------------------------------------------------------
+# Emit either as expression
+# ---------------------------------------------------------------------------
+
+proc emitEitherExpr(e: var LuaEmitter, cond: string, trueBlock, falseBlock: seq[KtgValue]): string =
+  ## Emit either as expression. For simple single-expression blocks, use
+  ## the Lua ternary idiom (cond and trueVal or falseVal). For complex
+  ## blocks, use an IIFE.
+  # Check if both blocks are simple single expressions
+  if trueBlock.len <= 2 and falseBlock.len <= 2:
+    # Try simple ternary
+    var tpos = 0
+    let trueExpr = e.emitExpr(trueBlock, tpos)
+    var fpos = 0
+    let falseExpr = e.emitExpr(falseBlock, fpos)
+    # Simple ternary only works if true value is not false/nil
+    result = "(" & cond & " and " & trueExpr & " or " & falseExpr & ")"
+  else:
+    # Complex: use IIFE
+    let baseIndent = e.pad
+    var code = "(function()\n"
+    code &= baseIndent & "  if " & cond & " then\n"
+    let saved = e.output
+    e.output = ""
+    let savedIndent = e.indent
+    e.indent = e.indent + 2
+    e.emitBody(trueBlock, asReturn = true)
+    code &= e.output
+    e.output = saved
+    e.indent = savedIndent
+    code &= baseIndent & "  else\n"
+    e.output = ""
+    e.indent = e.indent + 2
+    e.emitBody(falseBlock, asReturn = true)
+    code &= e.output
+    e.output = saved
+    e.indent = savedIndent
+    code &= baseIndent & "  end\n"
+    code &= baseIndent & "end)()"
+    result = code
+
+# ---------------------------------------------------------------------------
 # Compile-error guards for interpreter-only features
 # ---------------------------------------------------------------------------
 
@@ -548,12 +753,56 @@ proc compileError(feature, hint: string, line: int) =
   )
 
 # ---------------------------------------------------------------------------
+# Check if a word-name refers to a "none?" type predicate
+# ---------------------------------------------------------------------------
+
+proc isTypePredicate(name: string): bool =
+  ## Return true if name is a type-predicate like "none?", "integer?", etc.
+  name.endsWith("?") and name[0..^2] in [
+    "none", "integer", "float", "string", "logic", "money",
+    "pair", "tuple", "date", "time", "file", "url", "email",
+    "block", "paren", "map", "set", "context", "object",
+    "function", "native", "word", "type", "number"
+  ]
+
+proc needsParens(expr: string): bool =
+  ## Check if an expression needs wrapping in parens for use as an operand.
+  ## Needed when the expression contains and/or which have lower precedence than ==.
+  " and " in expr or " or " in expr
+
+proc emitTypePredicateCall(name: string, argExpr: string): string =
+  ## Emit a type predicate as an efficient Lua expression.
+  let baseName = name[0..^2]  # strip trailing ?
+  let safeArg = if needsParens(argExpr): "(" & argExpr & ")" else: argExpr
+  case baseName
+  of "none":
+    result = "_is_none(" & safeArg & ")"
+  of "integer":
+    result = "(type(" & argExpr & ") == \"number\" and math.floor(" & argExpr & ") == " & argExpr & ")"
+  of "float":
+    result = "(type(" & argExpr & ") == \"number\")"
+  of "string":
+    result = "(type(" & argExpr & ") == \"string\")"
+  of "logic":
+    result = "(type(" & argExpr & ") == \"boolean\")"
+  of "block", "context", "object", "map":
+    result = "(type(" & argExpr & ") == \"table\")"
+  of "function", "native":
+    result = "(type(" & argExpr & ") == \"function\")"
+  of "number":
+    result = "(type(" & argExpr & ") == \"number\")"
+  else:
+    # Generic fallback
+    result = "(type(" & argExpr & ") == \"" & baseName & "\")"
+
+# ---------------------------------------------------------------------------
 # Core expression emitter — returns a Lua expression string
 # ---------------------------------------------------------------------------
 
 proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   ## Emit the next expression from vals starting at pos. Returns a Lua
   ## expression string and advances pos past the consumed values.
+  ## Greedily consumes infix operators (matching evaluator's evalNext + applyInfix).
   if pos >= vals.len:
     return "nil"
 
@@ -603,15 +852,17 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
     of wkWord:
       let name = val.wordName
 
-      # --- Path access: obj/field/sub ---
-      if name.contains('/'):
-        let parts = name.split('/')
-        var path = luaName(parts[0])
-        for i in 1 ..< parts.len:
-          path &= "." & luaName(parts[i])
-        result = path
+      # --- Known refinement calls (before generic path handling) ---
+      if name == "round/down":
+        let arg = e.emitExpr(vals, pos)
+        result = "math.floor(" & arg & ")"
+      elif name == "round/up":
+        let arg = e.emitExpr(vals, pos)
+        result = "math.ceil(" & arg & ")"
 
-        # Check if next is infix
+      # --- Path access: obj/field/sub ---
+      elif name.contains('/'):
+        result = emitPath(name)
         # (fall through to infix handling below)
 
       # --- Interpreter-only features: compile error ---
@@ -622,17 +873,14 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
         compileError("bind", "bind is not available in compiled Lua output", val.line)
 
       elif name == "compose":
-        # compose on literal blocks could be resolved, but for now reject all
         compileError("compose", "use #preprocess for compile-time block composition", val.line)
 
       # --- No-ops: freeze/frozen? ---
       elif name == "freeze":
-        # consume the arg, emit it directly (no-op)
         result = e.emitExpr(vals, pos)
 
       elif name == "frozen?":
-        # Always false in compiled output
-        discard e.emitExpr(vals, pos)  # consume arg
+        discard e.emitExpr(vals, pos)
         result = "false"
 
       # --- print ---
@@ -643,13 +891,16 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
       # --- probe (returns value) ---
       elif name == "probe":
         let arg = e.emitExpr(vals, pos)
-        # probe prints and returns — wrap in a helper or just print
         result = "(function() local _v = " & arg & "; print(_v); return _v end)()"
 
       # --- not ---
       elif name == "not":
         let arg = e.emitExpr(vals, pos)
-        result = "not " & arg
+        # Wrap predicate calls in parens to ensure correct precedence
+        if arg.startsWith("(") or arg.startsWith("not "):
+          result = "not " & arg
+        else:
+          result = "not (" & arg & ")"
 
       # --- return ---
       elif name == "return":
@@ -659,12 +910,9 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
       # --- if: condition block ---
       elif name == "if":
         let cond = e.emitExpr(vals, pos)
-        # Next should be a block for the true branch
         if pos < vals.len and vals[pos].kind == vkBlock:
           let bodyBlock = vals[pos].blockVals
           pos += 1
-          # For expression context, use Lua's `(function() if ... end)()`
-          # This is the expression form; statement form is handled in emitBlock
           var bodyOut = ""
           e.indent += 1
           let saved = e.output
@@ -682,31 +930,15 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
       # --- either: condition true-block false-block ---
       elif name == "either":
         let cond = e.emitExpr(vals, pos)
-        var trueExpr = "nil"
-        var falseExpr = "nil"
+        var trueBlock: seq[KtgValue] = @[]
+        var falseBlock: seq[KtgValue] = @[]
         if pos < vals.len and vals[pos].kind == vkBlock:
-          let tb = vals[pos].blockVals
+          trueBlock = vals[pos].blockVals
           pos += 1
-          if tb.len == 1:
-            var tpos = 0
-            trueExpr = e.emitExpr(tb, tpos)
-          else:
-            var tpos = 0
-            # Multi-expression block — last value is the result
-            while tpos < tb.len:
-              trueExpr = e.emitExpr(tb, tpos)
         if pos < vals.len and vals[pos].kind == vkBlock:
-          let fb = vals[pos].blockVals
+          falseBlock = vals[pos].blockVals
           pos += 1
-          if fb.len == 1:
-            var fpos = 0
-            falseExpr = e.emitExpr(fb, fpos)
-          else:
-            var fpos = 0
-            while fpos < fb.len:
-              falseExpr = e.emitExpr(fb, fpos)
-        # Lua ternary idiom
-        result = "(" & cond & " and " & trueExpr & " or " & falseExpr & ")"
+        result = e.emitEitherExpr(cond, trueBlock, falseBlock)
 
       # --- function definition ---
       elif name == "function":
@@ -747,14 +979,11 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
         if pos < vals.len and vals[pos].kind == vkBlock:
           let blk = vals[pos].blockVals
           pos += 1
-          # Loop is a statement — emit directly. In expression context this
-          # is unusual but handle it by emitting nil.
           let saved = e.output
           e.output = ""
           e.emitLoop(blk)
           let loopCode = e.output
           e.output = saved
-          # Can't easily be an expression; emit inline
           e.raw(loopCode)
           result = "nil"
         else:
@@ -766,13 +995,8 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
         if pos < vals.len and vals[pos].kind == vkBlock:
           let rulesBlock = vals[pos].blockVals
           pos += 1
-          let saved = e.output
-          e.output = ""
-          e.emitMatch(valueExpr, rulesBlock)
-          let matchCode = e.output
-          e.output = saved
-          e.raw(matchCode)
-          result = "nil"
+          # match in expression context -> returns a value
+          result = e.emitMatchExpr(valueExpr, rulesBlock)
         else:
           result = "nil"
 
@@ -783,13 +1007,26 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
         result = "tostring(" & a & ") .. tostring(" & b & ")"
 
       elif name == "rejoin":
-        let arg = e.emitExpr(vals, pos)
-        # rejoin on a table — concatenate all elements
-        result = "table.concat(" & arg & ")"
+        # rejoin on a block — build a table.concat with tostring on each element
+        if pos < vals.len and vals[pos].kind == vkBlock:
+          let blk = vals[pos].blockVals
+          pos += 1
+          var parts: seq[string] = @[]
+          var bpos = 0
+          while bpos < blk.len:
+            let elem = e.emitExpr(blk, bpos)
+            # Strings don't need tostring, everything else does
+            if elem.startsWith("\""):
+              parts.add(elem)
+            else:
+              parts.add("tostring(" & elem & ")")
+          result = "table.concat({" & parts.join(", ") & "})"
+        else:
+          let arg = e.emitExpr(vals, pos)
+          result = "table.concat(" & arg & ")"
 
       elif name == "trim":
         let arg = e.emitExpr(vals, pos)
-        # Lua string trim idiom
         result = arg & ":match(\"^%s*(.-)%s*$\")"
 
       elif name == "uppercase":
@@ -803,8 +1040,6 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
       elif name == "split":
         let str = e.emitExpr(vals, pos)
         let delim = e.emitExpr(vals, pos)
-        # Emit a self-contained split. We use a local closure to avoid
-        # polluting scope.
         result = "(function()" &
                  " local r,s,d={}, " & str & ", " & delim &
                  "; for m in (s..d):gmatch(\"(.-)\"..d) do r[#r+1]=m end" &
@@ -829,6 +1064,10 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
         let arg = e.emitExpr(vals, pos)
         result = arg & "[1]"
 
+      elif name == "second":
+        let arg = e.emitExpr(vals, pos)
+        result = arg & "[2]"
+
       elif name == "last":
         let arg = e.emitExpr(vals, pos)
         result = arg & "[#" & arg & "]"
@@ -847,6 +1086,17 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
         let arg = e.emitExpr(vals, pos)
         result = "(function() local r={}; for i,v in ipairs(" & arg & ") do r[i]=v end; return r end)()"
 
+      elif name == "insert":
+        let blk = e.emitExpr(vals, pos)
+        let val_expr = e.emitExpr(vals, pos)
+        let idx_expr = e.emitExpr(vals, pos)
+        result = "(function() table.insert(" & blk & ", " & idx_expr & ", " & val_expr & "); return " & blk & " end)()"
+
+      elif name == "remove":
+        let blk = e.emitExpr(vals, pos)
+        let idx_expr = e.emitExpr(vals, pos)
+        result = "(function() table.remove(" & blk & ", " & idx_expr & "); return " & blk & " end)()"
+
       elif name == "select":
         let blk = e.emitExpr(vals, pos)
         let key = e.emitExpr(vals, pos)
@@ -855,13 +1105,17 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
       elif name == "has?":
         let blk = e.emitExpr(vals, pos)
         let val_expr = e.emitExpr(vals, pos)
-        # Generic — works for table key check
         result = "(" & blk & "[" & val_expr & "] ~= nil)"
 
       elif name == "index?":
         let blk = e.emitExpr(vals, pos)
         let val_expr = e.emitExpr(vals, pos)
         result = "(function() for i,v in ipairs(" & blk & ") do if v == " & val_expr & " then return i end end; return nil end)()"
+
+      # --- Type predicates (none?, integer?, etc.) ---
+      elif isTypePredicate(name):
+        let arg = e.emitExpr(vals, pos)
+        result = emitTypePredicateCall(name, arg)
 
       # --- Math ---
       elif name == "abs":
@@ -885,7 +1139,6 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
       elif name == "round":
         let arg = e.emitExpr(vals, pos)
         result = "math.floor(" & arg & " + 0.5)"
-
       elif name == "odd?":
         let arg = e.emitExpr(vals, pos)
         result = "(" & arg & " % 2 ~= 0)"
@@ -900,10 +1153,17 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
 
       # --- Type conversion ---
       elif name == "to":
-        discard e.emitExpr(vals, pos)
+        let typeExpr = e.emitExpr(vals, pos)
         let val_expr = e.emitExpr(vals, pos)
-        # Best-effort type conversion
-        result = "tonumber(" & val_expr & ") or " & val_expr
+        # Best-effort type conversion based on target type
+        if typeExpr == "\"string!\"":
+          result = "tostring(" & val_expr & ")"
+        elif typeExpr == "\"integer!\"":
+          result = "math.floor(tonumber(" & val_expr & "))"
+        elif typeExpr == "\"float!\"":
+          result = "tonumber(" & val_expr & ")"
+        else:
+          result = "tonumber(" & val_expr & ") or " & val_expr
 
       # --- Type introspection (erased — emit as string for now) ---
       elif name == "type":
@@ -940,22 +1200,18 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
       # --- apply ---
       elif name == "apply":
         let fn = e.emitExpr(vals, pos)
-        let args = e.emitExpr(vals, pos)
-        result = fn & "(unpack(" & args & "))"
+        let args_expr = e.emitExpr(vals, pos)
+        result = fn & "(unpack(" & args_expr & "))"
 
       # --- reduce ---
       elif name == "reduce":
         let arg = e.emitExpr(vals, pos)
-        # In compiled context, reduce on a literal block means evaluate each
-        # element. Best we can do: return the block as-is since elements are
-        # already expressions.
         result = arg
 
       # --- Generic function call or variable reference ---
       else:
         let a = e.arity(name)
         if a > 0:
-          # Known function — consume args
           var args: seq[string] = @[]
           for i in 0 ..< a:
             args.add(e.emitExpr(vals, pos))
@@ -963,12 +1219,6 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
         elif a == 0:
           result = luaName(name) & "()"
         else:
-          # Unknown — could be a variable or a user-defined function.
-          # Peek ahead: if there are remaining values and next is NOT
-          # an infix operator and NOT a set-word (i.e., looks like an arg),
-          # heuristically assume it's a function call. But this is fragile.
-          # For now: just emit as a variable reference. User-defined function
-          # arities are tracked when we see the definition.
           result = luaName(name)
 
   # --- Types, files, urls, emails — emit as string literals ---
@@ -1033,10 +1283,22 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
   while pos < vals.len:
     let val = vals[pos]
 
-    # --- Set-word at statement level: local name = expr ---
+    # --- Set-word at statement level ---
     if val.kind == vkWord and val.wordKind == wkSetWord:
-      let name = luaName(val.wordName)
+      let rawName = val.wordName
+      let isPath = rawName.contains('/')
+      let name = if isPath:
+                   emitPath(rawName)
+                 else:
+                   luaName(rawName)
+      let prefix = if isPath: ""            # globals: no 'local'
+                   elif name in e.locals: "" # already declared: no 'local'
+                   else: "local "
       pos += 1
+
+      # Track this as a local declaration (unless it's a path)
+      if not isPath:
+        e.locals.incl(name)
 
       # Check if RHS is a function definition
       if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkWord and
@@ -1062,12 +1324,20 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
             i += 1
 
           # Track arity for this function
-          e.arities[val.wordName] = params.len
+          e.arities[rawName] = params.len
 
-          e.ln("local function " & name & "(" & params.join(", ") & ")")
+          if isPath:
+            e.ln(name & " = function(" & params.join(", ") & ")")
+          else:
+            e.ln(prefix & "function " & name & "(" & params.join(", ") & ")")
+          let savedLocals = e.locals
+          e.locals = initHashSet[string]()
+          for p in params:
+            e.locals.incl(p)
           e.indent += 1
-          e.emitBody(bodyBlock, asReturn = true)
+          e.emitBody(bodyBlock, asReturn = not isPath)
           e.indent -= 1
+          e.locals = savedLocals
           e.ln("end")
           continue
 
@@ -1078,17 +1348,53 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
         if pos < vals.len and vals[pos].kind == vkBlock:
           let bodyBlock = vals[pos].blockVals
           pos += 1
-          e.arities[val.wordName] = 0
-          e.ln("local function " & name & "()")
+          e.arities[rawName] = 0
+          if isPath:
+            e.ln(name & " = function()")
+          else:
+            e.ln(prefix & "function " & name & "()")
+          let savedLocals = e.locals
+          e.locals = initHashSet[string]()
           e.indent += 1
-          e.emitBody(bodyBlock, asReturn = true)
+          # Path assignments (love.draw etc) don't need implicit return
+          e.emitBody(bodyBlock, asReturn = not isPath)
           e.indent -= 1
+          e.locals = savedLocals
           e.ln("end")
           continue
 
+      # Check if RHS is a match expression
+      if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkWord and
+         vals[pos].wordName == "match":
+        pos += 1
+        let valueExpr = e.emitExpr(vals, pos)
+        if pos < vals.len and vals[pos].kind == vkBlock:
+          let rulesBlock = vals[pos].blockVals
+          pos += 1
+          let matchExpr = e.emitMatchExpr(valueExpr, rulesBlock)
+          e.ln(prefix & name & " = " & matchExpr)
+          continue
+
+      # Check if RHS is an either expression
+      if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkWord and
+         vals[pos].wordName == "either":
+        pos += 1
+        let cond = e.emitExpr(vals, pos)
+        var trueBlock: seq[KtgValue] = @[]
+        var falseBlock: seq[KtgValue] = @[]
+        if pos < vals.len and vals[pos].kind == vkBlock:
+          trueBlock = vals[pos].blockVals
+          pos += 1
+        if pos < vals.len and vals[pos].kind == vkBlock:
+          falseBlock = vals[pos].blockVals
+          pos += 1
+        let eitherExpr = e.emitEitherExpr(cond, trueBlock, falseBlock)
+        e.ln(prefix & name & " = " & eitherExpr)
+        continue
+
       # Regular assignment
       let expr = e.emitExpr(vals, pos)
-      e.ln("local " & name & " = " & expr)
+      e.ln(prefix & name & " = " & expr)
       continue
 
     # --- Control flow as statements ---
@@ -1169,7 +1475,7 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
       if pos < vals.len and vals[pos].kind == vkBlock:
         let rulesBlock = vals[pos].blockVals
         pos += 1
-        e.emitMatch(valueExpr, rulesBlock)
+        e.emitMatchStmt(valueExpr, rulesBlock)
         continue
 
     # --- print as statement ---
@@ -1179,10 +1485,255 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
       e.ln("print(" & arg & ")")
       continue
 
+    # --- Path call as statement (e.g., love/graphics/setColor 1.0 0.0 0.0) ---
+    # Only treat as a function call if the path has known arity > 0 or there
+    # are arguments following it. Otherwise treat as a plain expression.
+    if val.kind == vkWord and val.wordKind == wkWord and val.wordName.contains('/'):
+      let path = emitPath(val.wordName)
+      let pathArity = e.arity(val.wordName)
+      if pathArity >= 0:
+        # Known function at this path — consume args
+        pos += 1
+        var args: seq[string] = @[]
+        for i in 0 ..< pathArity:
+          args.add(e.emitExpr(vals, pos))
+        e.ln(path & "(" & args.join(", ") & ")")
+        continue
+      else:
+        # Check if followed by arguments (heuristic: next value is not a keyword/set-word/end)
+        pos += 1
+        var args: seq[string] = @[]
+        while pos < vals.len:
+          let next = vals[pos]
+          if next.kind == vkWord and next.wordKind == wkSetWord: break
+          if next.kind == vkWord and next.wordKind == wkMetaWord: break
+          if next.kind == vkWord and next.wordKind == wkWord and
+             next.wordName in ["if", "either", "unless", "loop", "match",
+                                "print", "return", "break", "error", "try"]: break
+          if next.kind == vkWord and next.wordKind == wkWord and next.wordName.contains('/'): break
+          if next.kind == vkBlock: break  # blocks are not args to unknown path calls
+          args.add(e.emitExpr(vals, pos))
+        if args.len > 0:
+          e.ln(path & "(" & args.join(", ") & ")")
+        else:
+          e.ln(path)
+        continue
+
+    # --- Mutating series operations as statements ---
+    if val.kind == vkWord and val.wordKind == wkWord and val.wordName == "remove":
+      pos += 1
+      let blk = e.emitExpr(vals, pos)
+      let idx = e.emitExpr(vals, pos)
+      e.ln("table.remove(" & blk & ", " & idx & ")")
+      continue
+
+    if val.kind == vkWord and val.wordKind == wkWord and val.wordName == "insert":
+      pos += 1
+      let blk = e.emitExpr(vals, pos)
+      let val_expr = e.emitExpr(vals, pos)
+      let idx = e.emitExpr(vals, pos)
+      e.ln("table.insert(" & blk & ", " & idx & ", " & val_expr & ")")
+      continue
+
+    if val.kind == vkWord and val.wordKind == wkWord and val.wordName == "append":
+      pos += 1
+      let blk = e.emitExpr(vals, pos)
+      let val_expr = e.emitExpr(vals, pos)
+      e.ln("table.insert(" & blk & ", " & val_expr & ")")
+      continue
+
     # --- Generic expression as statement ---
     let expr = e.emitExpr(vals, pos)
     if expr.len > 0 and expr != "nil":
-      e.ln(expr)
+      # In Lua, a statement starting with ( is ambiguous (could be function call
+      # on previous expression). Prefix with ; to disambiguate.
+      if expr.startsWith("("):
+        e.ln(";" & expr)
+      else:
+        e.ln(expr)
+
+proc emitBlockReturn(e: var LuaEmitter, vals: seq[KtgValue]) =
+  ## Like emitBlock but adds implicit return to the last expression.
+  ## Walks the AST to find statement boundaries, emits all but the last
+  ## statement normally, then handles the last statement with return.
+  if vals.len == 0:
+    return
+
+  # Walk through to find each statement's starting position
+  var stmtStarts: seq[int] = @[]
+  var pos = 0
+  while pos < vals.len:
+    stmtStarts.add(pos)
+    let val = vals[pos]
+
+    # Skip Kintsugi header block (e.g., Kintsugi [...])
+    if val.kind == vkWord and val.wordKind == wkWord and val.wordName == "Kintsugi":
+      pos += 1
+      if pos < vals.len and vals[pos].kind == vkBlock:
+        pos += 1
+      continue
+
+    # Set-word: name + value (value may consume multiple tokens)
+    if val.kind == vkWord and val.wordKind == wkSetWord:
+      pos += 1
+      # Consume the RHS expression to find where next statement starts
+      let saved = e.output
+      e.output = ""
+      discard e.emitExpr(vals, pos)
+      e.output = saved
+      continue
+
+    # Keywords with known structure
+    if val.kind == vkWord and val.wordKind == wkWord:
+      case val.wordName
+      of "if", "unless":
+        pos += 1
+        let saved = e.output; e.output = ""
+        discard e.emitExpr(vals, pos)  # condition
+        e.output = saved
+        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1  # body block
+        continue
+      of "either":
+        pos += 1
+        let saved = e.output; e.output = ""
+        discard e.emitExpr(vals, pos)  # condition
+        e.output = saved
+        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1  # true block
+        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1  # false block
+        continue
+      of "loop":
+        pos += 1
+        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+        continue
+      of "match":
+        pos += 1
+        let saved = e.output; e.output = ""
+        discard e.emitExpr(vals, pos)  # value
+        e.output = saved
+        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1  # rules
+        continue
+      of "return":
+        pos += 1
+        let saved = e.output; e.output = ""
+        discard e.emitExpr(vals, pos)
+        e.output = saved
+        continue
+      of "break":
+        pos += 1
+        continue
+      of "print":
+        pos += 1
+        let saved = e.output; e.output = ""
+        discard e.emitExpr(vals, pos)
+        e.output = saved
+        continue
+      else: discard
+
+    # Generic expression
+    let saved = e.output; e.output = ""
+    discard e.emitExpr(vals, pos)
+    e.output = saved
+
+  if stmtStarts.len == 0:
+    return
+
+  # Emit all statements except the last normally
+  let lastStart = stmtStarts[^1]
+  if lastStart > 0:
+    e.emitBlock(vals[0 ..< lastStart])
+
+  # Now handle the last statement with implicit return
+  let lastVals = vals[lastStart .. ^1]
+  if lastVals.len == 0:
+    return
+
+  let lastVal = lastVals[0]
+
+  # If last statement starts with return or break, just emit normally
+  if lastVal.kind == vkWord and lastVal.wordKind == wkWord and
+     lastVal.wordName in ["return", "break"]:
+    e.emitBlock(lastVals)
+    return
+
+  # If last statement is a set-word, emit the assignment then return the variable
+  if lastVal.kind == vkWord and lastVal.wordKind == wkSetWord:
+    e.emitBlock(lastVals)
+    let name = if lastVal.wordName.contains('/'):
+                 emitPath(lastVal.wordName)
+               else:
+                 luaName(lastVal.wordName)
+    e.ln("return " & name)
+    return
+
+  # If last statement is if/unless, emit with return inside the block
+  if lastVal.kind == vkWord and lastVal.wordKind == wkWord and
+     lastVal.wordName in ["if", "unless"]:
+    var lpos = 1
+    let cond = e.emitExpr(lastVals, lpos)
+    if lpos < lastVals.len and lastVals[lpos].kind == vkBlock:
+      let body = lastVals[lpos].blockVals
+      if lastVal.wordName == "unless":
+        e.ln("if not (" & cond & ") then")
+      else:
+        e.ln("if " & cond & " then")
+      e.indent += 1
+      e.emitBlockReturn(body)
+      e.indent -= 1
+      e.ln("end")
+      return
+
+  # If last statement is either, emit with return in both branches
+  if lastVal.kind == vkWord and lastVal.wordKind == wkWord and
+     lastVal.wordName == "either":
+    var lpos = 1
+    let cond = e.emitExpr(lastVals, lpos)
+    var trueBlock: seq[KtgValue] = @[]
+    var falseBlock: seq[KtgValue] = @[]
+    if lpos < lastVals.len and lastVals[lpos].kind == vkBlock:
+      trueBlock = lastVals[lpos].blockVals
+      lpos += 1
+    if lpos < lastVals.len and lastVals[lpos].kind == vkBlock:
+      falseBlock = lastVals[lpos].blockVals
+    e.ln("if " & cond & " then")
+    e.indent += 1
+    e.emitBlockReturn(trueBlock)
+    e.indent -= 1
+    e.ln("else")
+    e.indent += 1
+    e.emitBlockReturn(falseBlock)
+    e.indent -= 1
+    e.ln("end")
+    return
+
+  # If last statement is match, emit with return in handlers
+  if lastVal.kind == vkWord and lastVal.wordKind == wkWord and
+     lastVal.wordName == "match":
+    var lpos = 1
+    let valueExpr = e.emitExpr(lastVals, lpos)
+    if lpos < lastVals.len and lastVals[lpos].kind == vkBlock:
+      let rulesBlock = lastVals[lpos].blockVals
+      # Emit match as if-chain with returns
+      e.emitMatchStmt(valueExpr, rulesBlock)
+      # TODO: add return inside each handler
+      return
+
+  # If last statement is loop, emit normally (loops don't produce values)
+  if lastVal.kind == vkWord and lastVal.wordKind == wkWord and
+     lastVal.wordName == "loop":
+    e.emitBlock(lastVals)
+    return
+
+  # If last statement is print, emit normally (print returns none)
+  if lastVal.kind == vkWord and lastVal.wordKind == wkWord and
+     lastVal.wordName == "print":
+    e.emitBlock(lastVals)
+    return
+
+  # Generic expression: emit with return
+  var lpos = 0
+  let expr = e.emitExpr(lastVals, lpos)
+  if expr != "nil":
+    e.ln("return " & expr)
 
 proc emitBody(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
   ## Emit a function body. If asReturn is true, the last expression gets
@@ -1194,56 +1745,42 @@ proc emitBody(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
     e.emitBlock(vals)
     return
 
-  # Find the last "statement" boundary: we need to emit all but the last
-  # statement normally, then emit the last one with a return.
-  # Simple heuristic: walk through and track statement boundaries.
-  # For now, we emit all statements, then patch the last line.
-
-  # Strategy: emit everything, capture the output, and prepend "return" to
-  # the last non-empty line if it doesn't already have return/break/if/for/end.
-  let saved = e.output
-  e.output = ""
-  e.emitBlock(vals)
-  var lines = e.output.splitLines()
-  e.output = saved
-
-  # Find last non-empty, non-end line
-  var lastIdx = -1
-  for i in countdown(lines.len - 1, 0):
-    let stripped = lines[i].strip()
-    if stripped.len > 0 and stripped != "end" and
-       not stripped.startsWith("if ") and
-       not stripped.startsWith("elseif ") and
-       not stripped.startsWith("else") and
-       not stripped.startsWith("for ") and
-       not stripped.startsWith("while ") and
-       not stripped.startsWith("local function ") and
-       not stripped.startsWith("return ") and
-       not stripped.startsWith("break"):
-      lastIdx = i
-      break
-
-  if lastIdx >= 0:
-    let stripped = lines[lastIdx].strip()
-    # Don't add return to lines that are already control structures
-    if not stripped.startsWith("local "):
-      let indent_str = lines[lastIdx][0 ..< lines[lastIdx].len - stripped.len]
-      lines[lastIdx] = indent_str & "return " & stripped
-    else:
-      # For `local x = expr`, add return x after
-      let parts = stripped.split(" = ", maxsplit = 1)
-      if parts.len >= 1:
-        let varDecl = parts[0]  # "local x"
-        let varName = varDecl.replace("local ", "").strip()
-        lines.insert(lines[lastIdx][0 ..< lines[lastIdx].len - stripped.len] & "return " & varName, lastIdx + 1)
-
-  for line in lines:
-    if line.len > 0:
-      e.raw(line & "\n")
+  e.emitBlockReturn(vals)
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+const LuaPrelude = """-- Kintsugi runtime support
+local _NONE = setmetatable({}, {__tostring = function() return "none" end})
+local function _is_none(v) return v == nil or v == _NONE end
+"""
+
+proc prescanArities(e: var LuaEmitter, ast: seq[KtgValue]) =
+  ## Pre-scan the AST to collect user-defined function arities.
+  ## This handles forward references (calling a function before it's defined).
+  var i = 0
+  while i < ast.len:
+    if ast[i].kind == vkWord and ast[i].wordKind == wkSetWord:
+      let name = ast[i].wordName
+      # name: function [params...] [body]
+      if i + 1 < ast.len and ast[i + 1].kind == vkWord and
+         ast[i + 1].wordKind == wkWord and ast[i + 1].wordName == "function":
+        if i + 2 < ast.len and ast[i + 2].kind == vkBlock:
+          var paramCount = 0
+          for s in ast[i + 2].blockVals:
+            if s.kind == vkWord and s.wordKind == wkWord:
+              paramCount += 1
+          e.arities[name] = paramCount
+          i += 4  # skip name, function, spec, body
+          continue
+      # name: does [body]
+      if i + 1 < ast.len and ast[i + 1].kind == vkWord and
+         ast[i + 1].wordKind == wkWord and ast[i + 1].wordName == "does":
+        e.arities[name] = 0
+        i += 3  # skip name, does, body
+        continue
+    i += 1
 
 proc emitLua*(ast: seq[KtgValue]): string =
   ## Walk the AST and produce Lua source code.
@@ -1252,130 +1789,6 @@ proc emitLua*(ast: seq[KtgValue]): string =
     output: "",
     arities: initNativeArities()
   )
+  e.prescanArities(ast)
   e.emitBlock(ast)
-  e.output
-
-
-# ---------------------------------------------------------------------------
-# Test cases (as comments)
-# ---------------------------------------------------------------------------
-
-# Input Kintsugi:
-#   x: 42
-# Expected Lua:
-#   local x = 42
-#
-# Input Kintsugi:
-#   x: 1 + 2
-# Expected Lua:
-#   local x = 1 + 2
-#
-# Input Kintsugi:
-#   add: function [a b] [a + b]
-# Expected Lua:
-#   local function add(a, b)
-#     return a + b
-#   end
-#
-# Input Kintsugi:
-#   print "hello"
-# Expected Lua:
-#   print("hello")
-#
-# Input Kintsugi:
-#   if x > 10 [print "big"]
-# Expected Lua:
-#   if x > 10 then
-#     print("big")
-#   end
-#
-# Input Kintsugi:
-#   either x > 0 [print "pos"] [print "neg"]
-# Expected Lua:
-#   if x > 0 then
-#     print("pos")
-#   else
-#     print("neg")
-#   end
-#
-# Input Kintsugi:
-#   loop [for [i] from 1 to 10 [print i]]
-# Expected Lua:
-#   for i = 1, 10 do
-#     print(i)
-#   end
-#
-# Input Kintsugi:
-#   loop [for [item] in items [print item]]
-# Expected Lua:
-#   for _, item in ipairs(items) do
-#     print(item)
-#   end
-#
-# Input Kintsugi:
-#   match x [
-#     [1] [print "one"]
-#     [2] [print "two"]
-#     default: [print "other"]
-#   ]
-# Expected Lua:
-#   if x == 1 then
-#     print("one")
-#   elseif x == 2 then
-#     print("two")
-#   else
-#     print("other")
-#   end
-#
-# Input Kintsugi:
-#   player: context [
-#     name: "Ray"
-#     score: 0
-#   ]
-# Expected Lua:
-#   local player = {
-#     name = "Ray",
-#     score = 0
-#   }
-#
-# Input Kintsugi:
-#   pos: 100x200
-# Expected Lua:
-#   local pos = {x=100, y=200}
-#
-# Input Kintsugi:
-#   price: $12.50
-# Expected Lua:
-#   local price = 1250
-#
-# Input Kintsugi:
-#   greet: does [print "hello"]
-# Expected Lua:
-#   local function greet()
-#     return print("hello")
-#   end
-#
-# Input Kintsugi:
-#   player/name
-# Expected Lua:
-#   player.name
-#
-# Input Kintsugi:
-#   items: [1 2 3]
-# Expected Lua:
-#   local items = {1, 2, 3}
-#
-# Input Kintsugi:
-#   n: size? items
-# Expected Lua:
-#   local n = #items
-#
-# Input Kintsugi:
-#   freeze obj
-# Expected Lua:
-#   obj
-#
-# Input Kintsugi:
-#   frozen? obj
-# Expected Lua:
-#   false
+  LuaPrelude & e.output

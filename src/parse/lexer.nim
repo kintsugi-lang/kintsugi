@@ -228,8 +228,8 @@ proc nextToken*(lex: var Lexer): KtgValue =
   if ch == '$':
     return lex.readMoney(startLine)
 
-  # file path (% followed by word char) vs modulo operator (% followed by space/digit)
-  if ch == '%' and (lex.peekAt(1).isAlpha or lex.peekAt(1) == '"'):
+  # file path vs modulo: % followed by whitespace/end = modulo, anything else = file path
+  if ch == '%' and lex.peekAt(1) notin {' ', '\t', '\r', '\n', '\0'}:
     return ktgFile(lex.readFilePath, startLine)
 
   # numbers (and pair, tuple, date, time)
@@ -258,7 +258,7 @@ proc nextToken*(lex: var Lexer): KtgValue =
       return KtgValue(kind: vkOp, opFn: nil, opSymbol: ">=", line: startLine)
     return KtgValue(kind: vkOp, opFn: nil, opSymbol: ">", line: startLine)
 
-  if ch == '%':
+  if ch == '%':  # only reached when followed by whitespace/end (file path caught above)
     discard lex.advance
     return KtgValue(kind: vkOp, opFn: nil, opSymbol: "%", line: startLine)
 

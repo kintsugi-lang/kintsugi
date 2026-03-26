@@ -1,18 +1,20 @@
 import ../src/core/types
-import ../src/eval/[dialect, evaluator, natives]
-import ../src/dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect, parse_dialect]
+import ../src/parse/[lexer, parser]
+import ../src/emit/lua
 
-let eval = newEvaluator()
-eval.registerNatives()
-eval.registerDialect(newLoopDialect())
-eval.registerMatch()
-eval.registerObjectDialect()
-eval.registerAttempt()
-eval.registerParse()
+let src = """
+  either true [
+    msg: "hi"
+    love/graphics/printf msg 0 475 480 "center"
+  ] [
+    love/graphics/printf "bye" 0 475 480 "center"
+  ]
+"""
+let ast = parseSource(src)
+echo "AST len: ", ast.len
+for v in ast:
+  echo "  ", v.kind, " ", (if v.kind == vkWord: v.wordName else: $v)
 
-echo "--- #preprocess test ---"
-try:
-  discard eval.evalString("#preprocess [emit [x: 42]]")
-  echo "x = " & $eval.evalString("x")
-except KtgError as e:
-  echo "ERROR: " & e.kind & " - " & e.msg
+echo ""
+echo "--- Lua ---"
+echo emitLua(ast)

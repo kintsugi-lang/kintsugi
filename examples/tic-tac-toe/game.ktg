@@ -1,0 +1,45 @@
+Kintsugi [
+  name: 'game
+  exports: [Game]
+]
+
+; --- Game State ---
+; Manages turns, win/draw detection, and game flow.
+
+game-status!: @type/enum ['playing | 'x-wins | 'o-wins | 'draw]
+
+Game: object [
+  field [board [context!]]
+  field [turn [word!]]
+  field [status [game-status!]]
+
+  turn: 'x
+  status: 'playing
+
+  play: function [pos [integer!]] [
+    if not self/status = 'playing [return self/status]
+
+    placed: self/board/place pos self/turn
+    if none? placed [return none]  ; cell occupied
+
+    ; check for winner
+    w: self/board/winner
+    match w [
+      ['x]  [self/status: 'x-wins]
+      ['o]  [self/status: 'o-wins]
+      [_]   [
+        if self/board/full? [self/status: 'draw]
+      ]
+    ]
+
+    ; switch turns
+    self/turn: either self/turn = 'x ['o] ['x]
+    self/status
+  ]
+
+  reset: does [
+    self/board/clear
+    self/turn: 'x
+    self/status: 'playing
+  ]
+]

@@ -222,38 +222,66 @@ proc registerNatives*(eval: Evaluator) =
   )
 
   ctx.native("first", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    if args[0].kind == vkBlock:
+    case args[0].kind
+    of vkBlock:
       if args[0].blockVals.len == 0:
         raise KtgError(kind: "range", msg: "first on empty block", data: nil)
       return args[0].blockVals[0]
-    raise KtgError(kind: "type", msg: "first expects block!, got " & typeName(args[0]), data: nil)
+    of vkString:
+      if args[0].strVal.len == 0:
+        raise KtgError(kind: "range", msg: "first on empty string", data: nil)
+      return ktgString($args[0].strVal[0])
+    else:
+      raise KtgError(kind: "type", msg: "first expects series (block! or string!), got " & typeName(args[0]), data: nil)
   )
 
   ctx.native("second", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    if args[0].kind == vkBlock:
+    case args[0].kind
+    of vkBlock:
       if args[0].blockVals.len < 2:
         raise KtgError(kind: "range", msg: "second on block with fewer than 2 elements", data: nil)
       return args[0].blockVals[1]
-    raise KtgError(kind: "type", msg: "second expects block!, got " & typeName(args[0]), data: nil)
+    of vkString:
+      if args[0].strVal.len < 2:
+        raise KtgError(kind: "range", msg: "second on string with fewer than 2 characters", data: nil)
+      return ktgString($args[0].strVal[1])
+    else:
+      raise KtgError(kind: "type", msg: "second expects series (block! or string!), got " & typeName(args[0]), data: nil)
   )
 
   ctx.native("last", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    if args[0].kind == vkBlock:
+    case args[0].kind
+    of vkBlock:
       if args[0].blockVals.len == 0:
         raise KtgError(kind: "range", msg: "last on empty block", data: nil)
       return args[0].blockVals[^1]
-    raise KtgError(kind: "type", msg: "last expects block!, got " & typeName(args[0]), data: nil)
+    of vkString:
+      if args[0].strVal.len == 0:
+        raise KtgError(kind: "range", msg: "last on empty string", data: nil)
+      return ktgString($args[0].strVal[^1])
+    else:
+      raise KtgError(kind: "type", msg: "last expects series (block! or string!), got " & typeName(args[0]), data: nil)
   )
 
   ctx.native("pick", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    if args[0].kind == vkBlock and args[1].kind == vkInteger:
-      let idx = int(args[1].intVal) - 1  # 1-based
+    if args[1].kind != vkInteger:
+      raise KtgError(kind: "type", msg: "pick expects integer! as index", data: args[1])
+    let idx = int(args[1].intVal) - 1  # 1-based
+    case args[0].kind
+    of vkBlock:
       if idx < 0 or idx >= args[0].blockVals.len:
         raise KtgError(kind: "range",
           msg: "index " & $args[1].intVal & " out of range for block of length " & $args[0].blockVals.len,
           data: args[1])
       return args[0].blockVals[idx]
-    raise KtgError(kind: "type", msg: "pick expects block! and integer!", data: nil)
+    of vkString:
+      if idx < 0 or idx >= args[0].strVal.len:
+        raise KtgError(kind: "range",
+          msg: "index " & $args[1].intVal & " out of range for string of length " & $args[0].strVal.len,
+          data: args[1])
+      return ktgString($args[0].strVal[idx])
+    else:
+      raise KtgError(kind: "type", msg: "pick expects block! or string!, got " & typeName(args[0]), data: nil)
   )
 
   ctx.native("append", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
@@ -430,6 +458,43 @@ proc registerNatives*(eval: Evaluator) =
     if args[0].kind == vkString and args[1].kind == vkString and args[2].kind == vkString:
       return ktgString(args[0].strVal.replace(args[1].strVal, args[2].strVal))
     raise KtgError(kind: "type", msg: "replace expects string! string! string!", data: nil)
+  )
+
+  ctx.native("substring", 3, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    if args[0].kind != vkString:
+      raise KtgError(kind: "type", msg: "substring expects string!, got " & typeName(args[0]), data: nil)
+    if args[1].kind != vkInteger or args[2].kind != vkInteger:
+      raise KtgError(kind: "type", msg: "substring expects string! integer! integer!", data: nil)
+    let start = int(args[1].intVal) - 1  # 1-based
+    let length = int(args[2].intVal)
+    let s = args[0].strVal
+    if start < 0 or start > s.len:
+      raise KtgError(kind: "range", msg: "substring start out of range", data: args[1])
+    let endIdx = min(start + length, s.len)
+    ktgString(s[start ..< endIdx])
+  )
+
+  ctx.native("read-file", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    let path = case args[0].kind
+      of vkString: args[0].strVal
+      of vkFile: args[0].filePath
+      else:
+        raise KtgError(kind: "type", msg: "read-file expects string! or file!", data: nil)
+    if not fileExists(path):
+      raise KtgError(kind: "io", msg: "file not found: " & path, data: args[0])
+    ktgString(readFile(path))
+  )
+
+  ctx.native("write-file", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    let path = case args[0].kind
+      of vkString: args[0].strVal
+      of vkFile: args[0].filePath
+      else:
+        raise KtgError(kind: "type", msg: "write-file expects string! or file!", data: nil)
+    if args[1].kind != vkString:
+      raise KtgError(kind: "type", msg: "write-file expects string! as content", data: nil)
+    writeFile(path, args[1].strVal)
+    ktgNone()
   )
 
   # --- Math ---

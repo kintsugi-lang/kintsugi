@@ -1,0 +1,60 @@
+Kintsugi [
+  name: 'ai
+  exports: [pick-move]
+]
+
+; --- AI ---
+; Simple AI: win if possible, block if needed, otherwise take center or corner.
+
+pick-move: function [board mark [any-word!]] [
+  opponent: either mark = 'x ['o] ['x]
+
+  ; try to win
+  winning: find-winning-move board mark
+  if not none? winning [return winning]
+
+  ; block opponent
+  blocking: find-winning-move board opponent
+  if not none? blocking [return blocking]
+
+  ; take center
+  if none? board/cell-at 5 [return 5]
+
+  ; take a corner
+  corners: [1 3 7 9]
+  state: context [choice: none]
+  loop [for [c] in corners [
+    if none? board/cell-at c [state/choice: c]
+  ]]
+  if not none? state/choice [return state/choice]
+
+  ; take any open cell
+  loop [for [i] from 1 to 9 [
+    if none? board/cell-at i [return i]
+  ]]
+
+  none  ; no moves (shouldn't happen)
+]
+
+find-winning-move: function [board mark [any-word!]] [
+  lines: [
+    [1 2 3] [4 5 6] [7 8 9]
+    [1 4 7] [2 5 8] [3 6 9]
+    [1 5 9] [3 5 7]
+  ]
+  state: context [result: none]
+  loop [for [line] in lines [
+    a: pick line 1
+    b: pick line 2
+    c: pick line 3
+    va: board/cell-at a
+    vb: board/cell-at b
+    vc: board/cell-at c
+
+    ; two marks + one empty = winning move
+    if va = mark and vb = mark and none? vc [state/result: c]
+    if va = mark and none? vb and vc = mark [state/result: b]
+    if none? va and vb = mark and vc = mark [state/result: a]
+  ]]
+  state/result
+]
