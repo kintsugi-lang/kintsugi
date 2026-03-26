@@ -5,7 +5,7 @@ A homoiconic programming language where the compiler, the dialects, and the prog
 > [!CAUTION]
 > This language is in active development. Things will break and explode.
 
-```
+```rebol
 Enemy: object [
   field [hp [integer!] 100]
   field [speed [float!] 40.0]
