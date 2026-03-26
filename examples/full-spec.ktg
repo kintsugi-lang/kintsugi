@@ -1,0 +1,1533 @@
+Kintsugi [
+  name: 'script-spec
+  date: 2026-03-25
+  file: %script-spec.ktg
+  version: 0.4.0
+]
+
+; ============================================================
+; Learn Kintsugi in Y Minutes
+; ============================================================
+;
+; Kintsugi is a homoiconic, dynamically-typed programming
+; language with rich built-in datatypes, preprocessing,
+; and a number of useful facilities powered by DSLs called
+; "dialects".
+;
+; Influenced by REBOL, Red, Ren-C, Common Lisp, D, Python,
+; Kotlin, and Raku.
+;
+; Dialects (file header determines target):
+;
+;   Kintsugi/Script   - the base language (interpreted)
+;   Kintsugi/Lua      - compiles to Lua 5.1 (Playdate, LOVE2D)
+;
+; "Kintsugi" alone means Kintsugi/Script.
+; Compilation targets extend Script -- they never remove
+; features, only add target-specific capabilities.
+;
+; File extensions:
+;   .ktg - For all source files.
+;
+; ============================================================
+
+
+; ============================================================
+; DATATYPES
+; ============================================================
+; Kintsugi has many built-in datatypes. Every value carries
+; its type at runtime. Type names are suffixed with !
+
+; --- Scalars ---
+
+my-int: 42                              ; integer!
+negative: -7                            ; integer!
+my-float: 3.14                          ; float!
+my-pair: 100x200                        ; pair! (2D coordinates)
+my-version: 1.2.3                       ; tuple! (versions, colors, IPs)
+
+; --- Logic ---
+; true and false are literals. on/off/yes/no are words bound
+; to logic values -- available as aliases in normal code, but
+; usable as keywords inside dialects without collision.
+
+a: true                                 ; logic!
+b: false
+c: on                                   ; same as true
+d: off                                  ; same as false
+e: yes                                  ; same as true
+f: no                                   ; same as false
+
+; --- None ---
+
+empty: none                             ; none! (null/nil)
+
+; --- Temporal ---
+
+my-date: 2026-03-15                     ; date!
+my-time: 14:30:00                       ; time!
+
+; --- Text ---
+
+my-string: "Hello, world"              ; string!
+escaped: "Line one\nLine two"          ; \n is newline escape
+
+; --- Identifiers & Resources ---
+
+my-file: %path/to/file.txt             ; file!
+my-url: https://example.com/api        ; url!
+my-email: user@example.com             ; email!
+
+; --- Money ---
+; money! is a precise numeric type stored as integer cents.
+; No float drift -- $0.10 + $0.20 is exactly $0.30.
+
+my-money: $19.99                        ; money! (1999 cents)
+
+; --- Composite ---
+
+my-block: [1 2 "three" 4.0]            ; block! (the universal container)
+nested: [[1 2] [3 4] [5 6]]            ; blocks nest freely
+code-as-data: [print "I am data"]      ; code is just a block
+my-paren: (1 + 2)                       ; paren! evaluates immediately: 3
+
+; --- Internal types ---
+; These are not constructed directly in user code, but
+; are returned by type and used internally:
+;   native!    -- built-in function
+;   op!        -- operator (infix symbol)
+;   type!      -- type name value (integer!, string!, etc.)
+;   context!   -- mutable key-value scope
+;   object!    -- immutable (frozen) key-value scope
+;   set!       -- unordered unique collection
+;   map!       -- hash-based key-value store
+
+
+; ============================================================
+; VARIABLES & WORDS
+; ============================================================
+; Words are the primary identifiers. A prefix or suffix
+; controls how the word evaluates.
+;
+;   word    - evaluate / lookup
+;   word:   - set-word (bind a value)
+;   :word   - get-word (get without calling)
+;   'word   - lit-word (the symbol itself)
+;   @word   - meta-word (lifecycle hooks / metamethods)
+;
+; The same system applies to paths:
+;   path/to          - evaluate / lookup
+;   path/to:         - set-path (assign through path)
+;   :path/to         - get-path (get without calling)
+;   'path/to         - lit-path (the path as data)
+
+name: "Kintsugi"                        ; set-word  (bind a value)
+print name                              ; word      (evaluate / lookup)
+ref: :name                              ; get-word  (get without calling)
+sym: 'name                              ; lit-word  (the symbol itself)
+
+; Words can contain letters, digits, hyphens, ?, !, _, ~
+is-valid?: true
+my-variable!: 42
+
+; --- Sigils ---
+; Every prefix, suffix, and punctuation character in Kintsugi
+; has a fixed meaning. Nothing is arbitrary.
+;
+; Word prefixes (change how the word evaluates):
+;   :    - get-word   (retrieve value without calling)
+;   '    - lit-word   (the symbol itself, unevaluated)
+;   @    - meta-word  (lifecycle hooks, runtime metadata)
+;
+; Word suffixes (naming conventions enforced by type):
+;   :    - set-word   (bind a value)
+;   !    - type name  (integer!, string!, user!, etc.)
+;   ?    - predicate  (returns logic! -- empty?, none?, odd?)
+;
+; Other sigils:
+;   #    - preprocessor / compile-time (#preprocess, #[expr])
+;   %    - file path  (%path/to/file.txt)
+;   $    - money      ($19.99)
+;   /    - path separator or refinement (obj/field, func/refine)
+
+
+; ============================================================
+; EVALUATION MODEL & ARITHMETIC
+; ============================================================
+; Kintsugi evaluates left to right with no operator precedence.
+; Use parens to control evaluation order. Operators are just
+; infix functions -- none is special.
+
+x: 10
+y: 3
+print x + y                             ; 13
+print x - y                             ; 7
+print x * y                             ; 30
+print x % y                             ; 1
+print 2 + 3 * 4                         ; 20 (left to right, NOT 14)
+print 2 + (3 * 4)                       ; 14 (parens force order)
+
+; --- Division ---
+; Division returns integer when exact, float otherwise.
+print 10 / 2                            ; 5 (integer! -- exact)
+print 10 / 3                            ; 3.333... (float! -- inexact)
+
+; Use round for explicit rounding
+print round/down 10 / 3                 ; 3 (truncate toward zero)
+print round 3.7                         ; 4 (nearest)
+print round/up 3.2                      ; 4 (away from zero)
+
+; --- Comparisons ---
+
+print 5 > 3                             ; true
+print 5 < 3                             ; false
+print 5 = 5                             ; true
+print 5 <> 3                            ; true
+print 5 >= 5                            ; true
+print 3 <= 5                            ; true
+
+; --- Numeric cross-type ---
+print 42 = 42.0                         ; true (integer and float compare by value)
+
+; --- Logic ---
+; and/or are infix operators. They do NOT short-circuit --
+; both sides are always evaluated because the evaluator must
+; consume the right operand.
+; Only false and none are falsy. 0, "", and [] are truthy.
+
+print not 1 = 2                         ; true
+print 1 = 1 and 2 = 2                  ; true
+print 1 = 2 or 2 = 2                   ; true
+
+; all/any -- block-based short-circuit for N values
+; all evaluates each expression; returns last if all truthy,
+; first falsy otherwise.
+; any evaluates each expression; returns first truthy, or none.
+print all [1 2 3]                       ; 3
+print all [1 false 3]                   ; false
+print any [false none 42]              ; 42
+
+; --- Money arithmetic ---
+print $10.00 + $5.50                    ; $15.50
+print $10.00 - $3.25                    ; $6.75
+print $10.00 * 3                        ; $30.00
+print $10.00 / 4                        ; $2.50
+print $10.00 > $5.00                    ; true
+
+; --- Pair arithmetic ---
+print 100x200 + 10x20                  ; 110x220
+print 100x200 - 10x20                  ; 90x180
+
+; --- String concatenation ---
+; Strings support + for concatenation
+print "hello" + " world"               ; hello world
+
+
+; ============================================================
+; CONTROL FLOW
+; ============================================================
+
+; if -- evaluates block when condition is truthy
+print if true [42]                      ; 42
+
+; either -- two branches, always returns a value
+sign: function [n] [
+  either n > 0 [1] [
+    either n < 0 [-1] [0]
+  ]
+]
+print sign 5                            ; 1
+print sign -3                           ; -1
+print sign 0                            ; 0
+
+; unless -- negated if
+print unless false ["ran"]              ; ran
+
+; --- Loops ---
+; loop is the only looping construct. See LOOP DIALECT below.
+; For conditional loops, use loop with if/break:
+
+; "while" pattern
+n: 1
+factorial: 1
+loop [
+  if n > 5 [break]
+  factorial: factorial * n
+  n: n + 1
+]
+print factorial                         ; 120
+
+; "until" pattern
+counter: 0
+loop [
+  counter: counter + 1
+  if counter = 10 [break]
+]
+print counter                           ; 10
+
+
+; ============================================================
+; GOTCHAS FOR C-STYLE DEVELOPERS
+; ============================================================
+; Kintsugi descends from REBOL, not C. Many things that look
+; familiar behave differently. Read this before you get bitten.
+;
+; --- No operator precedence ---
+; Everything evaluates left to right. 2 + 3 * 4 = 20, not 14.
+; Use parens to group: 2 + (3 * 4) = 14.
+2 + 3 * 4                               ; => 20
+2 + (3 * 4)                             ; => 14
+
+; --- Functions consume arguments greedily ---
+; No parens on calls. Functions eat N values from the stream.
+; f a b means "call f with a and b", not "f; then a; then b".
+; You cannot have optional positional arguments -- functions
+; always consume their full arity.
+;
+;   add 1 2                ; calls add with 1 and 2
+;   add 1 add 2 3          ; calls add with 1 and (add 2 3) = 5
+
+; --- and/or do NOT short-circuit ---
+; Both sides are always evaluated because the evaluator must
+; consume the right operand to know where it ends.
+;   false and expensive-call    ; expensive-call RUNS
+; Use all/any for short-circuit:
+;   all [false expensive-call]  ; stops at false, never calls
+
+; --- append is for blocks only ---
+; append mutates blocks in place (like push). It does NOT
+; work on strings. Use join or rejoin to build strings.
+;   data: [1 2]
+;   append data 3               ; data is now [1 2 3]
+;   join "hello" " world"       ; => "hello world"
+;   rejoin ["a" "b" "c"]        ; => "abc"
+
+; --- Division returns integer when exact ---
+; 10 / 2 => 5 (integer!), 10 / 3 => 3.33 (float!).
+; If you always want float, use to float! first.
+10 / 2                                   ; => 5 (integer!)
+10 / 3                                   ; => 3.3333 (float!)
+
+; --- replace replaces ALL occurrences ---
+; Unlike C's strtok or JS's String.replace, Kintsugi's
+; replace is replace-all by default.
+print replace "aabaa" "a" "x"           ; xxbxx
+
+; --- Loop variables don't leak ---
+; for-variables are scoped to the loop body. After the loop
+; they are cleaned up. Use loop/fold or loop/collect to get
+; values out.
+;   loop [for [i] from 1 to 5 [i]]
+;   i                                   ; ERROR: i has no value
+
+; --- try returns a context, not a value ---
+; result: try [10 / 0]
+; result/ok                             ; => false
+; result/kind                           ; => 'math
+; result/message                        ; => "division by zero"
+; Access fields via path, not select.
+
+; --- Equality is structural ---
+; Blocks, pairs, tuples are compared by value, not reference.
+print [1 2 3] = [1 2 3]                ; true
+print 100x200 = 100x200                ; true
+
+; --- Only false and none are falsy ---
+; 0, "", and [] are all truthy!
+print if 0 ["zero is truthy"]          ; zero is truthy
+print if "" ["empty string is truthy"] ; empty string is truthy
+print if [] ["empty block is truthy"]  ; empty block is truthy
+
+; --- to integer! true is ERROR ---
+; Numbers and logic are different domains. Use either or
+; comparison instead.
+;   either flag [1] [0]                 ; correct
+;   to integer! true                    ; ERROR
+
+
+; ============================================================
+; GOTCHAS FOR REBOL/RED DEVELOPERS
+; ============================================================
+; Kintsugi is in the REBOL lineage but runs on Lua, not
+; a custom VM. Some things had to change.
+;
+; --- Strings are immutable ---
+; No mutable string series. append does NOT work on strings.
+; Use join or rejoin instead:
+;   append "hello" " world"     ; ERROR
+;   join "hello" " world"       ; => "hello world"
+;
+; --- No char! type ---
+; Single characters are just string! values. "A" is a string,
+; not a char.
+;
+; --- money! is cents-based, no currency ---
+; $19.99 stores as 1999 cents (integer). No multi-currency,
+; no ISO codes. Arithmetic is exact (no float drift).
+;
+; --- try returns a context!, not the error itself ---
+; result: try [10 / 0]
+; result/ok                     ; path access, not select
+; result/kind                   ; => 'math
+; In REBOL, try returns the error itself or the value.
+; Kintsugi wraps both in a result context.
+;
+; --- object uses field keyword, not @default ---
+; Kintsugi uses a prototype model with typed fields:
+;   Person: object [
+;     field [name [string!]]
+;     field [age [integer!] 0]
+;   ]
+;   p: make Person [name: "Ray" age: 30]
+; Auto-generates person! type and make-person constructor.
+; Methods use self/field for access (not bare words).
+;
+; --- Loop variables are scoped ---
+; After loop [for [i] from 1 to 5 [...]], i is unset.
+; REBOL leaks loop vars to the parent. Kintsugi cleans up.
+; Use loop/fold or loop/collect to extract values.
+;
+; --- Set-word always shadows ---
+; In Kintsugi, set-word creates a NEW binding in the current
+; scope. It never writes through to the parent. To mutate
+; shared state, use a context and set-path:
+;   state: context [counter: 0]
+;   loop [from 1 to 10 [state/counter: state/counter + 1]]
+;   print state/counter          ; 10
+;
+; --- first [hello] returns word!, not lit-word! ---
+; Extraction from blocks preserves the original type.
+; first [hello] returns the word! value 'hello' as-is.
+; 'hello (a lit-word!) and first [hello] (a word!) are
+; different subtypes, so 'hello = first [hello] is false.
+;
+; --- Word equality is same-subtype only ---
+; 'hello = 'hello is true (both lit-words).
+; 'hello = first [hello] is false (lit-word vs word).
+; Compare names: (to string! 'hello) = (to string! first [hello])
+;
+; --- exports is a body-level word, not a header field ---
+; Put exports [...] in the module body, not in the header.
+;
+; --- require is gone, use load/eval ---
+; load/eval %lib/math.ktg replaces require %lib/math.ktg.
+; load is the primitive. load/eval = load + evaluate + freeze + cache.
+;
+; --- parse returns a context!, not logic! ---
+; result: parse "abc" [some alpha]
+; result/ok                      ; true
+; Captures go into the result context, NOT the caller's scope.
+; Use parse/ok for bare logic! result.
+
+
+; ============================================================
+; FUNCTIONS
+; ============================================================
+; The spec block inside 'function' is a dialect. Words,
+; type blocks, refinements, and return: have special meaning.
+;
+; Type annotations are enforced at runtime -- passing the
+; wrong type raises a type error. A future compiler can
+; trust these annotations for static optimization.
+
+; Basic definition
+add: function [a b] [a + b]
+print add 3 4                           ; 7
+
+; Type constraints (enforced at call time)
+add-typed: function [a [integer!] b [integer!] return: [integer!]] [
+  a + b
+]
+print add-typed 3 4                     ; 7
+; add-typed "hi" 3                      ; ERROR: a expects integer!, got string!
+
+; Typesets for polymorphism
+double: function [value [number!]] [
+  value * 2
+]
+print double 5                          ; 10
+print double 2.5                        ; 5.0
+
+; Refinements add optional behavior
+; TODO: user function refinements not yet implemented in v3
+; greet: function [name [string!] /loud] [
+;   message: join "Hello, " name
+;   if loud [message: uppercase message]
+;   print message
+; ]
+; greet "world"                           ; Hello, world
+; greet/loud "world"                      ; HELLO, WORLD
+
+; Refinements with parameters
+; format: function [val /pad size [integer!]] [
+;   either pad [
+;     ; pad val to size chars
+;   ] [
+;     to string! val
+;   ]
+; ]
+
+; Functions are first-class values
+operation: :add                         ; get-word grabs the function value
+print operation 3 4                     ; 7
+
+; Higher-order -- pass functions with get-word
+print apply :add [3 4]                  ; 7
+
+; Early return
+clamp: function [val lo hi] [
+  if val < lo [return lo]
+  if val > hi [return hi]
+  val
+]
+print clamp 5 1 10                      ; 5
+print clamp -3 1 10                     ; 1
+print clamp 15 1 10                     ; 10
+
+; Closures capture their defining context
+make-adder: function [n] [function [x] [x + n]]
+add5: make-adder 5
+print add5 10                           ; 15
+
+; does -- shorthand for function with no parameters
+greet-world: does [print "Hello, world!"]
+greet-world                             ; Hello, world!
+
+
+; ============================================================
+; BLOCK OPERATIONS
+; ============================================================
+; Blocks are Kintsugi's universal container. They hold any
+; mix of values. Indices are 1-based.
+
+data: [10 20 30 40 50]
+
+print size? data                        ; 5
+print length? data                      ; 5 (alias for size?)
+print empty? []                         ; true
+print pick data 3                       ; 30
+print first data                        ; 10
+print second data                       ; 20
+print last data                         ; 50
+
+; Membership and lookup
+print has? data 30                      ; true
+print index? data 30                    ; 3 (1-based)
+print has? "hello world" "world"        ; true
+
+; Select -- key-value lookup in flat blocks
+config: [width 800 height 600 depth 32]
+print select config 'width              ; 800
+print select config 'depth              ; 32
+
+; Mutation (blocks are mutable, shared by reference)
+buf: [1 2 3]
+append buf 4                            ; [1 2 3 4]
+insert buf 0 1                          ; insert 0 at position 1
+remove buf 1                            ; remove at position 1
+print size? buf                         ; 4
+
+; Copy creates an independent block
+original: [1 2 3]
+clone: copy original
+append clone 99
+print size? original                    ; 3 (unaffected)
+
+; Sort mutates in place
+nums: [3 1 4 1 5 9 2 6]
+sort nums
+print first nums                        ; 1
+print last nums                         ; 9
+
+; Multiple assignment (block destructuring)
+set [a b c] [1 2 3]
+print a                                 ; 1
+print b                                 ; 2
+print c                                 ; 3
+
+; Context destructuring (by name, not position)
+ctx: context [name: "Ray" age: 30]
+set [name age] ctx
+print name                              ; Ray
+print age                               ; 30
+
+; Reduce -- evaluate a block, return results as a block
+x: 10
+result: reduce [x + 1 x * 2 "hello"]
+print first result                      ; 11
+print second result                     ; 20
+
+
+; ============================================================
+; STRING OPERATIONS
+; ============================================================
+; Strings are immutable. Double-quoted. Multiline strings
+; use curly braces. Concatenation uses join (two values) or
+; rejoin (block of values).
+
+; --- Multiline strings ---
+
+message: {
+  Hello,
+  This is a multiline string.
+  It preserves line breaks.
+}
+
+; --- Interpolation via rejoin ---
+; rejoin evaluates a block and joins all results into a string.
+
+name: "Ray"
+age: 30
+print rejoin ["Hello, " name "!"]                ; Hello, Ray!
+print rejoin [name " is " age " years old"]      ; Ray is 30 years old
+print rejoin ["2 + 2 = " (2 + 2)]               ; 2 + 2 = 4
+
+; --- String functions ---
+
+print size? "hello"                     ; 5
+print join "hello" " world"             ; hello world
+print trim "  hello  "                  ; hello
+print index? "hello world" "world"      ; 7
+print has? "hello world" "world"        ; true
+print split "a,b,c" ","                 ; ["a" "b" "c"]
+print uppercase "hello"                 ; HELLO
+print lowercase "HELLO"                 ; hello
+print replace "hello world" "world" "Ray" ; hello Ray
+print replace "aabaa" "a" "x"          ; xxbxx (replace-all by default)
+
+; --- Escape sequences ---
+; \n = newline, \" = quote, \\ = backslash, \t = tab
+
+print "line one\nline two"
+
+
+; ============================================================
+; MAP TYPE
+; ============================================================
+; map! is a hash-based key-value store for fast lookup.
+; NOTE: map creation via make map! is planned but not yet
+; implemented. Maps can be created via to map! conversion
+; or returned from built-in operations.
+
+; Access via path
+; m: make map! [name: "Ray" age: 30]
+; m/name                                ; Ray
+; m/age                                 ; 30
+
+; Predicates
+; has? m 'name                          ; true
+; size? m                               ; number of key-value pairs
+
+
+; ============================================================
+; TYPE SYSTEM
+; ============================================================
+; Gradual typing. No implicit coercion. Three operations:
+;
+;   is?  type! value  -- check (returns logic!)
+;   to   type! value  -- convert (scalars only, throws on failure)
+;   [param [type!]]   -- constrain (in function specs)
+;
+; Type annotations on function params are enforced at runtime.
+
+; --- Introspection ---
+print type 42                           ; integer!
+print type "hello"                      ; string!
+print type [1 2 3]                      ; block!
+
+; --- Type predicates ---
+; Every type has a predicate (name?), generated from type name.
+print integer? 42                       ; true
+print float? 3.14                       ; true
+print string? "hello"                   ; true
+print logic? true                       ; true
+print none? none                        ; true
+print block? [1 2 3]                    ; true
+print pair? 100x200                     ; true
+print tuple? 1.2.3                      ; true
+print date? 2026-03-15                  ; true
+print time? 14:30:00                    ; true
+print file? %path/to/file              ; true
+print url? https://example.com         ; true
+print email? user@example.com          ; true
+print money? $19.99                     ; true
+
+; function? returns true for both function! and native!
+print function? :add                    ; true
+print function? :print                  ; true
+
+; Union predicates
+print number? 3.14                      ; true (integer! or float!)
+print number? 42                        ; true
+
+; --- Type checking (is?) ---
+; is? checks whether a value matches a type. Works with
+; built-in types, union types, and custom types.
+print is? integer! 42                   ; true
+print is? string! 42                    ; false
+print is? number! 3.14                  ; true
+print is? number! 42                    ; true
+
+; --- Type conversion (to) ---
+; to never coerces silently. Every conversion is explicit.
+; If it can fail (string parsing), it throws a type error.
+print to integer! "42"                  ; 42
+print to integer! 3.7                   ; 3 (truncate toward zero)
+print to string! 42                     ; 42
+print to float! 7                       ; 7.0
+print to block! "hello"                 ; ["hello"]
+
+; Numbers and logic don't cross!
+; to integer! true                      ; ERROR
+; to logic! 0                           ; ERROR
+
+; Word conversions
+print to string! 'hello                ; hello
+to word! "hello"                        ; => word!
+to set-word! "x"                        ; => set-word!
+to lit-word! "name"                     ; => lit-word!
+to get-word! "name"                     ; => get-word!
+to meta-word! "enter"                   ; => meta-word!
+
+; Money conversions
+print to money! 42                      ; $42.00
+print to money! "19.99"                 ; $19.99
+print to integer! $19.99                ; 1999 (cents)
+print to float! $19.99                  ; 19.99 (dollars)
+
+; Time conversions
+print to integer! 14:30:00             ; 52200 (total seconds)
+
+; Pair/tuple from blocks
+print to pair! [10 20]                  ; 10x20
+
+; Logic from string
+print to logic! "true"                  ; true
+print to logic! "false"                 ; false
+; to logic! 0                           ; ERROR
+
+; Logic from none
+print to logic! none                    ; false
+
+; --- Math utilities ---
+print min 3 7                           ; 3
+print max 3 7                           ; 7
+print abs -42                           ; 42
+print negate 5                          ; -5
+print odd? 7                            ; true
+print even? 8                           ; true
+print sqrt 9                            ; 3.0
+
+
+; ============================================================
+; ERROR HANDLING
+; ============================================================
+; Errors are raised with 'error'. Protected calls with 'try'.
+; try returns a context! with path access:
+;   result/ok       -- logic! (success or failure)
+;   result/value    -- the return value (on success)
+;   result/kind     -- lit-word! error kind (on failure)
+;   result/message  -- string! error message (on failure)
+;   result/data     -- any value attached to the error
+
+; --- Raising errors ---
+; error <kind:lit-word> <message:string> <data:any|none>
+
+safe-divide: function [x y] [
+  if y = 0 [error 'math "cannot divide by zero" none]
+  x / y
+]
+
+; --- try (protected call) ---
+
+result: try [safe-divide 10 2]
+print result/ok                         ; true
+print result/value                      ; 5
+
+result: try [safe-divide 10 0]
+print result/ok                         ; false
+print result/kind                       ; math
+print result/message                    ; cannot divide by zero
+
+; --- Pattern: check and branch on result ---
+result: try [safe-divide 10 0]
+either result/ok [
+  print rejoin ["Got: " result/value]
+] [
+  print rejoin ["Error: " result/message]
+]
+; Error: cannot divide by zero
+
+; --- Standard error kinds ---
+; 'type       -- wrong type passed to function
+; 'arity      -- too few arguments
+; 'undefined  -- word has no binding
+; 'math       -- division by zero, overflow
+; 'range      -- index out of bounds
+; 'parse      -- parse failed
+; 'load       -- file not found, circular dependency
+; 'frozen     -- attempt to mutate object!
+; 'make       -- required field missing in make
+; 'self       -- attempt to rebind self
+; 'user       -- raised explicitly by user code
+
+
+; ============================================================
+; LOOP DIALECT
+; ============================================================
+; loop is the only looping construct. The block inside loop
+; is a dialect when it starts with 'for' or 'from'.
+; Otherwise, the entire block is the body (infinite loop).
+;
+; Refinements:
+;   loop            - side effects only, returns none
+;   loop/collect    - gathers body results into a block
+;   loop/fold       - accumulates: first var is accumulator
+;   loop/partition  - body is predicate; values go into
+;                     [truthy falsy] based on result
+;
+; Dialect keywords:
+;   for   - declare iteration variable(s)
+;   in    - the data to iterate over
+;   from  - counting start value
+;   to    - counting end value
+;   by    - step value (default 1 or -1 based on direction)
+;   when  - guard clause (filter)
+;   it    - implicit variable when for is omitted
+
+; --- Basic iteration ---
+
+loop [for [item] in [1 2 3 4 5] [print item]]
+; 1
+; 2
+; 3
+; 4
+; 5
+
+; --- Counting ---
+
+loop [for [n] from 1 to 5 [print n]]
+; 1
+; 2
+; 3
+; 4
+; 5
+
+; Counting with step
+loop [from 0 to 10 by 5 [print it]]
+; 0
+; 5
+; 10
+
+; Counting down (direction inferred)
+loop [from 5 to 1 [print it]]
+; 5
+; 4
+; 3
+; 2
+; 1
+
+; --- Collecting ---
+
+squares: loop/collect [for [n] from 1 to 5 [n * n]]
+probe squares                           ; 1 4 9 16 25
+
+; --- Filtering ---
+
+evens: loop/collect [
+  for [n] in [1 2 3 4 5 6 7 8]
+  when [even? n]
+  [n]
+]
+probe evens                             ; 2 4 6 8
+
+; --- Folding ---
+
+total: loop/fold [for [acc n] from 1 to 10 [acc + n]]
+print total                             ; 55
+
+; --- Partitioning ---
+
+set [evens odds] loop/partition [for [x] from 1 to 8 [even? x]]
+probe evens                             ; 2 4 6 8
+probe odds                              ; 1 3 5 7
+
+; --- Break inside loop ---
+
+partial: loop/collect [
+  for [x] from 1 to 5 [
+    if x = 4 [break]
+    x * 10
+  ]
+]
+probe partial                           ; 10 20 30
+
+; --- Loop variables are scoped ---
+; After the loop, iteration variables do not exist in the
+; parent scope. This prevents accidental leaks.
+;   loop [for [i] from 1 to 5 [i]]
+;   print i                             ; ERROR: i has no value
+
+
+; ============================================================
+; MATCH DIALECT
+; ============================================================
+; Pattern matching with destructuring. First match wins.
+;
+; Pattern elements:
+;   literal    - matches exactly (integers, strings, etc.)
+;   bare word  - captures/binds the value at this position
+;   type!      - matches any value of that type
+;   (expr)     - evaluate expression, match against result
+;   'word      - matches the literal word
+;   _          - wildcard (matches anything, doesn't bind)
+;   when       - guard clause
+;   default:   - fallback if nothing matched
+
+match [1 2 3] [
+  [1 2 3]  [print "got 1 2 3"]
+  [1 _ 3]  [print "1, anything, 3"]
+  default: [print "nothing matched"]
+]
+; got 1 2 3
+
+; Destructuring
+match [10 20] [
+  [0 0]   [print "origin"]
+  [x 0]   [print rejoin ["x-axis at " x]]
+  [0 y]   [print rejoin ["y-axis at " y]]
+  [x y]   [print rejoin [x ", " y]]
+]
+; 10, 20
+
+; Guards
+match 25 [
+  [n] when [n < 13]  [print "child"]
+  [n] when [n < 20]  [print "teenager"]
+  [n] when [n < 65]  [print "adult"]
+  [_]                [print "senior"]
+]
+; adult
+
+
+; ============================================================
+; CONTEXTS & BINDING
+; ============================================================
+; Contexts are the universal construct. Closures, objects,
+; modules, and scopes are all contexts. Runtime type: context!
+;
+; context! is mutable. object! is immutable (frozen).
+; freeze upgrades context! to object! (one-way).
+;
+; Created by:
+;   context [...]  - explicit mutable context
+;   function       - parameters and local words
+;   object [...]   - immutable prototype (object!)
+;   make Prototype [...]  - mutable instance (context!)
+
+; context creates a mutable environment
+point: context [x: 10 y: 20]
+print point/x                           ; 10
+print point/y                           ; 20
+
+; Set-path assignment works on context!
+point/x: 30
+print point/x                           ; 30
+
+; Introspection
+print words-of point                    ; [x y]
+
+; Freezing: context! -> object! (one-way, immutable)
+frozen-point: freeze point
+print frozen? frozen-point              ; true
+print frozen? point                     ; false
+; frozen-point/x: 99                    ; ERROR: cannot mutate frozen object
+
+; --- Set-word always shadows ---
+; Inside any block that creates a new scope (function, loop,
+; context), set-word creates a NEW binding. It never writes
+; through to the parent.
+;
+; To mutate shared state, use a context and set-path:
+state: context [counter: 0]
+loop [from 1 to 10 [
+  state/counter: state/counter + 1     ; mutates through reference
+]]
+print state/counter                     ; 10
+
+; --- Assignment is by reference ---
+; Compound values (blocks, contexts, maps) are shared.
+; copy creates an independent value.
+a-block: [1 2 3]
+b-block: a-block
+append b-block 4
+print size? a-block                     ; 4 (same block!)
+
+c-block: copy a-block
+append c-block 5
+print size? a-block                     ; 4 (independent)
+print size? c-block                     ; 5
+
+
+; ============================================================
+; OBJECT DIALECT
+; ============================================================
+; object defines a prototype with typed fields and methods.
+; make stamps instances from prototypes.
+;
+; Convention: prototypes use PascalCase -- Person, Card,
+; Reader. This distinguishes them from regular words.
+;
+; Field syntax uses the 'field' keyword:
+;   field [name [type!]]               -- required
+;   field [name [type!] default-val]   -- with default
+;
+; Everything after field declarations is the body (methods).
+; Methods access the instance via self (lexically bound).
+
+; --- Prototype with methods ---
+
+Counter: object [
+  field [n [integer!] 0]
+
+  increment: function [] [self/n: self/n + 1]
+  value: function [] [self/n]
+]
+
+c: make Counter []
+c/increment
+c/increment
+print c/value                           ; 2
+
+; --- Required fields ---
+
+Person: object [
+  field [name [string!]]
+  field [age [integer!]]
+
+  greet: function [] [
+    rejoin ["Hi, I'm " self/name " age " self/age]
+  ]
+  birthday: function [] [
+    self/age: self/age + 1
+  ]
+]
+
+p: make Person [name: "Ray" age: 30]
+print p/greet                           ; Hi, I'm Ray age 30
+p/birthday
+print p/age                             ; 31
+
+; --- Clone from an instance ---
+p2: make p [age: 25]
+print p2/name                           ; Ray
+print p2/age                            ; 25
+print p/age                             ; 31 (original unchanged)
+
+; --- Mixed required and defaulted fields ---
+
+Account: object [
+  field [owner [string!]]
+  field [balance [money!] $0.00]
+
+  deposit: function [amount [money!]] [
+    self/balance: self/balance + amount
+  ]
+  summary: function [] [
+    rejoin [self/owner ": " self/balance]
+  ]
+]
+
+acct: make Account [owner: "Ray"]
+acct/deposit $100.00
+print acct/summary                      ; Ray: $100.00
+
+; Override a default at creation time
+acct2: make Account [owner: "Jo" balance: $50.00]
+print acct2/summary                     ; Jo: $50.00
+
+; --- Auto-generation ---
+; When assigned to a set-word, object auto-generates:
+;   person!       -- custom type predicate
+;   make-person   -- constructor function
+;
+; Person: object [...] generates person! and make-person.
+; make-person takes required field values in declaration order.
+;
+; is? checks structural compatibility:
+;   is? :Person p    ; true if p has all Person fields
+
+; --- No prototype chains ---
+; make is a stamp. No delegation, no inheritance.
+; Instances don't know where they came from.
+; Compose via embedding:
+;
+; Damageable: object [
+;   field [hp [integer!] 100]
+;   damage: function [amount [integer!]] [self/hp: self/hp - amount]
+; ]
+; Enemy: object [
+;   field [stats [context!]]
+;   field [speed [float!] 40.0]
+; ]
+; goblin: make Enemy [stats: make Damageable []]
+; goblin/stats/damage 10
+; goblin/stats/hp                       ; 90
+
+; --- self is bound at make time ---
+; self is a regular word pointing to the instance. Each
+; instance's methods have their own self. self cannot be
+; rebound (self: x is an error inside methods).
+; self can be passed to functions: do-something self
+
+
+; ============================================================
+; LIFECYCLE HOOKS
+; ============================================================
+; @enter and @exit are meta-words that fire at scope
+; boundaries inside any evaluated block.
+;
+;   @enter [block]  - runs when entering a scope (once)
+;   @exit  [block]  - runs when leaving a scope (once, always
+;                     runs, even on error -- like finally)
+;
+; @exit is the primary resource cleanup mechanism.
+;
+; Example:
+;   if true [
+;     @enter [resource: acquire-lock "database"]
+;     @exit  [release-lock resource]
+;     result: query resource "SELECT * FROM users"
+;     print result
+;   ]
+
+
+; ============================================================
+; PARSE DIALECT
+; ============================================================
+; Rule-based pattern matching on strings and blocks.
+; One system, two modes -- same combinators for both.
+; The only difference is what "an element" means:
+; a character in strings, a value in blocks.
+;
+; Parse returns a context! with:
+;   ok       -- logic! (true if rules matched full input)
+;   plus any set-word captures and collect results.
+;
+; Captures go into the returned context, NOT the caller's
+; scope. This is intentional -- dialects don't silently
+; modify the caller.
+;
+; Use parse/ok to get a bare logic! result.
+;
+; Combinators:
+;   |         - ordered alternative (lowest precedence)
+;   end       - match end of input
+;   skip      - match any single element
+;   some      - one or more matches
+;   any       - zero or more matches
+;   opt       - zero or one match
+;   not       - negative lookahead (doesn't consume)
+;   ahead     - positive lookahead (doesn't consume)
+;   to        - scan to (not past) a match
+;   thru      - scan through (past) a match
+;   into      - descend into nested block
+;   quote     - match literally (escape keywords)
+;   N rule    - repeat exactly N times
+;   N M rule  - repeat between N and M times
+;   collect   - wraps rule; keep inside appends to collected
+;   keep      - inside collect, appends matched value
+;   break     - exit some/any loop with success
+;   fail      - force backtracking
+;   (...)     - evaluate expression as side effect
+;   [...]     - sub-rule grouping
+;
+; String character classes:
+;   alpha digit space upper lower alnum newline
+;
+; Block matching extras:
+;   'word   - match literal word
+;   type!   - match by datatype
+;
+; Custom character classes:
+;   charset "abc"           - set of characters
+;   charset [alpha "_"]     - set combining classes + chars
+
+; --- String parsing ---
+
+result: parse "hello" [some alpha]
+print result/ok                         ; true
+
+result: parse "abc123" [some alpha]
+print result/ok                         ; false (digits unconsumed)
+
+; --- Captures go into returned context ---
+
+result: parse "user@example.com" [
+  name: some [alpha | digit | "."]
+  "@"
+  domain: some [alpha | digit | "." | "-"]
+]
+print result/ok                         ; true
+print result/name                       ; user
+print result/domain                     ; example.com
+
+; set-word inside some -- last match wins
+result: parse "1,2,3" [some [num: some digit opt ","]]
+print result/num                        ; 3
+
+; --- Block parsing ---
+
+result: parse [name "Alice" age 25] [
+  'name who: string!
+  'age years: integer!
+]
+print result/ok                         ; true
+print result/who                        ; Alice
+print result/years                      ; 25
+
+; --- Collect/keep ---
+; collect/keep for explicit accumulation. Must be named
+; with a set-word -- unnamed collect discards values.
+
+result: parse [1 "a" 2 "b" 3] [
+  nums: collect [some [keep integer! | skip]]
+]
+print result/nums                       ; [1 2 3]
+
+; --- Composable rules ---
+digit-run: [some digit]
+; date-rule: [year: digit-run "-" month: digit-run "-" day: digit-run]
+; parse "2026-03-15" date-rule
+
+; --- parse/ok refinement ---
+; Returns bare logic! when you only care about success.
+; if parse/ok input [some digit] [print "all numbers"]
+
+
+; ============================================================
+; ATTEMPT DIALECT
+; ============================================================
+; Resilient pipelines with error handling.
+; Each step receives the previous result as 'it'.
+;
+; Dialect keywords:
+;   source   - initial operation
+;   then     - chain step (previous result is 'it')
+;   when     - guard (short-circuit to none if falsy)
+;   catch    - handle a named error kind
+;   retries  - retry count on error
+;   fallback - last resort
+;
+; With source: evaluate source, run pipeline, return result.
+; Without source: returns a reusable pipeline function.
+
+result: attempt [
+  source ["  Hello, World  "]
+  then   [trim it]
+  then   [lowercase it]
+  then   [split it ", "]
+]
+print result                            ; ["hello" "world"]
+
+; Reusable pipeline (no source = function)
+clean: attempt [
+  when [not empty? it]
+  then [trim it]
+  then [lowercase it]
+]
+print clean "  HELLO  "                 ; hello
+
+; Error handling in pipelines
+; result: attempt [
+;   source [some-dangerous-operation]
+;   then   [process it]
+;   catch 'network-error [print "failed" none]
+;   retries 3
+;   fallback [none]
+; ]
+
+
+; ============================================================
+; BLOCKS & HOMOICONICITY
+; ============================================================
+; Code is data. Data is code. Blocks hold code or data
+; without evaluating. do bridges data and execution.
+;
+; In compiled targets, homoiconicity lives at preprocess
+; time -- the preprocessor is the full language, and it
+; generates the static code that gets compiled.
+
+data: [print "Hello"]
+
+; Inspect code as data
+print size? data                        ; 2
+print first data                        ; print (a word!)
+print second data                       ; Hello (a string)
+
+; do -- execute data as code [INTERPRETER-ONLY]
+do [print "I was data, now I am running"]
+
+; compose -- evaluate parens in blocks [INTERPRETER-ONLY on dynamic blocks]
+target: "Alice"
+code: compose [greet (target) 42]       ; => [greet "Alice" 42]
+print second code                       ; Alice
+
+; reduce -- evaluate every expression, return results block
+result: reduce [1 + 2 3 * 4 "hello"]
+print first result                      ; 3
+print second result                     ; 12
+
+; --- Interpreter-only features ---
+; do, compose on dynamic blocks, and bind require runtime
+; evaluation and cannot be compiled. Using them means your
+; code runs only in the interpreter.
+;
+; For compiled targets (Kintsugi/Lua), use #preprocess to
+; generate code at compile time instead.
+
+
+; ============================================================
+; PREPROCESSING
+; ============================================================
+; Preprocessing runs before evaluation. The preprocessor is
+; the full Kintsugi language -- not a limited macro system.
+;
+; Two forms:
+;   #preprocess [block]  -- evaluate block; emit injects code
+;   #[expr]              -- inline; evaluate expr, inject result
+;
+; Available in the preprocess context:
+;   platform  - current target ('script or 'lua)
+;   emit      - inject a block into the output program
+
+#preprocess [
+  either platform = 'script [
+    emit [print "Running in Script mode"]
+  ] [
+    emit [print "Running on Lua"]
+  ]
+]
+
+; Code generation -- generates get-name, get-age, get-email
+#preprocess [
+  loop [
+    for [field] in [name age email] [
+      emit compose [
+        (to set-word! join "get-" field) function [obj] [
+          select obj (to lit-word! field)
+        ]
+      ]
+    ]
+  ]
+]
+
+; Inline preprocess -- inject a value
+; x: #[1 + 2]                          ; x = 3 (preprocess time)
+; y: 10 + #[3 * 4]                     ; y = 22
+
+; Platform values:
+;   Kintsugi []          -> platform = 'script
+;   Kintsugi/Lua []      -> platform = 'lua
+
+
+; ============================================================
+; LOADING & MODULES
+; ============================================================
+; load is the universal file-reading primitive.
+; Refinements determine how the file is processed:
+;
+;   load %file             -- parse as data, return context!
+;   load/eval %file        -- evaluate + freeze + cache = object!
+;   load/freeze %file      -- parse as data + freeze = object!
+;   load/header %file      -- return just the header block
+;   load/fresh %file       -- skip cache for one call
+;
+; load/eval replaces the old require. Results are immutable
+; object! values, cached by absolute path.
+;
+; Example:
+;   math: load/eval %lib/math.ktg
+;   math/add 3 4                        ; 7
+;
+; --- Module file structure ---
+;
+;   Kintsugi []
+;
+;   exports [add clamp]                 ; only these are public
+;
+;   add: function [a b] [a + b]
+;   clamp: function [val lo hi] [min hi max lo val]
+;   helper: function [x] [x * x]       ; not exported, private
+;
+; exports is a body-level word, not a header field.
+; If exports is never called, everything is public.
+;
+; --- Caching ---
+; load/eval caches by fully resolved absolute path.
+; Every consumer gets the same immutable object! reference.
+;
+; --- Circular dependencies ---
+; Always an error:
+;   ERROR 'load: circular dependency: %a.ktg -> %b.ktg -> %a.ktg
+;
+; --- Serialization ---
+; save %file data writes context data as Kintsugi literals.
+; Functions are skipped -- behavior comes from the prototype.
+;   save %save.dat player
+;   ; reload:
+;   data: load %save.dat
+;   p: make Player data
+
+
+; ============================================================
+; HEADER DIALECT
+; ============================================================
+; Programs may begin with a header block. The header word
+; is the dialect and determines the compilation target.
+; Headers are optional -- a headerless file is just code.
+;
+; Dialect words:
+;   Kintsugi          -- Script (interpreted)
+;   Kintsugi/Lua      -- compiles to Lua 5.1
+;
+; Header contents are optional metadata for tooling.
+; No required fields. No fields with language-level effects.
+;
+; Common conventions:
+;   name:       - module name (lit-word)
+;   version:    - semantic version (tuple!)
+;   date:       - last-modified date
+;   file:       - source file path
+;
+; Examples:
+;   Kintsugi []                         ; script, no metadata
+;   Kintsugi [version: 1.0.0]          ; script with metadata
+;   Kintsugi/Lua []                     ; compiles to Lua
+;   Kintsugi/Lua [version: 1.0.0]      ; Lua with metadata
+
+
+; ============================================================
+; PUTTING IT ALL TOGETHER
+; ============================================================
+
+; --- Quicksort (manual) ---
+; Kintsugi has built-in sort. This shows off
+; loop/partition and recursion.
+
+qsort: function [blk] [
+  if (size? blk) <= 1 [return blk]
+  pivot: first blk
+  rest: copy blk
+  remove rest 1
+  set [lo hi] loop/partition [for [x] in rest [x < pivot]]
+  result: qsort lo
+  append result pivot
+  loop [for [x] in qsort hi [append result x]]
+  result
+]
+
+unsorted: [3 1 4 1 5 9 2 6 5 3]
+sorted: qsort unsorted
+probe sorted                            ; 1 1 2 3 3 4 5 5 6 9
+
+; --- Fibonacci ---
+
+fib: function [n] [
+  seq: [0 1]
+  loop [
+    from 1 to (n - 2) [
+      a: pick seq ((size? seq) - 1)
+      b: last seq
+      append seq (a + b)
+    ]
+  ]
+  seq
+]
+
+probe fib 10                            ; 0 1 1 2 3 5 8 13 21 34
+
+; --- State Machine ---
+; Objects with match for state transitions.
+
+TrafficLight: object [
+  field [state [string!] "red"]
+  field [timer [integer!] 0]
+
+  advance: does [
+    match self/state [
+      ["red"]    [self/state: "green"  self/timer: 30]
+      ["green"]  [self/state: "yellow" self/timer: 5]
+      ["yellow"] [self/state: "red"    self/timer: 45]
+    ]
+  ]
+
+  display: does [
+    rejoin ["[" (uppercase self/state) "] " self/timer "s"]
+  ]
+]
+
+light: make TrafficLight []
+print light/display                     ; [RED] 0s
+light/advance
+print light/display                     ; [GREEN] 30s
+light/advance
+print light/display                     ; [YELLOW] 5s
+light/advance
+print light/display                     ; [RED] 45s
+
+; --- Shared state via context + set-path ---
+; The idiomatic way to mutate state from inside a function
+; or loop: put state in a context, use path access.
+
+scores: context [total: 0 count: 0]
+
+add-score: function [n] [
+  scores/total: scores/total + n
+  scores/count: scores/count + 1
+]
+
+add-score 90
+add-score 85
+add-score 92
+print rejoin ["Average: " (scores/total / scores/count)]
+; Average: 89
+
+; --- Pipeline processing with attempt ---
+
+process-name: attempt [
+  when [not empty? it]
+  then [trim it]
+  then [uppercase it]
+]
+
+print process-name "  ray  "            ; RAY
+
+; --- Collect + filter pattern ---
+
+data: [1 2 3 4 5 6 7 8 9 10]
+
+big-evens: loop/collect [
+  for [n] in data
+  when [n > 5 and even? n]
+  [n]
+]
+probe big-evens                         ; 6 8 10
+
+; --- Accumulator with fold ---
+
+sum: loop/fold [for [acc n] in [10 20 30 40 50] [acc + n]]
+print sum                               ; 150
+
+; --- Safe division with try ---
+
+safe-calc: function [x y] [
+  result: try [x / y]
+  either result/ok [
+    result/value
+  ] [
+    rejoin ["ERROR: " result/message]
+  ]
+]
+print safe-calc 10 3                    ; 3.333...
+print safe-calc 10 0                    ; ERROR: division by zero
