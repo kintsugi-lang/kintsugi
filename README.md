@@ -1,7 +1,7 @@
 # Kintsugi
 
-A homoiconic programming language. Blocks of data interpreted by dialects, targeting clean Lua output for game dev on constrained devices. Influenced by REBOL, Red, Common Lisp, Lua, and Raku.
- 
+A homoiconic programming language. Blocks of data interpreted by dialects, targeting clean Lua output for game dev on constrained devices.
+
 > [!CAUTION]
 > This language is in active development. Things will break and explode.
 
@@ -64,10 +64,37 @@ bin/kintsugi examples/full-spec.ktg
 bin/kintsugi -c examples/hello.ktg
 ```
 
-## Learn
+## Learn Kintsugi
 
 The language spec is a single executable file that doubles as the documentation:
 
 **[`examples/full-spec.ktg`](examples/full-spec.ktg)**
 
 It covers everything: types, functions, control flow, dialects, objects, error handling, the module system, preprocessing, and gotchas for developers coming from C-style or REBOL-style languages. Because it's `.ktg`, it's tested -- if the docs are wrong, the tests fail.
+
+## Design Decisions
+
+The full spec with 30+ design decisions is at [`docs/language-spec-questions.md`](docs/language-spec-questions.md). Key principles:
+
+- **Dialects are scoped vocabularies.** A dialect changes what words mean inside its block. The compiler is a dialect.
+- **`context!` is mutable, `object!` is immutable.** The type determines mutability, not annotations.
+- **Set-word always shadows.** Mutate shared state via context + set-path.
+- **Only `false` and `none` are falsy.** 0, "", and [] are truthy.
+- **Explicit primitives, compositional magic.** Small explicit functions at the base.
+- **Rich compile-time, lean runtime.** Dialects resolve at compile time. The Playdate shouldn't know Kintsugi exists.
+
+## Architecture
+
+```
+Source text
+  -> Lexer (tokens)
+  -> Parser (AST: seq[KtgValue])
+  -> #preprocess pass (AST -> AST)
+  -> Evaluator (runs it) OR Lua Emitter (emits .lua)
+```
+
+Written in Nim. Compiles to C. 6,000 lines of source, 771 tests.
+
+## Lineage
+
+Influenced by REBOL, Red, Common Lisp, Lua, and Raku.

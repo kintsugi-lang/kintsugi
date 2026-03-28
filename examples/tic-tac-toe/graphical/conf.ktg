@@ -1,0 +1,10 @@
+bindings [
+  love/conf "love.conf" 'override
+]
+
+love/conf: function [t] [
+  t/window/title: "Kintsugi Tic-Tac-Toe"
+  t/window/width: 480
+  t/window/height: 540
+  t/window/resizable: false
+]

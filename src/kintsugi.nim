@@ -2,12 +2,13 @@
 ##
 ## Usage:
 ##   kintsugi                  — start REPL
-##   kintsugi <file>           — run a file
+##   kintsugi <file|dir>       — run a file or directory
 ##   kintsugi -e <expr>        — evaluate expression
-##   kintsugi -c <file>        — compile to Lua (stdout)
-##   kintsugi --compile <file> — compile to Lua (stdout)
+##   kintsugi -c <file|dir>    — compile to Lua
+##   kintsugi -c <file> -o <out> — compile to specific output
+##   kintsugi -c <file|dir> --dry-run — print compiled Lua to stdout
 
-import std/[os, strutils]
+import std/[os, strutils, algorithm]
 import core/types
 import parse/parser
 import eval/[dialect, evaluator, natives]
@@ -55,6 +56,9 @@ proc repl() =
     except CatchableError as e:
       echo "Error: " & e.msg
 
+proc hasHeader(source: string): bool =
+  source.strip.startsWith("Kintsugi")
+
 proc stripHeader(source: string): string =
   ## Strip Kintsugi [...] header if present.
   let trimmed = source.strip
@@ -74,16 +78,24 @@ proc stripHeader(source: string): string =
         return source[i+1 .. ^1]
   source
 
-proc runFile(path: string) =
+proc collectKtgFiles(dir: string): seq[string] =
+  for f in walkDir(dir):
+    if f.kind == pcFile and f.path.endsWith(".ktg"):
+      result.add(f.path)
+  result.sort()
+
+# --- Interpreter ---
+
+proc runSingleFile(path: string, eval: Evaluator = nil) =
   if not fileExists(path):
     echo "Error: file not found: " & path
     quit(1)
 
   let source = stripHeader(readFile(path))
-  let eval = setupEval()
+  let e = if eval != nil: eval else: setupEval()
 
   try:
-    discard eval.evalString(source)
+    discard e.evalString(source)
   except KtgError as e:
     echo "Error [" & e.kind & "]: " & e.msg
     if e.stack.len > 0:
@@ -95,26 +107,90 @@ proc runFile(path: string) =
     echo "Error: " & e.msg
     quit(1)
 
-proc compileLua(path: string, outPath: string = "") =
+proc runFile(path: string) =
+  if dirExists(path):
+    let files = collectKtgFiles(path)
+    if files.len == 0:
+      echo "No .ktg files found in: " & path
+      quit(1)
+    let eval = setupEval()
+    for f in files:
+      runSingleFile(f, eval)
+  else:
+    runSingleFile(path)
+
+# --- Compiler ---
+
+proc compileOne(path: string, outPath: string = "") =
+  ## Compile a single .ktg file. Header presence determines prelude.
   if not fileExists(path):
     echo "Error: file not found: " & path
     quit(1)
 
-  let source = stripHeader(readFile(path))
+  let content = readFile(path)
+  let isEntrypoint = hasHeader(content)
+  let source = stripHeader(content)
   let ast = parseSource(source)
   let eval = setupEval()
   let processed = eval.preprocess(ast)
   let sourceDir = parentDir(absolutePath(path))
-  let luaCode = emitLua(processed, sourceDir)
+
+  let luaCode = if isEntrypoint:
+                  emitLua(processed, sourceDir)
+                else:
+                  emitLuaModule(processed, sourceDir)
 
   if outPath.len > 0:
     writeFile(outPath, luaCode)
     echo "Compiled: " & path & " -> " & outPath
   else:
-    # Default: same name with .lua extension
     let defaultOut = path.changeFileExt("lua")
     writeFile(defaultOut, luaCode)
     echo "Compiled: " & path & " -> " & defaultOut
+
+proc compilePath(path: string, outPath: string = "") =
+  if dirExists(path):
+    if outPath.len > 0:
+      echo "Error: -o cannot be used with directory compilation"
+      quit(1)
+    var count = 0
+    for f in collectKtgFiles(path):
+      compileOne(f)
+      count += 1
+    if count == 0:
+      echo "No .ktg files found in: " & path
+  else:
+    compileOne(path, outPath)
+
+proc dryRunPath(path: string) =
+  if dirExists(path):
+    for f in collectKtgFiles(path):
+      let content = readFile(f)
+      let isEntrypoint = hasHeader(content)
+      let source = stripHeader(content)
+      let ast = parseSource(source)
+      let eval = setupEval()
+      let processed = eval.preprocess(ast)
+      let sourceDir = parentDir(absolutePath(f))
+      echo ";; " & f
+      if isEntrypoint:
+        echo emitLua(processed, sourceDir)
+      else:
+        echo emitLuaModule(processed, sourceDir)
+  else:
+    let content = readFile(path)
+    let isEntrypoint = hasHeader(content)
+    let source = stripHeader(content)
+    let ast = parseSource(source)
+    let eval = setupEval()
+    let processed = eval.preprocess(ast)
+    let sourceDir = parentDir(absolutePath(path))
+    if isEntrypoint:
+      echo emitLua(processed, sourceDir)
+    else:
+      echo emitLuaModule(processed, sourceDir)
+
+# --- Main ---
 
 proc main() =
   let args = commandLineParams()
@@ -125,6 +201,7 @@ proc main() =
 
   var i = 0
   var compile = false
+  var dryRun = false
   var evalExpr = ""
   var outPath = ""
   var filePath = ""
@@ -147,8 +224,8 @@ proc main() =
       else:
         echo "Error: -o requires a path"
         quit(1)
-    of "--stdout":
-      outPath = "-"
+    of "--dry-run":
+      dryRun = true
     else:
       filePath = args[i]
     i += 1
@@ -171,35 +248,25 @@ proc main() =
       quit(1)
     return
 
-  if filePath.len == 0 and not compile:
-    echo "Usage: kintsugi [options] [file]"
+  if filePath.len == 0:
+    echo "Usage: kintsugi [options] [file|dir]"
     echo ""
     echo "  (no args)                    Start REPL"
-    echo "  <file>                       Run a Kintsugi file"
+    echo "  <file|dir>                   Run a file or all .ktg files in a directory"
     echo "  -e, --eval <expr>            Evaluate expression"
-    echo "  -c, --compile <file>         Compile to Lua (.ktg -> .lua)"
+    echo "  -c, --compile <file|dir>     Compile to Lua (.ktg -> .lua)"
     echo "  -c <file> -o <out>           Compile to specific output file"
-    echo "  -c <file> --stdout           Compile to stdout"
+    echo "  -c <file|dir> --dry-run      Print compiled Lua to stdout"
     quit(1)
 
   if compile:
-    if outPath == "-":
-      # stdout mode
-      let source = stripHeader(readFile(filePath))
-      let ast = parseSource(source)
-      let eval = setupEval()
-      let processed = eval.preprocess(ast)
-      let sourceDir = parentDir(absolutePath(filePath))
-      echo emitLua(processed, sourceDir)
+    if dryRun:
+      dryRunPath(filePath)
     else:
-      compileLua(filePath, outPath)
+      compilePath(filePath, outPath)
     return
 
-  # Auto-detect: Kintsugi/Lua header means compile
-  let source = readFile(filePath)
-  if source.strip.startsWith("Kintsugi/Lua"):
-    compileLua(filePath, outPath)
-  else:
-    runFile(filePath)
+  # Default: interpret
+  runFile(filePath)
 
 main()

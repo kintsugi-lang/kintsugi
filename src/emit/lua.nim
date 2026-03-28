@@ -24,6 +24,7 @@ type
     bkConst   ## bare reference, no parens
     bkAlias   ## name mapping, emits as-is
     bkAssign  ## callback assignment target
+    bkOverride ## function definition: emits `function lua.path(...)` form
 
   RefinementInfo* = object
     name*: string
@@ -846,7 +847,7 @@ proc compileError(feature, hint: string, line: int) =
   raise EmitError(
     msg: "======== COMPILE ERROR ========\n" &
          "Interpreter-Only Feature\n" &
-         "'" & feature & "' cannot be used in Kintsugi/Lua -- it requires runtime evaluation" &
+         "'" & feature & "' cannot be used in compiled output -- it requires runtime evaluation" &
          (if line > 0: " @ line " & $line else: "") & "\n" &
          "  hint: " & hint
   )
@@ -1582,6 +1583,28 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
         pos += 1
       continue
 
+    # --- set [names] value — destructuring assignment ---
+    if val.kind == vkWord and val.wordKind == wkWord and val.wordName == "set":
+      pos += 1
+      if pos < vals.len and vals[pos].kind == vkBlock:
+        let namesBlock = vals[pos].blockVals
+        pos += 1
+        let valueExpr = e.emitExpr(vals, pos)
+        var names: seq[string] = @[]
+        for v in namesBlock:
+          if v.kind == vkWord and v.wordKind == wkWord:
+            let n = luaName(v.wordName)
+            names.add(n)
+            e.locals.incl(n)
+        # Use temp var to avoid evaluating the expression multiple times
+        let tmp = "_set_tmp"
+        e.ln("local " & tmp & " = " & valueExpr)
+        var indices: seq[string] = @[]
+        for i in 1 .. names.len:
+          indices.add(tmp & "[" & $i & "]")
+        e.ln("local " & names.join(", ") & " = " & indices.join(", "))
+        continue
+
     # --- Bound name as statement (e.g., update-sprites -> gfx.sprite.update()) ---
     if val.kind == vkWord and val.wordKind == wkWord and
        val.wordName in e.nameMap and val.wordName notin ["if", "either", "unless",
@@ -1661,7 +1684,10 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
           let spec = parseSpec(specBlock)
           let params = spec.allLuaParams()
 
-          if isPath or isBound:
+          let isOverride = rawName in e.bindingKinds and e.bindingKinds[rawName] == bkOverride
+          if isOverride:
+            e.ln("function " & name & "(" & params.join(", ") & ")")
+          elif isPath or isBound:
             e.ln(name & " = function(" & params.join(", ") & ")")
           else:
             e.ln(prefix & "function " & name & "(" & params.join(", ") & ")")
@@ -1670,7 +1696,7 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
           for p in params:
             e.locals.incl(p)
           e.indent += 1
-          e.emitBody(bodyBlock, asReturn = not (isPath or isBound))
+          e.emitBody(bodyBlock, asReturn = not (isPath or isBound or isOverride))
           e.indent -= 1
           e.locals = savedLocals
           e.ln("end")
@@ -1978,6 +2004,11 @@ proc findLastStmtStart(e: var LuaEmitter, vals: seq[KtgValue]): int =
         pos += 1
         discard e.emitExpr(vals, pos)
         continue
+      of "set":
+        pos += 1
+        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+        discard e.emitExpr(vals, pos)
+        continue
       of "remove":
         pos += 1
         discard e.emitExpr(vals, pos)
@@ -2183,6 +2214,9 @@ proc prescanBindings(e: var LuaEmitter, blk: seq[KtgValue]) =
       e.nameMap[name] = luaPath
       e.bindings[name] = BindingInfo(arity: 1, isFunction: true, isUnknown: false)
       e.bindingKinds[name] = bkAssign
+    of "override":
+      e.nameMap[name] = luaPath
+      e.bindingKinds[name] = bkOverride
     else:
       discard
 
@@ -2322,7 +2356,7 @@ proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
       parts.add(lua & " = " & lua)
     e.ln("return {" & parts.join(", ") & "}")
 
-  LuaPrelude & e.output
+  e.output
 
 proc emitLua*(ast: seq[KtgValue], sourceDir: string = ""): string =
   ## Walk the AST and produce Lua source code.

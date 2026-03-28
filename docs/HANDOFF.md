@@ -27,7 +27,7 @@ The core language is complete and usable:
 - **Parse dialect** -- PEG-style with backtracking, string and block modes, captures, collect/keep
 - **Preprocessing** -- `#preprocess [...]` and `#[expr]` inline form, full language at preprocess time
 - **Modules** -- `load`, `load/eval`, `load/header`, `load/fresh`, `require`, `require/fresh`, `exports`, caching
-- **Lua emitter** -- compiles Kintsugi/Lua dialect to Lua 5.1 source
+- **Lua emitter** -- compiles Kintsugi to Lua 5.1 source via -c flag
 - **Chain operator** -- `->` for method-style calls
 - **Natives** -- 80+ built-in functions including string ops, file I/O, date/time, freeze/copy with /deep refinements
 - **Emacs mode** -- syntax highlighting, indentation

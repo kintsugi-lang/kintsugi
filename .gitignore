@@ -1,4 +1,3 @@
 .claude/
 bin/
 *.lua
-!**/conf.lua

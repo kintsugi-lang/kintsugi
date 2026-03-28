@@ -1,4 +1,4 @@
-Kintsugi/Lua [
+Kintsugi [
   name: 'tic-tac-toe-love
   version: 1.0.0
 ]
@@ -12,14 +12,18 @@ Kintsugi/Lua [
 ; =============================================================
 
 bindings [
-  love/graphics/clear        "love.graphics.clear"        'call 3
-  love/graphics/setColor     "love.graphics.setColor"     'call 3
-  love/graphics/setLineWidth "love.graphics.setLineWidth" 'call 1
-  love/graphics/line         "love.graphics.line"         'call 4
-  love/graphics/circle       "love.graphics.circle"       'call 4
-  love/graphics/printf       "love.graphics.printf"       'call 5
-  love/draw                  "love.draw"                  'assign
-  love/mousepressed          "love.mousepressed"          'assign
+  lg "love.graphics" 'alias
+  le "love.event" 'alias
+  lg/clear "love.graphics.clear" 'call 3
+  lg/setColor "love.graphics.setColor" 'call 3
+  lg/setLineWidth "love.graphics.setLineWidth" 'call 1
+  lg/line "love.graphics.line" 'call 4
+  lg/circle "love.graphics.circle" 'call 4
+  lg/printf "love.graphics.printf" 'call 5
+  love/draw "love.draw" 'assign
+  love/mousepressed "love.mousepressed" 'assign
+  love/keypressed "love.keypressed" 'assign
+  le/quit "love.event.quit" 'call 0
 ]
 
 ; --- Constants ---
@@ -155,16 +159,16 @@ xy-to-pos: function [mx my] [
 ; --- LÖVE2D callbacks ---
 
 love/draw: function [] [
-  love/graphics/clear (pick bg 1) (pick bg 2) (pick bg 3)
+  lg/clear (pick bg 1) (pick bg 2) (pick bg 3)
 
   ; grid lines
-  love/graphics/setColor (pick grid 1) (pick grid 2) (pick grid 3)
-  love/graphics/setLineWidth 2
+  lg/setColor (pick grid 1) (pick grid 2) (pick grid 3)
+  lg/setLineWidth 2
   loop [for [i] from 1 to 2 [
     x: offset + padding + i * cell-size
     y: offset + padding + i * cell-size
-    love/graphics/line x (offset + padding) x (offset + padding + cell-size * 3)
-    love/graphics/line (offset + padding) y (offset + padding + cell-size * 3) y
+    lg/line x (offset + padding) x (offset + padding + cell-size * 3)
+    lg/line (offset + padding) y (offset + padding + cell-size * 3) y
   ]]
 
   ; marks
@@ -175,37 +179,37 @@ love/draw: function [] [
       cx: (pick coords 1) + cell-size / 2
       cy: (pick coords 2) + cell-size / 2
       either cell = 'x [
-        love/graphics/setColor (pick x-clr 1) (pick x-clr 2) (pick x-clr 3)
-        love/graphics/setLineWidth line-width
+        lg/setColor (pick x-clr 1) (pick x-clr 2) (pick x-clr 3)
+        lg/setLineWidth line-width
         m: cell-size / 4
         px: pick coords 1
         py: pick coords 2
-        love/graphics/line (px + m) (py + m) (px + cell-size - m) (py + cell-size - m)
-        love/graphics/line (px + cell-size - m) (py + m) (px + m) (py + cell-size - m)
+        lg/line (px + m) (py + m) (px + cell-size - m) (py + cell-size - m)
+        lg/line (px + cell-size - m) (py + m) (px + m) (py + cell-size - m)
       ] [
-        love/graphics/setColor (pick o-clr 1) (pick o-clr 2) (pick o-clr 3)
-        love/graphics/setLineWidth line-width
-        love/graphics/circle "line" cx cy (cell-size / 3)
+        lg/setColor (pick o-clr 1) (pick o-clr 2) (pick o-clr 3)
+        lg/setLineWidth line-width
+        lg/circle "line" cx cy (cell-size / 3)
       ]
     ]
   ]]
 
   ; status text
-  love/graphics/setColor (pick txt 1) (pick txt 2) (pick txt 3)
+  lg/setColor (pick txt 1) (pick txt 2) (pick txt 3)
   either board/status = 'playing [
     msg: either board/turn = 'x ["Your turn (click a cell)"] ["AI thinking..."]
-    love/graphics/printf msg 0 475 480 "center"
+    lg/printf msg 0 475 480 "center"
   ] [
     either board/status = 'x-wins [
-      love/graphics/setColor (pick win 1) (pick win 2) (pick win 3)
-      love/graphics/printf "You win! Click to restart." 0 475 480 "center"
+      lg/setColor (pick win 1) (pick win 2) (pick win 3)
+      lg/printf "You win! Click to restart." 0 475 480 "center"
     ] [
       either board/status = 'o-wins [
-        love/graphics/setColor (pick x-clr 1) (pick x-clr 2) (pick x-clr 3)
-        love/graphics/printf "AI wins! Click to restart." 0 475 480 "center"
+        lg/setColor (pick x-clr 1) (pick x-clr 2) (pick x-clr 3)
+        lg/printf "AI wins! Click to restart." 0 475 480 "center"
       ] [
-        love/graphics/setColor (pick drw 1) (pick drw 2) (pick drw 3)
-        love/graphics/printf "Draw! Click to restart." 0 475 480 "center"
+        lg/setColor (pick drw 1) (pick drw 2) (pick drw 3)
+        lg/printf "Draw! Click to restart." 0 475 480 "center"
       ]
     ]
   ]
@@ -235,4 +239,8 @@ love/mousepressed: function [mx my button] [
       place ai-pos 'o
     ]
   ]
+]
+
+love/keypressed: function [key] [
+  if key = "escape" [le/quit]
 ]

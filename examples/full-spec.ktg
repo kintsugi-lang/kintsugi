@@ -17,14 +17,12 @@ Kintsugi [
 ; Influenced by REBOL, Red, Ren-C, Common Lisp, D, Python,
 ; Kotlin, and Raku.
 ;
-; Dialects (file header determines target):
+; Headers:
+;   Kintsugi [...]    - marks a file as an entrypoint (with metadata)
+;   (no header)       - module (loaded via require)
 ;
-;   Kintsugi/Script   - the base language (interpreted)
-;   Kintsugi/Lua      - compiles to Lua 5.1 (Playdate, LOVE2D)
-;
-; "Kintsugi" alone means Kintsugi/Script.
-; Compilation targets extend Script -- they never remove
-; features, only add target-specific capabilities.
+; The header determines prelude inclusion when compiling.
+; Compilation is always explicit via -c flag.
 ;
 ; File extensions:
 ;   .ktg - For all source files.
@@ -1547,7 +1545,7 @@ print second result                     ; 12
 ; evaluation and cannot be compiled. Using them means your
 ; code runs only in the interpreter.
 ;
-; For compiled targets (Kintsugi/Lua), use #preprocess to
+; In compiled output, use #preprocess to
 ; generate code at compile time instead.
 
 
@@ -1599,8 +1597,8 @@ print pp-val                            ; 3
 print pp-double 5                       ; 10
 
 ; Platform values:
-;   Kintsugi []          -> platform = 'script
-;   Kintsugi/Lua []      -> platform = 'lua
+;   interpreter          -> platform = 'script
+;   compiled via -c      -> platform = 'lua
 
 
 ; ============================================================
@@ -1658,13 +1656,11 @@ print pp-double 5                       ; 10
 ; ============================================================
 ; HEADER DIALECT
 ; ============================================================
-; Programs may begin with a header block. The header word
-; is the dialect and determines the compilation target.
-; Headers are optional -- a headerless file is just code.
+; Programs may begin with a header block. The header marks
+; the file as an entrypoint. Files without headers are modules.
 ;
-; Dialect words:
-;   Kintsugi          -- Script (interpreted)
-;   Kintsugi/Lua      -- compiles to Lua 5.1
+; When compiling (-c), entrypoints get the runtime prelude.
+; Modules don't — they're loaded via require.
 ;
 ; Header contents are optional metadata for tooling.
 ; No required fields. No fields with language-level effects.
@@ -1676,10 +1672,9 @@ print pp-double 5                       ; 10
 ;   file:       - source file path
 ;
 ; Examples:
-;   Kintsugi []                         ; script, no metadata
-;   Kintsugi [version: 1.0.0]          ; script with metadata
-;   Kintsugi/Lua []                     ; compiles to Lua
-;   Kintsugi/Lua [version: 1.0.0]      ; Lua with metadata
+;   Kintsugi []                         ; entrypoint, no metadata
+;   Kintsugi [version: 1.0.0]          ; entrypoint with metadata
+;   (no header)                         ; module
 
 
 ; ============================================================
