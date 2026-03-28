@@ -13,7 +13,7 @@ suite "user function refinements":
   test "basic boolean refinement":
     let eval = makeEval()
     discard eval.evalString("""
-      greet: function [name [string!] / loud] [
+      greet: function [name [string!] /loud] [
         message: join "Hello, " name
         if loud [message: uppercase message]
         message
@@ -25,7 +25,7 @@ suite "user function refinements":
   test "refinement with parameter":
     let eval = makeEval()
     discard eval.evalString("""
-      format: function [val / pad size [integer!]] [
+      format: function [val /pad size [integer!]] [
         either pad [
           rejoin [val " (padded to " size ")"]
         ] [
@@ -39,7 +39,7 @@ suite "user function refinements":
   test "multiple refinements":
     let eval = makeEval()
     discard eval.evalString("""
-      say: function [msg [string!] / loud / prefix tag [string!]] [
+      say: function [msg [string!] /loud /prefix tag [string!]] [
         result: msg
         if prefix [result: join tag result]
         if loud [result: uppercase result]
@@ -53,7 +53,7 @@ suite "user function refinements":
   test "inactive refinement defaults to false":
     let eval = makeEval()
     discard eval.evalString("""
-      check-ref: function [/ active] [
+      check-ref: function [/active] [
         active
       ]
     """)
@@ -63,7 +63,7 @@ suite "user function refinements":
   test "refinement param defaults to none when inactive":
     let eval = makeEval()
     discard eval.evalString("""
-      check-param: function [/ with name [string!]] [
+      check-param: function [/with name [string!]] [
         either with [name] [none]
       ]
     """)

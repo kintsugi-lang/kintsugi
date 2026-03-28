@@ -14,8 +14,9 @@
 ##   - `#preprocess` runs at compile time (not in this file).
 ##   - `freeze`/`frozen?` are no-ops in compiled output.
 
-import std/[strutils, tables, sequtils, sets]
+import std/[strutils, tables, sequtils, sets, os]
 import ../core/types
+import ../parse/parser
 
 type
   BindingKind* = enum
@@ -24,19 +25,30 @@ type
     bkAlias   ## name mapping, emits as-is
     bkAssign  ## callback assignment target
 
+  RefinementInfo* = object
+    name*: string
+    paramCount*: int
+
+  BindingInfo* = object
+    arity*: int          ## -1 = value (not callable), 0+ = function with N params
+    isFunction*: bool    ## true = definitely a function, false = definitely a value
+    isUnknown*: bool     ## true = couldn't determine (use heuristic)
+    refinements*: seq[RefinementInfo]
+
   LuaEmitter = object
     indent: int
     output: string
-    ## Track known function arities (min args).
-    arities: Table[string, int]
-    ## Track max arity for variadic bindings. If absent, max = min.
-    maxArities: Table[string, int]
+    bindings: Table[string, BindingInfo]
     ## Track locally declared names. Undeclared names emit as globals.
     locals: HashSet[string]
     ## Map Kintsugi name -> Lua path for foreign bindings.
     nameMap: Table[string, string]
     ## Track the kind for each binding entry.
     bindingKinds: Table[string, BindingKind]
+    ## Source directory for resolving require paths.
+    sourceDir: string
+    ## Modules currently being compiled (cycle detection).
+    compiling: HashSet[string]
 
   EmitError* = ref object of CatchableError
 
@@ -54,9 +66,16 @@ proc ln(e: var LuaEmitter, s: string) =
 proc raw(e: var LuaEmitter, s: string) =
   e.output &= s
 
+proc getBinding(e: LuaEmitter, name: string): BindingInfo =
+  if name in e.bindings: e.bindings[name]
+  else: BindingInfo(arity: -1, isFunction: false, isUnknown: true)
+
 proc arity(e: LuaEmitter, name: string): int =
-  ## Return known arity, or -1 for unknown (treat as 0-arg variable reference).
-  if name in e.arities: e.arities[name] else: -1
+  ## Return known arity, or -1 for unknown.
+  let b = e.getBinding(name)
+  if b.isFunction: b.arity
+  elif b.isUnknown: -1
+  else: -1
 
 proc sanitize(name: string): string =
   ## Convert Kintsugi identifiers to valid Lua identifiers.
@@ -90,104 +109,107 @@ proc luaEscape(s: string): string =
 # Native arity table — what the emitter needs to know about built-in funcs
 # ---------------------------------------------------------------------------
 
-proc initNativeArities(): Table[string, int] =
-  result = initTable[string, int]()
+proc nativeBinding(arity: int): BindingInfo =
+  BindingInfo(arity: arity, isFunction: true, isUnknown: false)
+
+proc initNativeBindings(): Table[string, BindingInfo] =
+  result = initTable[string, BindingInfo]()
   # Output
-  result["print"] = 1
-  result["probe"] = 1
-  result["import"] = 1
-  result["assert"] = 1
+  result["print"] = nativeBinding(1)
+  result["probe"] = nativeBinding(1)
+  result["import"] = nativeBinding(1)
+  result["assert"] = nativeBinding(1)
   # Control flow
-  result["if"] = 2       # condition block
-  result["either"] = 3   # condition true-block false-block
-  result["unless"] = 2   # condition block
-  result["not"] = 1
-  result["return"] = 1
-  result["break"] = 0
-  # Type introspection (erased in compiled output, but arity needed for parsing)
-  result["type"] = 1
+  result["if"] = nativeBinding(2)       # condition block
+  result["either"] = nativeBinding(3)   # condition true-block false-block
+  result["unless"] = nativeBinding(2)   # condition block
+  result["not"] = nativeBinding(1)
+  result["return"] = nativeBinding(1)
+  result["break"] = nativeBinding(0)
+  # Type introspection
+  result["type"] = nativeBinding(1)
   # Type predicates — all arity 1
   for name in ["integer", "float", "string", "logic", "none", "money",
                "pair", "tuple", "date", "time", "file", "url", "email",
                "block", "paren", "map", "set", "context", "object",
                "function", "native", "word", "type", "number"]:
-    result[name & "?"] = 1
-  result["is?"] = 2
+    result[name & "?"] = nativeBinding(1)
+  result["is?"] = nativeBinding(2)
   # Series
-  result["size?"] = 1
-  result["length?"] = 1
-  result["empty?"] = 1
-  result["first"] = 1
-  result["second"] = 1
-  result["last"] = 1
-  result["pick"] = 2
-  result["append"] = 2
-  result["copy"] = 1
-  result["select"] = 2
-  result["has?"] = 2
-  result["index?"] = 2
-  result["insert"] = 3
-  result["remove"] = 2
+  result["size?"] = nativeBinding(1)
+  result["length?"] = nativeBinding(1)
+  result["empty?"] = nativeBinding(1)
+  result["first"] = nativeBinding(1)
+  result["second"] = nativeBinding(1)
+  result["last"] = nativeBinding(1)
+  result["pick"] = nativeBinding(2)
+  result["append"] = nativeBinding(2)
+  result["copy"] = nativeBinding(1)
+  result["select"] = nativeBinding(2)
+  result["has?"] = nativeBinding(2)
+  result["index?"] = nativeBinding(2)
+  result["insert"] = nativeBinding(3)
+  result["remove"] = nativeBinding(2)
   # String ops
-  result["join"] = 2
-  result["rejoin"] = 1
-  result["trim"] = 1
-  result["uppercase"] = 1
-  result["lowercase"] = 1
-  result["split"] = 2
-  result["replace"] = 3
-  result["substring"] = 3
-  result["starts-with?"] = 2
-  result["ends-with?"] = 2
+  result["join"] = nativeBinding(2)
+  result["rejoin"] = nativeBinding(1)
+  result["trim"] = nativeBinding(1)
+  result["uppercase"] = nativeBinding(1)
+  result["lowercase"] = nativeBinding(1)
+  result["split"] = nativeBinding(2)
+  result["replace"] = nativeBinding(3)
+  result["substring"] = nativeBinding(3)
+  result["starts-with?"] = nativeBinding(2)
+  result["ends-with?"] = nativeBinding(2)
   # Math
-  result["abs"] = 1
-  result["negate"] = 1
-  result["min"] = 2
-  result["max"] = 2
-  result["round"] = 1
-  result["odd?"] = 1
-  result["even?"] = 1
-  result["sqrt"] = 1
+  result["abs"] = nativeBinding(1)
+  result["negate"] = nativeBinding(1)
+  result["min"] = nativeBinding(2)
+  result["max"] = nativeBinding(2)
+  result["round"] = nativeBinding(1)
+  result["odd?"] = nativeBinding(1)
+  result["even?"] = nativeBinding(1)
+  result["sqrt"] = nativeBinding(1)
   # Homoiconic — do/compose/bind are compile errors in Lua mode
-  result["do"] = 1
-  result["reduce"] = 1
-  result["all"] = 1
-  result["any"] = 1
+  result["do"] = nativeBinding(1)
+  result["reduce"] = nativeBinding(1)
+  result["all"] = nativeBinding(1)
+  result["any"] = nativeBinding(1)
   # Function creation
-  result["function"] = 2
+  result["function"] = nativeBinding(2)
   # Context/Object
-  result["context"] = 1
-  result["freeze"] = 1
-  result["frozen?"] = 1
-  result["words-of"] = 1
+  result["context"] = nativeBinding(1)
+  result["freeze"] = nativeBinding(1)
+  result["frozen?"] = nativeBinding(1)
+  result["words-of"] = nativeBinding(1)
   # Type conversion
-  result["to"] = 2
+  result["to"] = nativeBinding(2)
   # Apply
-  result["apply"] = 2
+  result["apply"] = nativeBinding(2)
   # Sort
-  result["sort"] = 1
+  result["sort"] = nativeBinding(1)
   # Set (destructuring)
-  result["set"] = 2
+  result["set"] = nativeBinding(2)
   # Error handling
-  result["error"] = 3
-  result["try"] = 1
+  result["error"] = nativeBinding(3)
+  result["try"] = nativeBinding(1)
   # Match
-  result["match"] = 2
+  result["match"] = nativeBinding(2)
   # Make
-  result["make"] = 2
+  result["make"] = nativeBinding(2)
   # IO
-  result["read-file"] = 1
-  result["write-file"] = 2
-  result["load"] = 1
-  result["save"] = 2
-  result["require"] = 1
-  result["exports"] = 1
+  result["read-file"] = nativeBinding(1)
+  result["write-file"] = nativeBinding(2)
+  result["load"] = nativeBinding(1)
+  result["save"] = nativeBinding(2)
+  result["require"] = nativeBinding(1)
+  result["exports"] = nativeBinding(1)
   # Set operations
-  result["charset"] = 1
-  result["union"] = 2
-  result["intersect"] = 2
+  result["charset"] = nativeBinding(1)
+  result["union"] = nativeBinding(2)
+  result["intersect"] = nativeBinding(2)
   # Bindings is a compile-time dialect — handled specially in prescan
-  result["bindings"] = 1
+  result["bindings"] = nativeBinding(1)
   # Loop is a dialect — handled specially, not via arity
 
 # ---------------------------------------------------------------------------
@@ -222,8 +244,12 @@ proc resolvedName(e: LuaEmitter, name: string): string =
 proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string
 proc emitBody(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false)
 proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue])
+proc emitBlockReturn(e: var LuaEmitter, vals: seq[KtgValue])
 proc emitMatchExpr(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValue]): string
 proc emitEitherExpr(e: var LuaEmitter, cond: string, trueBlock, falseBlock: seq[KtgValue]): string
+proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
+                    compiling: HashSet[string] = initHashSet[string]()): string
+proc findExports(ast: seq[KtgValue]): seq[string]
 
 # ---------------------------------------------------------------------------
 # Infix operators
@@ -250,7 +276,11 @@ proc emitPath(name: string): string =
   let parts = name.split('/')
   result = luaName(parts[0])
   for i in 1 ..< parts.len:
-    result &= "." & luaName(parts[i])
+    if parts[i].startsWith(":"):
+      # Dynamic get-word segment: /:var → [var]
+      result &= "[" & luaName(parts[i][1..^1]) & "]"
+    else:
+      result &= "." & luaName(parts[i])
 
 # ---------------------------------------------------------------------------
 # Emit a single literal value as a Lua expression string
@@ -322,26 +352,65 @@ proc emitContextBlock(e: var LuaEmitter, vals: seq[KtgValue]): string =
   "{\n" & parts.mapIt(repeat("  ", e.indent + 1) & it).join(",\n") & "\n" & e.pad & "}"
 
 # ---------------------------------------------------------------------------
+# Shared function spec parser
+# ---------------------------------------------------------------------------
+
+type
+  ParsedSpec = object
+    params: seq[string]
+    refinements: seq[tuple[name: string, params: seq[string]]]
+    returnType: string
+
+proc parseSpec(specBlock: seq[KtgValue]): ParsedSpec =
+  ## Parse a function spec block into params, refinements, and return type.
+  var params: seq[string] = @[]
+  var refinements: seq[tuple[name: string, params: seq[string]]] = @[]
+  var returnType = ""
+  var i = 0
+  var inRefinement = false
+  while i < specBlock.len:
+    let s = specBlock[i]
+    if s.kind == vkWord and s.wordKind == wkWord and s.wordName.startsWith("/"):
+      let refName = s.wordName[1..^1]
+      refinements.add((name: refName, params: @[]))
+      inRefinement = true
+      i += 1
+      continue
+    if s.kind == vkWord and s.wordKind == wkWord:
+      if inRefinement:
+        refinements[^1].params.add(luaName(s.wordName))
+      else:
+        params.add(luaName(s.wordName))
+    elif s.kind == vkBlock:
+      discard  # type annotation
+    elif s.kind == vkWord and s.wordKind == wkSetWord and s.wordName == "return":
+      i += 1
+      if i < specBlock.len and specBlock[i].kind == vkBlock:
+        let typeBlock = specBlock[i].blockVals
+        if typeBlock.len > 0:
+          returnType = $typeBlock[0]
+    elif s.kind == vkWord and s.wordKind == wkSetWord:
+      # Other set-words in spec — skip
+      discard
+    i += 1
+  ParsedSpec(params: params, refinements: refinements, returnType: returnType)
+
+proc allLuaParams(spec: ParsedSpec): seq[string] =
+  ## Full Lua param list: regular params + refinement flags + refinement params.
+  result = spec.params
+  for r in spec.refinements:
+    result.add(luaName(r.name))
+    for rp in r.params:
+      result.add(rp)
+
+# ---------------------------------------------------------------------------
 # Emit function definition
 # ---------------------------------------------------------------------------
 
 proc emitFuncDef(e: var LuaEmitter, specBlock, bodyBlock: seq[KtgValue]): string =
   ## Parse a function spec [a b] and body [...] into a Lua function expression.
-  var params: seq[string] = @[]
-  var i = 0
-  while i < specBlock.len:
-    let s = specBlock[i]
-    if s.kind == vkWord and s.wordKind == wkWord:
-      # Skip 'return:' set-word and its type block
-      params.add(luaName(s.wordName))
-    elif s.kind == vkWord and s.wordKind == wkSetWord:
-      # return: [type!] — skip the type annotation
-      i += 1
-      if i < specBlock.len and specBlock[i].kind == vkBlock:
-        discard  # skip type block
-    elif s.kind == vkBlock:
-      discard  # type annotation block — skip
-    i += 1
+  let spec = parseSpec(specBlock)
+  let params = spec.allLuaParams()
 
   let paramStr = params.join(", ")
   var funcStr = "function(" & paramStr & ")\n"
@@ -497,8 +566,9 @@ proc emitLoop(e: var LuaEmitter, blk: seq[KtgValue]) =
 # Emit match as if-chain (statement form)
 # ---------------------------------------------------------------------------
 
-proc emitMatchStmt(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValue]) =
-  ## match value [...rules...] as a statement (no value produced)
+proc emitMatchStmt(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValue],
+                   asReturn: bool = false) =
+  ## match value [...rules...] as a statement. If asReturn, emit return in handlers.
   var pos = 0
   var first = true
 
@@ -515,11 +585,13 @@ proc emitMatchStmt(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValu
         else:
           e.ln("else")
         e.indent += 1
-        e.emitBlock(rulesBlock[pos].blockVals)
+        if asReturn:
+          e.emitBlockReturn(rulesBlock[pos].blockVals)
+        else:
+          e.emitBlock(rulesBlock[pos].blockVals)
         e.indent -= 1
         pos += 1
-      if not first:
-        e.ln("end")
+      # Don't emit end here — the loop-end handler at line 688 does it
       continue
 
     # Expect pattern block
@@ -609,7 +681,10 @@ proc emitMatchStmt(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValu
     for (name, expr) in bindings:
       e.ln("local " & name & " = " & expr)
 
-    e.emitBlock(handler)
+    if asReturn:
+      e.emitBlockReturn(handler)
+    else:
+      e.emitBlock(handler)
     e.indent -= 1
     first = false
 
@@ -876,59 +951,100 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
     of wkWord:
       let name = val.wordName
 
-      # --- Known refinement calls (before generic path handling) ---
+      # --- Known native refinement calls ---
       if name == "round/down":
         let arg = e.emitExpr(vals, pos)
         result = "math.floor(" & arg & ")"
       elif name == "round/up":
         let arg = e.emitExpr(vals, pos)
         result = "math.ceil(" & arg & ")"
+      elif name == "copy/deep":
+        let arg = e.emitExpr(vals, pos)
+        result = "_deep_copy(" & arg & ")"
+      elif name == "sort/by":
+        let arr = e.emitExpr(vals, pos)
+        let keyFn = e.emitExpr(vals, pos)
+        result = "(function() table.sort(" & arr & ", function(a, b) return " & keyFn & "(a) < " & keyFn & "(b) end); return " & arr & " end)()"
+      elif name == "sort/with":
+        let arr = e.emitExpr(vals, pos)
+        let cmpFn = e.emitExpr(vals, pos)
+        result = "(function() table.sort(" & arr & ", " & cmpFn & "); return " & arr & " end)()"
+      elif name == "try/handle":
+        # try/handle [body] [handler] — handler receives error as 'it'
+        if pos < vals.len and vals[pos].kind == vkBlock:
+          let blk = vals[pos].blockVals
+          pos += 1
+          # Handler block — evaluated with 'it' bound to error
+          var handlerBody = ""
+          if pos < vals.len and vals[pos].kind == vkBlock:
+            let hblk = vals[pos].blockVals
+            pos += 1
+            let saved = e.output
+            e.output = ""
+            e.indent += 2
+            e.emitBody(hblk, asReturn = true)
+            handlerBody = e.output
+            e.output = saved
+          let saved = e.output
+          e.output = ""
+          e.indent += 1
+          e.emitBody(blk, asReturn = true)
+          let bodyStr = e.output
+          e.output = saved
+          e.indent -= 1
+          result = "(function()\n" &
+                   e.pad & "  local ok, it = pcall(function()\n" &
+                   bodyStr &
+                   e.pad & "  end)\n" &
+                   e.pad & "  if ok then return it\n" &
+                   e.pad & "  else\n" &
+                   handlerBody &
+                   e.pad & "  end\n" &
+                   e.pad & "end)()"
+        else:
+          result = "nil"
+      elif name == "freeze/deep":
+        # No-op in compiled output, just pass through
+        result = e.emitExpr(vals, pos)
 
       # --- Path access or call: obj/field/sub ---
       elif name.contains('/'):
+        let parts = name.split('/')
+        let head = parts[0]
         let path = emitPath(name)
-        let a = e.arity(name)
-        if a > 0:
-          # known arity
+        let headBinding = e.getBinding(head)
+        let fullBinding = e.getBinding(name)
+
+        if fullBinding.isFunction and not fullBinding.isUnknown:
+          # Whole path is a known binding (from bindings dialect)
           var args: seq[string] = @[]
-          for i in 0 ..< a:
+          for i in 0 ..< fullBinding.arity:
             args.add(e.emitExpr(vals, pos))
           result = path & "(" & args.join(", ") & ")"
-        elif a == 0:
-          result = path & "()"
-        elif pos < vals.len:
-          # unknown path — heuristic: if next token looks like an arg, consume as call
-          let next = vals[pos]
-          let looksLikeArg = not (
-            next.kind == vkWord and next.wordName == "->" or
-            next.kind == vkWord and next.wordKind == wkSetWord or
-            next.kind == vkWord and next.wordKind == wkMetaWord or
-            isInfixOp(next) or
-            (next.kind == vkWord and next.wordKind == wkWord and
-             next.wordName in ["if", "either", "unless", "loop", "match",
-                                "print", "return", "break", "error", "try"])
-          )
-          if looksLikeArg:
-            var args: seq[string] = @[]
-            while pos < vals.len:
-              let n = vals[pos]
-              if n.kind == vkWord and n.wordName == "->": break
-              if isInfixOp(n): break
-              if n.kind == vkWord and n.wordKind == wkSetWord: break
-              if n.kind == vkWord and n.wordKind == wkMetaWord: break
-              if n.kind == vkWord and n.wordKind == wkWord and
-                 n.wordName in ["if", "either", "unless", "loop", "match",
-                                  "print", "return", "break", "error", "try"]: break
-              if n.kind == vkBlock: break
-              # peek: if followed by ->, this word starts a chain — stop collecting args
-              if n.kind == vkWord and n.wordKind == wkWord and
-                 pos + 1 < vals.len and vals[pos + 1].kind == vkWord and vals[pos + 1].wordName == "->":
-                break
-              args.add(e.emitExpr(vals, pos))
-            result = path & "(" & args.join(", ") & ")"
-          else:
-            result = path
+        elif headBinding.isFunction and not headBinding.isUnknown:
+          # Head is a known function — refinement call
+          let refNames = parts[1..^1]
+          var args: seq[string] = @[]
+          # Consume regular args
+          for i in 0 ..< headBinding.arity:
+            args.add(e.emitExpr(vals, pos))
+          # Emit refinement flags and params
+          if headBinding.refinements.len > 0:
+            for r in headBinding.refinements:
+              let active = r.name in refNames
+              args.add(if active: "true" else: "false")
+              if active:
+                for j in 0 ..< r.paramCount:
+                  args.add(e.emitExpr(vals, pos))
+              else:
+                for j in 0 ..< r.paramCount:
+                  args.add("nil")
+          result = e.resolvedName(head) & "(" & args.join(", ") & ")"
+        elif not headBinding.isFunction and not headBinding.isUnknown:
+          # Head is a known value — pure field access, no arg consumption
+          result = path
         else:
+          # Unknown path — default to field access (safe: won't consume args)
           result = path
 
       # --- Interpreter-only features: compile error ---
@@ -1262,36 +1378,63 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
         let arg = e.emitExpr(vals, pos)
         result = arg
 
+      # --- require: compile dependency and emit Lua require() ---
+      elif name == "require":
+        if pos < vals.len:
+          let pathVal = vals[pos]
+          pos += 1
+          var rawPath = case pathVal.kind
+            of vkFile: pathVal.filePath
+            of vkString: pathVal.strVal
+            else: $pathVal
+          # Resolve to absolute path for cycle detection
+          let srcDir = if e.sourceDir.len > 0: e.sourceDir else: getCurrentDir()
+          let absPath = if rawPath.isAbsolute: rawPath else: srcDir / rawPath
+          # Cycle detection
+          if absPath in e.compiling:
+            raise EmitError(msg: "circular require detected: " & rawPath)
+          # Compute Lua module name (filename without extension)
+          let moduleName = rawPath.changeFileExt("").replace("/", ".").replace("\\", ".")
+          # Compile the required file
+          if fileExists(absPath):
+            let depSource = readFile(absPath)
+            var depAst = parseSource(depSource)
+            # Strip Kintsugi header
+            if depAst.len >= 2 and depAst[0].kind == vkWord and depAst[0].wordKind == wkWord and
+               depAst[0].wordName.startsWith("Kintsugi") and depAst[1].kind == vkBlock:
+              depAst = depAst[2..^1]
+            let outPath = absPath.changeFileExt("lua")
+            # Add this file to compiling set for cycle detection
+            var childCompiling = e.compiling
+            childCompiling.incl(absPath)
+            let depDir = parentDir(absPath)
+            let depLua = emitLuaModule(depAst, depDir, childCompiling)
+            writeFile(outPath, depLua)
+          result = "require(\"" & moduleName & "\")"
+        else:
+          result = "nil"
+
+      # --- exports: handled at module level, skip in expression context ---
+      elif name == "exports":
+        discard e.emitExpr(vals, pos)  # consume the block arg
+        result = "nil"
+
       # --- Generic function call or variable reference ---
       else:
         let resolvedLua = e.resolvedName(name)
-        let minA = e.arity(name)
-        let maxA = if name in e.maxArities: e.maxArities[name] else: minA
-        if minA > 0 or (minA == 0 and maxA > 0):
+        let info = e.getBinding(name)
+        let a = e.arity(name)
+        if a >= 0:
           var args: seq[string] = @[]
-          # consume required args (min)
-          for i in 0 ..< minA:
+          for i in 0 ..< a:
             args.add(e.emitExpr(vals, pos))
-          # try to consume optional args up to max
-          if maxA > minA:
-            var extra = 0
-            while extra < (maxA - minA) and pos < vals.len:
-              let next = vals[pos]
-              # stop at things that can't be arguments
-              if next.kind == vkWord and next.wordName == "->": break
-              if isInfixOp(next): break
-              if next.kind == vkWord and next.wordKind == wkSetWord: break
-              if next.kind == vkWord and next.wordKind == wkMetaWord: break
-              if next.kind == vkWord and next.wordKind == wkWord and
-                 next.wordName in ["if", "either", "unless", "loop", "match",
-                                    "print", "return", "break", "error", "try",
-                                    "assert", "import"]: break
-              if next.kind == vkBlock: break
-              args.add(e.emitExpr(vals, pos))
-              extra += 1
+          # Append default refinement args (all false/nil) for non-refinement calls
+          if info.refinements.len > 0:
+            for r in info.refinements:
+              args.add("false")
+              for j in 0 ..< r.paramCount:
+                args.add("nil")
           result = resolvedLua & "(" & args.join(", ") & ")"
-        elif minA == 0:
-          result = resolvedLua & "()"
         else:
           result = resolvedLua
 
@@ -1345,7 +1488,17 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
     let opStr = if op.kind == vkOp: luaOp(op.opSymbol) else: luaOp(op.wordName)
     pos += 1
     let right = e.emitExpr(vals, pos)
-    result = result & " " & opStr & " " & right
+    # Special case: = none / <> none → _is_none() / not _is_none()
+    if right == "nil" and opStr == "==":
+      result = "_is_none(" & result & ")"
+    elif right == "nil" and opStr == "~=":
+      result = "not _is_none(" & result & ")"
+    elif result == "nil" and opStr == "==":
+      result = "_is_none(" & right & ")"
+    elif result == "nil" and opStr == "~=":
+      result = "not _is_none(" & right & ")"
+    else:
+      result = result & " " & opStr & " " & right
 
 proc emitExprWithChain(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   ## Like emitExpr but also processes -> method chains.
@@ -1384,6 +1537,13 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
   while pos < vals.len:
     let val = vals[pos]
 
+    # --- Skip Kintsugi header (Kintsugi [...] or Kintsugi/Lua [...]) ---
+    if val.kind == vkWord and val.wordKind == wkWord and val.wordName.startsWith("Kintsugi"):
+      pos += 1
+      if pos < vals.len and vals[pos].kind == vkBlock:
+        pos += 1
+      continue
+
     # --- Bindings block: emit alias declarations, skip the rest ---
     if val.kind == vkWord and val.wordKind == wkWord and val.wordName == "bindings":
       pos += 1
@@ -1418,7 +1578,7 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
             if bpos < blk.len and blk[bpos].kind == vkInteger:
               bpos += 1  # skip second arity (max)
           if bkindName == "alias":
-            e.ln("local " & luaName(bnameName) & " <const> = " & bpathStr)
+            e.ln("local " & luaName(bnameName) & " = " & bpathStr)
         pos += 1
       continue
 
@@ -1450,6 +1610,21 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
         e.ln(resolvedLua)
         continue
 
+    # --- @const prefix: @const x: value ---
+    if val.kind == vkWord and val.wordKind == wkMetaWord and val.wordName == "const":
+      pos += 1
+      if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkSetWord:
+        let rawName = vals[pos].wordName
+        let name = luaName(rawName)
+        pos += 1
+        let prefix = if name in e.locals: "" else: "local "
+        e.locals.incl(name)
+        let expr = e.emitExprWithChain(vals, pos)
+        e.ln(prefix & name & " <const> = " & expr)
+        continue
+      # @const without set-word — skip
+      continue
+
     # --- Set-word at statement level ---
     if val.kind == vkWord and val.wordKind == wkSetWord:
       let rawName = val.wordName
@@ -1463,18 +1638,11 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
                    luaName(rawName)
       pos += 1
 
-      # Check for @const annotation
-      var isConst = false
-      if pos < vals.len and vals[pos].kind == vkWord and
-         vals[pos].wordKind == wkMetaWord and vals[pos].wordName == "const":
-        isConst = true
-        pos += 1
-
       let prefix = if isBound: ""            # bound names: global path, no 'local'
                    elif isPath: ""            # globals: no 'local'
                    elif name in e.locals: "" # already declared: no 'local'
                    else: "local "
-      let constAnnotation = if isConst and prefix == "local ": " <const>" else: ""
+      let constAnnotation = ""
 
       # Track this as a local declaration (unless it's a path)
       if not isPath:
@@ -1489,22 +1657,9 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
           let bodyBlock = vals[pos + 1].blockVals
           pos += 2
 
-          # Extract param names for the function header
-          var params: seq[string] = @[]
-          var i = 0
-          while i < specBlock.len:
-            let s = specBlock[i]
-            if s.kind == vkWord and s.wordKind == wkWord:
-              params.add(luaName(s.wordName))
-            elif s.kind == vkBlock:
-              discard  # type annotation — skip
-            elif s.kind == vkWord and s.wordKind == wkSetWord:
-              i += 1  # skip return type block
-              if i < specBlock.len and specBlock[i].kind == vkBlock: discard
-            i += 1
-
-          # Track arity for this function
-          e.arities[rawName] = params.len
+          # Extract param names using shared spec parser
+          let spec = parseSpec(specBlock)
+          let params = spec.allLuaParams()
 
           if isPath or isBound:
             e.ln(name & " = function(" & params.join(", ") & ")")
@@ -1650,6 +1805,13 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
       e.ln("import " & arg)
       continue
 
+    # --- exports: skip (handled at module level via findExports) ---
+    if val.kind == vkWord and val.wordKind == wkWord and val.wordName == "exports":
+      pos += 1
+      if pos < vals.len and vals[pos].kind == vkBlock:
+        pos += 1  # skip the block arg
+      continue
+
     # --- print as statement ---
     if val.kind == vkWord and val.wordKind == wkWord and val.wordName == "print":
       pos += 1
@@ -1658,33 +1820,18 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
       continue
 
     # --- Path call as statement (e.g., love/graphics/setColor 1.0 0.0 0.0) ---
-    # Only treat as a function call if the path has known arity > 0 or there
-    # are arguments following it. Otherwise treat as a plain expression.
     if val.kind == vkWord and val.wordKind == wkWord and val.wordName.contains('/'):
+      let pathParts = val.wordName.split('/')
+      let head = pathParts[0]
       let path = emitPath(val.wordName)
-      let pathArity = e.arity(val.wordName)
-      if pathArity >= 0:
-        # Known function with fixed arity — consume exact args
+      let fullBinding = e.getBinding(val.wordName)
+      let headBinding = e.getBinding(head)
+
+      if fullBinding.isFunction and not fullBinding.isUnknown:
+        # Whole path is a known binding (from bindings dialect)
         pos += 1
         var args: seq[string] = @[]
-        for i in 0 ..< pathArity:
-          args.add(e.emitExpr(vals, pos))
-        e.ln(path & "(" & args.join(", ") & ")")
-        continue
-      else:
-        # Unknown path: heuristic arg collection
-        pos += 1
-        var args: seq[string] = @[]
-        while pos < vals.len:
-          let next = vals[pos]
-          if next.kind == vkWord and next.wordName == "->": break
-          if next.kind == vkWord and next.wordKind == wkSetWord: break
-          if next.kind == vkWord and next.wordKind == wkMetaWord: break
-          if next.kind == vkWord and next.wordKind == wkWord and
-             next.wordName in ["if", "either", "unless", "loop", "match",
-                                "print", "return", "break", "error", "try"]: break
-          if next.kind == vkWord and next.wordKind == wkWord and next.wordName.contains('/'): break
-          if next.kind == vkBlock: break
+        for i in 0 ..< fullBinding.arity:
           args.add(e.emitExpr(vals, pos))
         # Apply -> chain if present
         var result = path & "(" & args.join(", ") & ")"
@@ -1699,21 +1846,35 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
             if mn.kind == vkWord and mn.wordName == "->": break
             if isInfixOp(mn): break
             if mn.kind == vkWord and mn.wordKind == wkSetWord: break
-            if mn.kind == vkWord and mn.wordKind == wkMetaWord: break
-            if mn.kind == vkWord and mn.wordKind == wkWord and
-               mn.wordName in ["if", "either", "unless", "loop", "match",
-                                "print", "return", "break", "error", "try"]: break
-            if mn.kind == vkWord and mn.wordKind == wkWord and mn.wordName.contains('/'): break
             if mn.kind == vkBlock: break
-            if mn.kind == vkWord and mn.wordKind == wkWord and
-               pos + 1 < vals.len and vals[pos + 1].kind == vkWord and vals[pos + 1].wordName == "->":
-              break
             margs.add(e.emitExpr(vals, pos))
           result = result & ":" & methodName & "(" & margs.join(", ") & ")"
-        if args.len > 0 or result.contains(":"):
-          e.ln(result)
-        else:
-          e.ln(path)
+        e.ln(result)
+        continue
+      elif headBinding.isFunction and not headBinding.isUnknown:
+        # Head is a known function — refinement call as statement
+        let refNames = pathParts[1..^1]
+        pos += 1
+        var args: seq[string] = @[]
+        for i in 0 ..< headBinding.arity:
+          args.add(e.emitExpr(vals, pos))
+        # Append refinement flags and params
+        if headBinding.refinements.len > 0:
+          for r in headBinding.refinements:
+            let active = r.name in refNames
+            args.add(if active: "true" else: "false")
+            if active:
+              for j in 0 ..< r.paramCount:
+                args.add(e.emitExpr(vals, pos))
+            else:
+              for j in 0 ..< r.paramCount:
+                args.add("nil")
+        e.ln(e.resolvedName(head) & "(" & args.join(", ") & ")")
+        continue
+      else:
+        # Value path or unknown — just emit as expression statement
+        pos += 1
+        e.ln(path)
         continue
 
     # --- Mutating series operations as statements ---
@@ -1749,60 +1910,53 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
       else:
         e.ln(expr)
 
-proc emitBlockReturn(e: var LuaEmitter, vals: seq[KtgValue]) =
-  ## Like emitBlock but adds implicit return to the last expression.
-  ## Walks the AST to find statement boundaries, emits all but the last
-  ## statement normally, then handles the last statement with return.
-  if vals.len == 0:
-    return
-
-  # Walk through to find each statement's starting position
+proc findLastStmtStart(e: var LuaEmitter, vals: seq[KtgValue]): int =
+  ## Dry-run through vals to find where the last statement starts.
+  ## Uses emitBlock with output discarded to correctly advance position.
   var stmtStarts: seq[int] = @[]
   var pos = 0
+  let saved = e.output
+  e.output = ""
   while pos < vals.len:
     stmtStarts.add(pos)
     let val = vals[pos]
-
-    # Skip Kintsugi header block (e.g., Kintsugi [...])
-    if val.kind == vkWord and val.wordKind == wkWord and val.wordName == "Kintsugi":
+    # Skip headers, bindings, exports
+    if val.kind == vkWord and val.wordKind == wkWord and
+       val.wordName.startsWith("Kintsugi"):
       pos += 1
-      if pos < vals.len and vals[pos].kind == vkBlock:
-        pos += 1
+      if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
       continue
-
-    # Skip bindings blocks
-    if val.kind == vkWord and val.wordKind == wkWord and val.wordName == "bindings":
+    if val.kind == vkWord and val.wordKind == wkWord and
+       val.wordName in ["bindings", "exports"]:
       pos += 1
-      if pos < vals.len and vals[pos].kind == vkBlock:
-        pos += 1
+      if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
       continue
-
-    # Set-word: name + value (value may consume multiple tokens including -> chains)
+    # @const prefix
+    if val.kind == vkWord and val.wordKind == wkMetaWord and val.wordName == "const":
+      pos += 1
+      if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkSetWord:
+        pos += 1
+        discard e.emitExprWithChain(vals, pos)
+        continue
+      continue
+    # Set-word
     if val.kind == vkWord and val.wordKind == wkSetWord:
       pos += 1
-      let saved = e.output
-      e.output = ""
       discard e.emitExprWithChain(vals, pos)
-      e.output = saved
       continue
-
-    # Keywords with known structure
+    # Keywords with known token counts
     if val.kind == vkWord and val.wordKind == wkWord:
       case val.wordName
       of "if", "unless":
         pos += 1
-        let saved = e.output; e.output = ""
-        discard e.emitExpr(vals, pos)  # condition
-        e.output = saved
-        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1  # body block
+        discard e.emitExpr(vals, pos)
+        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
         continue
       of "either":
         pos += 1
-        let saved = e.output; e.output = ""
-        discard e.emitExpr(vals, pos)  # condition
-        e.output = saved
-        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1  # true block
-        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1  # false block
+        discard e.emitExpr(vals, pos)
+        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
         continue
       of "loop":
         pos += 1
@@ -1810,42 +1964,54 @@ proc emitBlockReturn(e: var LuaEmitter, vals: seq[KtgValue]) =
         continue
       of "match":
         pos += 1
-        let saved = e.output; e.output = ""
-        discard e.emitExpr(vals, pos)  # value
-        e.output = saved
-        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1  # rules
+        discard e.emitExpr(vals, pos)
+        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
         continue
       of "return":
         pos += 1
-        let saved = e.output; e.output = ""
         discard e.emitExpr(vals, pos)
-        e.output = saved
         continue
       of "break":
         pos += 1
         continue
-      of "print":
+      of "print", "assert":
         pos += 1
-        let saved = e.output; e.output = ""
         discard e.emitExpr(vals, pos)
-        e.output = saved
+        continue
+      of "remove":
+        pos += 1
+        discard e.emitExpr(vals, pos)
+        discard e.emitExpr(vals, pos)
+        continue
+      of "insert":
+        pos += 1
+        discard e.emitExpr(vals, pos)
+        discard e.emitExpr(vals, pos)
+        discard e.emitExpr(vals, pos)
+        continue
+      of "append":
+        pos += 1
+        discard e.emitExpr(vals, pos)
+        discard e.emitExpr(vals, pos)
         continue
       else: discard
-
-    # Generic expression (use WithChain to consume -> chains as one statement)
-    let saved = e.output; e.output = ""
+    # Generic expression
     discard e.emitExprWithChain(vals, pos)
-    e.output = saved
+  e.output = saved
+  if stmtStarts.len > 0: stmtStarts[^1] else: 0
 
-  if stmtStarts.len == 0:
+proc emitBlockReturn(e: var LuaEmitter, vals: seq[KtgValue]) =
+  ## Like emitBlock but adds implicit return to the last expression.
+  if vals.len == 0:
     return
 
+  let lastStart = e.findLastStmtStart(vals)
+
   # Emit all statements except the last normally
-  let lastStart = stmtStarts[^1]
   if lastStart > 0:
     e.emitBlock(vals[0 ..< lastStart])
 
-  # Now handle the last statement with implicit return
+  # Handle the last statement with implicit return
   let lastVals = vals[lastStart .. ^1]
   if lastVals.len == 0:
     return
@@ -1915,9 +2081,7 @@ proc emitBlockReturn(e: var LuaEmitter, vals: seq[KtgValue]) =
     let valueExpr = e.emitExpr(lastVals, lpos)
     if lpos < lastVals.len and lastVals[lpos].kind == vkBlock:
       let rulesBlock = lastVals[lpos].blockVals
-      # Emit match as if-chain with returns
-      e.emitMatchStmt(valueExpr, rulesBlock)
-      # TODO: add return inside each handler
+      e.emitMatchStmt(valueExpr, rulesBlock, asReturn = true)
       return
 
   # If last statement is loop, emit normally (loops don't produce values)
@@ -1958,6 +2122,10 @@ const LuaPrelude = """-- Kintsugi runtime support
 local unpack = unpack or table.unpack
 local _NONE = setmetatable({}, {__tostring = function() return "none" end})
 local function _is_none(v) return v == nil or v == _NONE end
+local function _deep_copy(t)
+  if type(t) ~= "table" then return t end
+  local r = {}; for k, v in pairs(t) do r[k] = _deep_copy(v) end; return r
+end
 """
 
 proc prescanBindings(e: var LuaEmitter, blk: seq[KtgValue]) =
@@ -1993,26 +2161,19 @@ proc prescanBindings(e: var LuaEmitter, blk: seq[KtgValue]) =
     of "call":
       e.nameMap[name] = luaPath
       e.bindingKinds[name] = bkCall
-      # Next value(s): either single N (min=max=N) or min max
+      # Fixed arity: single integer N
       if pos < blk.len and blk[pos].kind == vkInteger:
-        let first = int(blk[pos].intVal)
+        let arity = int(blk[pos].intVal)
         pos += 1
+        # Skip legacy second integer (variadic max) if present
         if pos < blk.len and blk[pos].kind == vkInteger:
-          # two integers: min max
-          let second = int(blk[pos].intVal)
           pos += 1
-          e.arities[name] = first       # min
-          e.maxArities[name] = second    # max
-        else:
-          # single integer: fixed arity
-          e.arities[name] = first
-          e.maxArities[name] = first
+        e.bindings[name] = BindingInfo(arity: arity, isFunction: true, isUnknown: false)
       else:
-        e.arities[name] = 0
-        e.maxArities[name] = 0
+        e.bindings[name] = BindingInfo(arity: 0, isFunction: true, isUnknown: false)
     of "const":
       e.nameMap[name] = luaPath
-      e.arities[name] = -1  # not callable
+      e.bindings[name] = BindingInfo(arity: -1, isFunction: false, isUnknown: false)
       e.bindingKinds[name] = bkConst
     of "alias":
       # Alias emits a local declaration; no nameMap entry needed since
@@ -2020,47 +2181,159 @@ proc prescanBindings(e: var LuaEmitter, blk: seq[KtgValue]) =
       e.bindingKinds[name] = bkAlias
     of "assign":
       e.nameMap[name] = luaPath
-      e.arities[name] = 1
+      e.bindings[name] = BindingInfo(arity: 1, isFunction: true, isUnknown: false)
       e.bindingKinds[name] = bkAssign
     else:
       discard
 
-proc prescanArities(e: var LuaEmitter, ast: seq[KtgValue]) =
-  ## Pre-scan the AST to collect user-defined function arities and bindings.
+proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
+  ## Recursively scan a block for function definitions and value bindings.
   var i = 0
-  while i < ast.len:
-    # Scan for bindings [...] blocks
-    if ast[i].kind == vkWord and ast[i].wordKind == wkWord and
-       ast[i].wordName == "bindings":
-      if i + 1 < ast.len and ast[i + 1].kind == vkBlock:
-        e.prescanBindings(ast[i + 1].blockVals)
+  while i < vals.len:
+    # bindings [...] dialect
+    if vals[i].kind == vkWord and vals[i].wordKind == wkWord and
+       vals[i].wordName == "bindings":
+      if i + 1 < vals.len and vals[i + 1].kind == vkBlock:
+        e.prescanBindings(vals[i + 1].blockVals)
         i += 2
         continue
 
-    if ast[i].kind == vkWord and ast[i].wordKind == wkSetWord:
-      let name = ast[i].wordName
-      # name: function [params...] [body]
-      if i + 1 < ast.len and ast[i + 1].kind == vkWord and
-         ast[i + 1].wordKind == wkWord and ast[i + 1].wordName == "function":
-        if i + 2 < ast.len and ast[i + 2].kind == vkBlock:
+    # name: function [spec] [body]
+    if vals[i].kind == vkWord and vals[i].wordKind == wkSetWord:
+      let name = vals[i].wordName
+      if i + 1 < vals.len and vals[i + 1].kind == vkWord and
+         vals[i + 1].wordKind == wkWord and vals[i + 1].wordName == "function":
+        if i + 2 < vals.len and vals[i + 2].kind == vkBlock:
+          let spec = vals[i + 2].blockVals
           var paramCount = 0
-          for s in ast[i + 2].blockVals:
+          var refInfos: seq[RefinementInfo] = @[]
+          var inRefinement = false
+          var j = 0
+          while j < spec.len:
+            let s = spec[j]
+            # Refinement: /name token
+            if s.kind == vkWord and s.wordKind == wkWord and s.wordName.startsWith("/"):
+              let refName = s.wordName[1..^1]
+              refInfos.add(RefinementInfo(name: refName, paramCount: 0))
+              inRefinement = true
+              j += 1
+              continue
+            # Count params
             if s.kind == vkWord and s.wordKind == wkWord:
-              paramCount += 1
-          e.arities[name] = paramCount
-          i += 4  # skip name, function, spec, body
+              if inRefinement:
+                refInfos[^1].paramCount += 1
+              else:
+                paramCount += 1
+            elif s.kind == vkWord and s.wordKind == wkSetWord:
+              # return: [type] — skip
+              j += 1
+              if j < spec.len and spec[j].kind == vkBlock: discard
+            elif s.kind == vkBlock:
+              discard  # type annotation
+            j += 1
+          e.bindings[name] = BindingInfo(arity: paramCount, isFunction: true, isUnknown: false,
+                                          refinements: refInfos)
+          # Recurse into function body
+          if i + 3 < vals.len and vals[i + 3].kind == vkBlock:
+            e.prescanBlock(vals[i + 3].blockVals)
+          i += 4
           continue
+      # name: require %path — prescan the dependency's exports
+      elif i + 1 < vals.len and vals[i + 1].kind == vkWord and
+           vals[i + 1].wordKind == wkWord and vals[i + 1].wordName == "require":
+        if i + 2 < vals.len and vals[i + 2].kind in {vkFile, vkString}:
+          let rawPath = if vals[i + 2].kind == vkFile: vals[i + 2].filePath
+                        else: vals[i + 2].strVal
+          let srcDir = if e.sourceDir.len > 0: e.sourceDir else: getCurrentDir()
+          let absPath = if rawPath.isAbsolute: rawPath else: srcDir / rawPath
+          if fileExists(absPath) and absPath notin e.compiling:
+            let depSource = readFile(absPath)
+            var depAst = parseSource(depSource)
+            if depAst.len >= 2 and depAst[0].kind == vkWord and depAst[0].wordKind == wkWord and
+               depAst[0].wordName.startsWith("Kintsugi") and depAst[1].kind == vkBlock:
+              depAst = depAst[2..^1]
+            # Prescan the dependency to get its bindings
+            var childCompiling = e.compiling
+            childCompiling.incl(absPath)
+            var depEmitter = LuaEmitter(bindings: initNativeBindings(),
+                                         sourceDir: parentDir(absPath),
+                                         compiling: childCompiling)
+            depEmitter.prescanBlock(depAst)
+            # Find exports and register as path bindings
+            let exports = findExports(depAst)
+            let exportNames = if exports.len > 0: exports
+                              else:
+                                # No exports — use all top-level bindings
+                                var names: seq[string] = @[]
+                                for k, v in depEmitter.bindings:
+                                  if k notin initNativeBindings(): # skip natives
+                                    names.add(k)
+                                names
+            # Register name as a value (the module object)
+            e.bindings[name] = BindingInfo(arity: -1, isFunction: false, isUnknown: false)
+            # Register name/export as the correct binding type
+            for exp in exportNames:
+              let pathName = name & "/" & exp
+              if exp in depEmitter.bindings:
+                e.bindings[pathName] = depEmitter.bindings[exp]
+          i += 3
+          continue
+      else:
+        # name: <non-function> — it's a value
+        if name notin e.bindings:
+          e.bindings[name] = BindingInfo(arity: -1,
+                                          isFunction: false, isUnknown: false)
     i += 1
 
-proc emitLua*(ast: seq[KtgValue]): string =
+proc findExports(ast: seq[KtgValue]): seq[string] =
+  ## Scan for `exports [name1 name2 ...]` and return the exported names.
+  var i = 0
+  while i < ast.len:
+    if ast[i].kind == vkWord and ast[i].wordKind == wkWord and
+       ast[i].wordName == "exports":
+      if i + 1 < ast.len and ast[i + 1].kind == vkBlock:
+        for v in ast[i + 1].blockVals:
+          if v.kind == vkWord and v.wordKind == wkWord:
+            result.add(v.wordName)
+        return result
+    i += 1
+
+proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
+                    compiling: HashSet[string] = initHashSet[string]()): string =
+  ## Compile a Kintsugi module to Lua. Emits exports as return statement.
+  var e = LuaEmitter(
+    indent: 0,
+    output: "",
+    bindings: initNativeBindings(),
+    nameMap: initTable[string, string](),
+    bindingKinds: initTable[string, BindingKind](),
+    sourceDir: sourceDir,
+    compiling: compiling
+  )
+  e.prescanBlock(ast)
+  e.emitBlock(ast)
+
+  # Emit exports return
+  let exports = findExports(ast)
+  if exports.len > 0:
+    var parts: seq[string] = @[]
+    for name in exports:
+      let lua = luaName(name)
+      parts.add(lua & " = " & lua)
+    e.ln("return {" & parts.join(", ") & "}")
+
+  LuaPrelude & e.output
+
+proc emitLua*(ast: seq[KtgValue], sourceDir: string = ""): string =
   ## Walk the AST and produce Lua source code.
   var e = LuaEmitter(
     indent: 0,
     output: "",
-    arities: initNativeArities(),
+    bindings: initNativeBindings(),
     nameMap: initTable[string, string](),
-    bindingKinds: initTable[string, BindingKind]()
+    bindingKinds: initTable[string, BindingKind](),
+    sourceDir: sourceDir
   )
-  e.prescanArities(ast)
+  e.prescanBlock(ast)
   e.emitBlock(ast)
   LuaPrelude & e.output

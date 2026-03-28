@@ -45,9 +45,7 @@ The core language is complete and usable:
 
 ### What Needs Work
 
-- Lua emitter is heuristic-based and fragile
-- User function refinements not yet implemented
-- Map creation via `make map!` not implemented
+- Lua emitter uses recursive binding tracking and context-aware dispatch; foreign API calls need `bindings` dialect to declare arities
 - No LSP, debugger, or formatter
 
 ---
@@ -167,12 +165,9 @@ The living spec is `docs/language-spec-questions.md` (34+ decisions documented).
 
 ## Known Limitations
 
-- **Lua emitter is heuristic-based** -- pattern-matches AST shapes rather than using a formal IR. Fragile for complex patterns, implicit returns in certain contexts, and deeply nested expressions.
+- **Lua emitter** -- uses recursive binding tracking to distinguish functions from values. Foreign API calls (Love2D, Playdate) need `bindings` dialect to declare arities. Unknown paths default to field access.
 - **`some`/`any` backtracking** -- greedy with backtracking like REBOL. Has exponential worst-case potential on pathological inputs (e.g., deeply nested alternatives with overlapping prefixes).
 - **No LSP, no debugger, no formatter** -- editor support is Emacs syntax highlighting only.
-- **User function refinements** -- not yet implemented (only native refinements work).
-- **Map creation** -- `make map! [...]` not yet implemented.
-- **Emitter doesn't handle all patterns** -- implicit returns in certain contexts, some complex control flow.
 
 ---
 

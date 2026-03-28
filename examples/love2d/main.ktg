@@ -1,6 +1,22 @@
+Kintsugi/Lua [
+  name: 'love2d-demo
+  version: 1.0.0
+]
+
 ; Minimal LÖVE2D game in Kintsugi
-; Compile: bun run compile.ts examples/love2d/main.ktg
-; Run:     love examples/love2d/
+; Compile: kintsugi -c main.ktg -o main.lua
+; Run:     love .
+
+bindings [
+  love/window/setTitle    "love.window.setTitle"         'call 1
+  love/keyboard/isDown    "love.keyboard.isDown"         'call 1
+  love/graphics/setColor  "love.graphics.setColor"       'call 3
+  love/graphics/circle    "love.graphics.circle"         'call 4
+  love/graphics/print     "love.graphics.print"          'call 3
+  love/load               "love.load"                    'assign
+  love/update             "love.update"                  'assign
+  love/draw               "love.draw"                    'assign
+]
 
 x: 400
 y: 300

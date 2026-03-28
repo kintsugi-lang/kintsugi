@@ -1,0 +1,6 @@
+Kintsugi/Lua [name: 'test-module]
+
+double: function [x] [x * 2]
+triple: function [x] [x * 3]
+
+exports [double triple]

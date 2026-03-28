@@ -172,11 +172,20 @@ proc readWord(lex: var Lexer): string =
   var w = ""
   while not lex.atEnd and isWordChar(lex.peek):
     w &= lex.advance
-  # consume path segments: word/segment/segment
-  while not lex.atEnd and lex.peek == '/' and lex.peekAt(1).isAlpha:
-    w &= lex.advance  # /
-    while not lex.atEnd and isWordChar(lex.peek):
-      w &= lex.advance
+  # consume path segments: word/segment/segment or word/:get-word
+  while not lex.atEnd and lex.peek == '/':
+    if lex.peekAt(1).isAlpha:
+      w &= lex.advance  # /
+      while not lex.atEnd and isWordChar(lex.peek):
+        w &= lex.advance
+    elif lex.peekAt(1) == ':' and lex.peekAt(2).isAlpha:
+      # get-word path segment: /:word
+      w &= lex.advance  # /
+      w &= lex.advance  # :
+      while not lex.atEnd and isWordChar(lex.peek):
+        w &= lex.advance
+    else:
+      break
   w
 
 proc readFilePath(lex: var Lexer): string =
@@ -238,6 +247,12 @@ proc nextToken*(lex: var Lexer): KtgValue =
   # numbers (and pair, tuple, date, time)
   if isDigit(ch) or (ch == '-' and lex.peekAt(1).isDigit):
     return lex.readNumber
+
+  # refinement: /word (no space between / and alpha)
+  if ch == '/' and isAlpha(lex.peekAt(1)):
+    discard lex.advance  # skip /
+    let name = lex.readWord
+    return ktgWord("/" & name, wkWord, startLine)
 
   # operators
   if ch in {'+', '*', '/', '='}:
@@ -372,10 +387,6 @@ proc nextToken*(lex: var Lexer): KtgValue =
     discard lex.advance
     return ktgWord("|", wkWord, startLine)
 
-  # path separator
-  if ch == '/':
-    discard lex.advance
-    return ktgWord("/", wkWord, startLine)
 
   # unrecognized — skip and warn
   discard lex.advance

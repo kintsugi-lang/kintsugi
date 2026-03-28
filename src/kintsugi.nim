@@ -3,6 +3,7 @@
 ## Usage:
 ##   kintsugi                  — start REPL
 ##   kintsugi <file>           — run a file
+##   kintsugi -e <expr>        — evaluate expression
 ##   kintsugi -c <file>        — compile to Lua (stdout)
 ##   kintsugi --compile <file> — compile to Lua (stdout)
 
@@ -101,7 +102,10 @@ proc compileLua(path: string, outPath: string = "") =
 
   let source = stripHeader(readFile(path))
   let ast = parseSource(source)
-  let luaCode = emitLua(ast)
+  let eval = setupEval()
+  let processed = eval.preprocess(ast)
+  let sourceDir = parentDir(absolutePath(path))
+  let luaCode = emitLua(processed, sourceDir)
 
   if outPath.len > 0:
     writeFile(outPath, luaCode)
@@ -121,11 +125,19 @@ proc main() =
 
   var i = 0
   var compile = false
+  var evalExpr = ""
   var outPath = ""
   var filePath = ""
 
   while i < args.len:
     case args[i]
+    of "-e", "--eval":
+      if i + 1 < args.len:
+        i += 1
+        evalExpr = args[i]
+      else:
+        echo "Error: -e requires an expression"
+        quit(1)
     of "-c", "--compile":
       compile = true
     of "-o", "--output":
@@ -141,11 +153,30 @@ proc main() =
       filePath = args[i]
     i += 1
 
-  if filePath.len == 0:
+  if evalExpr.len > 0:
+    let eval = setupEval()
+    try:
+      let result = eval.evalString(evalExpr)
+      if result.kind != vkNone:
+        echo $result
+    except KtgError as e:
+      echo "Error [" & e.kind & "]: " & e.msg
+      if e.stack.len > 0:
+        echo "Stack trace:"
+        for frame in e.stack:
+          echo "  " & frame.name & " at line " & $frame.line
+      quit(1)
+    except CatchableError as e:
+      echo "Error: " & e.msg
+      quit(1)
+    return
+
+  if filePath.len == 0 and not compile:
     echo "Usage: kintsugi [options] [file]"
     echo ""
     echo "  (no args)                    Start REPL"
     echo "  <file>                       Run a Kintsugi file"
+    echo "  -e, --eval <expr>            Evaluate expression"
     echo "  -c, --compile <file>         Compile to Lua (.ktg -> .lua)"
     echo "  -c <file> -o <out>           Compile to specific output file"
     echo "  -c <file> --stdout           Compile to stdout"
@@ -156,7 +187,10 @@ proc main() =
       # stdout mode
       let source = stripHeader(readFile(filePath))
       let ast = parseSource(source)
-      echo emitLua(ast)
+      let eval = setupEval()
+      let processed = eval.preprocess(ast)
+      let sourceDir = parentDir(absolutePath(filePath))
+      echo emitLua(processed, sourceDir)
     else:
       compileLua(filePath, outPath)
     return

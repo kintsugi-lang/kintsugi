@@ -7,9 +7,20 @@ Kintsugi/Lua [
 ; Tic-Tac-Toe for LÖVE2D
 ; =============================================================
 ;
-; Compile: kintsugi -c love-main.ktg -o main.lua
+; Compile: kintsugi -c main.ktg -o main.lua
 ; Run:     love .
 ; =============================================================
+
+bindings [
+  love/graphics/clear        "love.graphics.clear"        'call 3
+  love/graphics/setColor     "love.graphics.setColor"     'call 3
+  love/graphics/setLineWidth "love.graphics.setLineWidth" 'call 1
+  love/graphics/line         "love.graphics.line"         'call 4
+  love/graphics/circle       "love.graphics.circle"       'call 4
+  love/graphics/printf       "love.graphics.printf"       'call 5
+  love/draw                  "love.draw"                  'assign
+  love/mousepressed          "love.mousepressed"          'assign
+]
 
 ; --- Constants ---
 
@@ -201,18 +212,20 @@ love/draw: function [] [
 ]
 
 love/mousepressed: function [mx my button] [
-  if not button = 1 [return none]
+  unless button = 1 [return none]
 
-  if not board/status = 'playing [
+  unless board/status = 'playing [
     reset
     return none
   ]
 
-  if not board/turn = 'x [return none]
+  unless board/turn = 'x [return none]
 
   pos: xy-to-pos mx my
   if none? pos [return none]
 
+  unless board/cells/:pos = none [return none]
+  
   placed: place pos 'x
   if none? placed [return none]
 

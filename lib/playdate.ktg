@@ -5,12 +5,8 @@
 ; Usage: include this block at the top of your Playdate game,
 ; or copy/paste the bindings block you need.
 ;
-; Example:
-;   bindings [
-;     image-new       "gfx.image.new"                      'call 1
-;     sprite-new      "gfx.sprite.new"                     'call 1
-;     ...
-;   ]
+; Each binding has a fixed arity. For calls that take more args
+; than declared, wrap in parens: (draw-text "hello" 10 20)
 ; =============================================================
 
 bindings [
@@ -18,8 +14,8 @@ bindings [
   gfx                  "playdate.graphics"                  'alias
 
   ; --- Images ---
-  image-new            "gfx.image.new"                      'call 1 2   ; path [bgcolor]
-  image-draw           "gfx.image.draw"                     'call 1 5   ; image [x y flip scale]
+  image-new            "gfx.image.new"                      'call 1     ; path — parens for bgcolor: (image-new path bgcolor)
+  image-draw           "gfx.image.draw"                     'call 1     ; image — parens for position: (image-draw img x y flip scale)
 
   ; --- Sprites ---
   sprite-new           "gfx.sprite.new"                     'call 1
@@ -59,8 +55,8 @@ bindings [
   draw-circle          "gfx.drawCircleAtPoint"              'call 3
   fill-circle          "gfx.fillCircleAtPoint"              'call 3
   draw-line            "gfx.drawLine"                       'call 4
-  draw-text            "gfx.drawText"                       'call 1 3   ; text [x y]
-  clear                "gfx.clear"                          'call 0 1   ; [color]
+  draw-text            "gfx.drawText"                       'call 3     ; text x y
+  clear                "gfx.clear"                          'call 0     ; parens for color: (clear color)
 
   ; --- Color constants ---
   color-black          "gfx.kColorBlack"                    'const

@@ -1,6 +1,11 @@
 -- Kintsugi runtime support
+local unpack = unpack or table.unpack
 local _NONE = setmetatable({}, {__tostring = function() return "none" end})
 local function _is_none(v) return v == nil or v == _NONE end
+local function _deep_copy(t)
+  if type(t) ~= "table" then return t end
+  local r = {}; for k, v in pairs(t) do r[k] = _deep_copy(v) end; return r
+end
 local cell_size = 140
 local padding = 10
 local offset = 20
@@ -197,6 +202,9 @@ love.mousepressed = function(mx, my, button)
   end
   local pos = xy_to_pos(mx, my)
   if _is_none(pos) then
+    return nil
+  end
+  if not (_is_none(board.cells[pos])) then
     return nil
   end
   local placed = place(pos, "x")

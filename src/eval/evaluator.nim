@@ -262,7 +262,40 @@ proc navigatePath*(eval: Evaluator, head: KtgValue, segments: seq[string],
                    ctx: KtgContext): KtgValue =
   var current = head
   for seg in segments:
-    if current.kind == vkContext:
+    # Dynamic get-word segment: :name → evaluate name, use result as index
+    if seg.startsWith(":"):
+      let varName = seg[1..^1]
+      let idx = ctx.get(varName)
+      if current.kind == vkBlock:
+        if idx.kind == vkInteger:
+          let i = int(idx.intVal)
+          if i >= 1 and i <= current.blockVals.len:
+            current = current.blockVals[i - 1]
+          else:
+            raise KtgError(kind: "range",
+              msg: "index " & $i & " out of range (1.." & $current.blockVals.len & ")",
+              data: idx)
+        else:
+          raise KtgError(kind: "type",
+            msg: "block index must be integer!, got " & typeName(idx), data: idx)
+      elif current.kind == vkMap:
+        let key = $idx
+        if key in current.mapEntries:
+          current = current.mapEntries[key]
+        else:
+          raise KtgError(kind: "undefined",
+            msg: key & " not found in map", data: idx)
+      elif current.kind == vkContext:
+        let key = $idx
+        current = current.ctx.get(key)
+      elif current.kind == vkObject:
+        let key = $idx
+        current = current.obj.get(key)
+      else:
+        raise KtgError(kind: "type",
+          msg: "cannot index " & typeName(current) & " with dynamic path", data: idx)
+    # Static word segment: literal field lookup
+    elif current.kind == vkContext:
       current = current.ctx.get(seg)
     elif current.kind == vkObject:
       current = current.obj.get(seg)
@@ -377,11 +410,6 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
       return bound
 
     of wkSetWord:
-      # skip @const annotation if present (compile-time only)
-      if pos < vals.len and vals[pos].kind == vkWord and
-         vals[pos].wordKind == wkMetaWord and vals[pos].wordName == "const":
-        pos += 1
-
       # evaluate RHS with infix
       var rhs = eval.evalNext(vals, pos, ctx)
       eval.applyInfix(rhs, vals, pos, ctx)
@@ -406,7 +434,33 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
         var current = headVal
         for i in 0 ..< segments.len - 1:
           let seg = segments[i]
-          if current.kind == vkContext:
+          # Dynamic get-word segment in set-path
+          if seg.startsWith(":"):
+            let varName = seg[1..^1]
+            let idx = ctx.get(varName)
+            if current.kind == vkBlock:
+              if idx.kind == vkInteger:
+                let j = int(idx.intVal)
+                if j >= 1 and j <= current.blockVals.len:
+                  current = current.blockVals[j - 1]
+                else:
+                  raise KtgError(kind: "range",
+                    msg: "index " & $j & " out of range", data: idx)
+              else:
+                raise KtgError(kind: "type",
+                  msg: "block index must be integer!", data: idx)
+            elif current.kind == vkContext:
+              current = current.ctx.get($idx)
+            elif current.kind == vkMap:
+              let key = $idx
+              if key in current.mapEntries:
+                current = current.mapEntries[key]
+              else:
+                raise KtgError(kind: "undefined", msg: key & " not found in map", data: nil)
+            else:
+              raise KtgError(kind: "type",
+                msg: "cannot navigate path on " & typeName(current), data: current)
+          elif current.kind == vkContext:
             current = current.ctx.get(seg)
           elif current.kind == vkMap:
             if seg in current.mapEntries:
@@ -423,7 +477,29 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
               data: current)
         # Set on the final target
         let lastSeg = segments[^1]
-        if current.kind == vkContext:
+        # Dynamic get-word as final segment
+        if lastSeg.startsWith(":"):
+          let varName = lastSeg[1..^1]
+          let idx = ctx.get(varName)
+          if current.kind == vkBlock:
+            if idx.kind == vkInteger:
+              let j = int(idx.intVal)
+              if j >= 1 and j <= current.blockVals.len:
+                current.blockVals[j - 1] = rhs
+              else:
+                raise KtgError(kind: "range",
+                  msg: "index " & $j & " out of range", data: idx)
+            else:
+              raise KtgError(kind: "type",
+                msg: "block index must be integer!", data: idx)
+          elif current.kind == vkContext:
+            current.ctx.set($idx, rhs)
+          elif current.kind == vkMap:
+            current.mapEntries[$idx] = rhs
+          else:
+            raise KtgError(kind: "type",
+              msg: "cannot set on " & typeName(current), data: current)
+        elif current.kind == vkContext:
           current.ctx.set(lastSeg, rhs)
         elif current.kind == vkMap:
           current.mapEntries[lastSeg] = rhs
@@ -568,6 +644,17 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
         let typeVal = ktgType("custom-type!")
         typeVal.customType = ct
         return typeVal
+
+      # @const x: value — compile-time annotation, interpreter treats as normal assignment
+      if val.wordName == "const":
+        if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkSetWord:
+          let setWord = vals[pos]
+          pos += 1
+          var rhs = eval.evalNext(vals, pos, ctx)
+          eval.applyInfix(rhs, vals, pos, ctx)
+          ctx.set(setWord.wordName, rhs)
+          return rhs
+        return val
 
       # lifecycle hooks — for now return self
       return val
@@ -912,7 +999,7 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue]): seq[KtgValue] =
   var hasPreprocess = false
   for v in ast:
     if v.kind == vkWord and v.wordKind == wkMetaWord and
-       v.wordName in ["preprocess", "#preprocess", "#inline"]:
+       v.wordName in ["#preprocess", "#inline"]:
       hasPreprocess = true
       break
   if not hasPreprocess:
@@ -924,13 +1011,18 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue]): seq[KtgValue] =
     if ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
        ast[i].wordName == "#inline" and i + 1 < ast.len and
        ast[i + 1].kind == vkBlock:
-      # Inline preprocess: #[expr] — evaluate the block and splice the result
+      # Inline preprocess: #[expr] — evaluate and splice result.
+      # If result is a block, splice its contents (multi-node). Otherwise splice the value.
       let value = eval.evalBlock(ast[i + 1].blockVals, eval.global)
       if value != nil and value.kind != vkNone:
-        result.add(value)
+        if value.kind == vkBlock:
+          for v in value.blockVals:
+            result.add(v)
+        else:
+          result.add(value)
       i += 2
     elif ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
-       ast[i].wordName in ["preprocess", "#preprocess"] and i + 1 < ast.len and
+       ast[i].wordName == "#preprocess" and i + 1 < ast.len and
        ast[i + 1].kind == vkBlock:
       # Set up a preprocess context with `emit` and `platform`
       let ppCtx = eval.global.child

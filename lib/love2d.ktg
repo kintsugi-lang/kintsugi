@@ -2,31 +2,32 @@
 ; LOVE2D bindings for Kintsugi
 ; =============================================================
 ;
-; Bindings for LOVE2D. Provides arity hints and friendlier names.
-; Use: bindings (load %lib/love2d.ktg) or copy the block inline.
+; Bindings for LOVE2D. Provides arity declarations and friendlier names.
+; Use: copy the block inline, or use bindings (load %lib/love2d.ktg).
 ;
-; Arity format: 'call min max  (or 'call N for fixed arity)
+; Each binding has a fixed arity. For calls that take more args
+; than declared, wrap in parens: (draw-image sprite 100 200 0 1 1)
 ; =============================================================
 
 bindings [
   ; --- Graphics ---
-  set-color            "love.graphics.setColor"             'call 3 4   ; rgb or rgba
-  set-bg-color         "love.graphics.setBackgroundColor"   'call 3 4
-  clear-screen         "love.graphics.clear"                'call 0 4   ; no args or rgba
-  draw-circle          "love.graphics.circle"               'call 4 5   ; mode x y r [segments]
-  draw-rect            "love.graphics.rectangle"            'call 5 6   ; mode x y w h [rx]
-  draw-line            "love.graphics.line"                 'call 4 8   ; x1 y1 x2 y2 [...]
-  draw-text            "love.graphics.print"                'call 1 3   ; text [x y]
-  draw-text-f          "love.graphics.printf"               'call 4 5   ; text x y limit [align]
+  set-color            "love.graphics.setColor"             'call 3     ; rgb — use parens for rgba: (set-color r g b a)
+  set-bg-color         "love.graphics.setBackgroundColor"   'call 3
+  clear-screen         "love.graphics.clear"                'call 3
+  draw-circle          "love.graphics.circle"               'call 4     ; mode x y r
+  draw-rect            "love.graphics.rectangle"            'call 5     ; mode x y w h
+  draw-line            "love.graphics.line"                 'call 4     ; x1 y1 x2 y2
+  draw-text            "love.graphics.print"                'call 3     ; text x y
+  draw-text-f          "love.graphics.printf"               'call 5     ; text x y limit align
   set-line-width       "love.graphics.setLineWidth"         'call 1
   set-font             "love.graphics.setFont"              'call 1
-  new-font             "love.graphics.newFont"              'call 1 2   ; path [size]
+  new-font             "love.graphics.newFont"              'call 1     ; path — use parens for size: (new-font path size)
 
   ; --- Window ---
   set-title            "love.window.setTitle"               'call 1
   get-width            "love.graphics.getWidth"             'call 0
   get-height           "love.graphics.getHeight"            'call 0
-  set-mode             "love.window.setMode"                'call 2 3   ; w h [flags]
+  set-mode             "love.window.setMode"                'call 2     ; w h
 
   ; --- Input ---
   key-down?            "love.keyboard.isDown"               'call 1
@@ -35,13 +36,13 @@ bindings [
   get-mouse-y          "love.mouse.getY"                    'call 0
 
   ; --- Audio ---
-  new-source           "love.audio.newSource"               'call 2 3   ; path type [static]
+  new-source           "love.audio.newSource"               'call 2     ; path type
   play-sound           "love.audio.play"                    'call 1
   stop-sound           "love.audio.stop"                    'call 1
 
   ; --- Images ---
-  new-image            "love.graphics.newImage"             'call 1 2   ; path [format]
-  draw-image           "love.graphics.draw"                 'call 1 6   ; drawable [x y r sx sy]
+  new-image            "love.graphics.newImage"             'call 1     ; path
+  draw-image           "love.graphics.draw"                 'call 1     ; drawable — use parens for position: (draw-image sprite x y r sx sy)
 
   ; --- System callbacks ---
   set-load             "love.load"                          'assign

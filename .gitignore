@@ -1,4 +1,4 @@
 .claude/
 bin/
-node_modules/
-docs/superpowers/
+*.lua
+!**/conf.lua

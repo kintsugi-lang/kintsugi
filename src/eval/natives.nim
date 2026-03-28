@@ -871,19 +871,13 @@ proc registerNatives*(eval: Evaluator) =
     var inRefinement = false  # true when we've seen a /word
     while i < spec.len:
       let s = spec[i]
-      # Refinement declaration: / followed by word (/ is parsed as vkOp)
-      if s.kind == vkOp and s.opSymbol == "/":
-        # Next token should be the refinement name
-        if i + 1 < spec.len and spec[i + 1].kind == vkWord and spec[i + 1].wordKind == wkWord:
-          i += 1
-          let refName = spec[i].wordName
-          refinements.add(RefinementSpec(name: refName, params: @[]))
-          inRefinement = true
-          i += 1
-          continue
-        else:
-          i += 1
-          continue
+      # Refinement declaration: /name (single word token starting with /)
+      if s.kind == vkWord and s.wordKind == wkWord and s.wordName.startsWith("/"):
+        let refName = s.wordName[1..^1]
+        refinements.add(RefinementSpec(name: refName, params: @[]))
+        inRefinement = true
+        i += 1
+        continue
       if s.kind == vkWord and s.wordKind == wkWord:
         var pname = s.wordName
         var ptype = ""
