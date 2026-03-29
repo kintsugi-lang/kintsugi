@@ -51,6 +51,8 @@ proc repl() =
       let result = eval.evalString(line)
       if result.kind != vkNone:
         echo $result
+    except ExitSignal as e:
+      quit(e.code)
     except KtgError as e:
       echo "Error [" & e.kind & "]: " & e.msg
     except CatchableError as e:
@@ -96,6 +98,8 @@ proc runSingleFile(path: string, eval: Evaluator = nil) =
 
   try:
     discard e.evalString(source)
+  except ExitSignal as e:
+    quit(e.code)
   except KtgError as e:
     echo "Error [" & e.kind & "]: " & e.msg
     if e.stack.len > 0:
@@ -236,6 +240,8 @@ proc main() =
       let result = eval.evalString(evalExpr)
       if result.kind != vkNone:
         echo $result
+    except ExitSignal as e:
+      quit(e.code)
     except KtgError as e:
       echo "Error [" & e.kind & "]: " & e.msg
       if e.stack.len > 0:

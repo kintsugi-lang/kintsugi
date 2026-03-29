@@ -96,7 +96,7 @@ suite "sort/by":
     check $eval.evalString("first items") == "1"
     check $eval.evalString("last items") == "3"
 
-suite "load and require":
+suite "load and import":
   test "load returns parsed block":
     let tmpFile = getTempDir() / "test_load.ktg"
     writeFile(tmpFile, """x: 42""")
@@ -114,22 +114,22 @@ suite "load and require":
     check $eval.evalString("mod/y") == "10"
     removeFile(tmpFile)
 
-  test "require caches modules":
-    let tmpFile = getTempDir() / "test_require.ktg"
+  test "import caches modules":
+    let tmpFile = getTempDir() / "test_import.ktg"
     writeFile(tmpFile, "counter: 1")
     let eval = makeEval()
-    discard eval.evalString("a: require \"" & tmpFile & "\"")
-    discard eval.evalString("b: require \"" & tmpFile & "\"")
+    discard eval.evalString("a: import \"" & tmpFile & "\"")
+    discard eval.evalString("b: import \"" & tmpFile & "\"")
     # Both should be the same cached object
     check $eval.evalString("a/counter") == "1"
     check $eval.evalString("b/counter") == "1"
     removeFile(tmpFile)
 
-  test "require strips Kintsugi header":
-    let tmpFile = getTempDir() / "test_require_header.ktg"
+  test "import strips Kintsugi header":
+    let tmpFile = getTempDir() / "test_import_header.ktg"
     writeFile(tmpFile, "Kintsugi [title: \"test\"]\nx: 99")
     let eval = makeEval()
-    discard eval.evalString("m: require \"" & tmpFile & "\"")
+    discard eval.evalString("m: import \"" & tmpFile & "\"")
     check $eval.evalString("m/x") == "99"
     removeFile(tmpFile)
 
@@ -138,7 +138,7 @@ suite "exports":
     let tmpFile = getTempDir() / "test_exports.ktg"
     writeFile(tmpFile, "exports [add]\nadd: function [a b] [a + b]\nsecret: 42")
     let eval = makeEval()
-    discard eval.evalString("m: require \"" & tmpFile & "\"")
+    discard eval.evalString("m: import \"" & tmpFile & "\"")
     check $eval.evalString("type m/add 1 2") == "integer!"  # confirm add works
     check $eval.evalString("m/add 3 4") == "7"
     # secret should not be exported

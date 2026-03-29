@@ -15,10 +15,10 @@ Kintsugi [
 
 ; --- SDK imports ---
 
-import "CoreLibs/object"
-import "CoreLibs/graphics"
-import "CoreLibs/sprites"
-import "CoreLibs/timer"
+raw {import "CoreLibs/object"}
+raw {import "CoreLibs/graphics"}
+raw {import "CoreLibs/sprites"}
+raw {import "CoreLibs/timer"}
 
 ; --- Bindings ---
 
@@ -48,8 +48,7 @@ myGameSetUp: function [] [
   assert playerImage
 
   playerSprite: sprite-new playerImage
-  playerSprite -> moveTo 200 120
-  playerSprite -> add
+  playerSprite -> moveTo 200 120 -> add
 
   ; background
   backgroundImage: image-new "Images/background"

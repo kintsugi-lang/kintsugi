@@ -255,9 +255,16 @@ proc nextToken*(lex: var Lexer): KtgValue =
     return ktgWord("/" & name, wkWord, startLine)
 
   # operators
-  if ch in {'+', '*', '/', '='}:
+  if ch in {'+', '*', '/'}:
     discard lex.advance
     return KtgValue(kind: vkOp, opFn: nil, opSymbol: $ch, line: startLine)
+
+  if ch == '=':
+    discard lex.advance
+    if lex.peek == '=':
+      discard lex.advance
+      return KtgValue(kind: vkOp, opFn: nil, opSymbol: "==", line: startLine)
+    return KtgValue(kind: vkOp, opFn: nil, opSymbol: "=", line: startLine)
 
   if ch == '<':
     discard lex.advance

@@ -26,6 +26,8 @@ type
   ReturnSignal* = ref object of CatchableError
     value*: KtgValue
   BreakSignal* = ref object of CatchableError
+  ExitSignal* = ref object of CatchableError
+    code*: int
 
 
 # --- Evaluator creation ---
@@ -132,6 +134,14 @@ proc applyOp*(eval: Evaluator, op: string, left, right: KtgValue): KtgValue =
   # comparison ops
   case op
   of "=":  return ktgLogic(valuesEqual(left, right))
+  of "==":
+    const nonScalar = {vkBlock, vkParen, vkMap, vkSet, vkContext, vkObject,
+                       vkFunction, vkNative, vkOp}
+    if left.kind in nonScalar or right.kind in nonScalar:
+      raise KtgError(kind: "type",
+        msg: "== requires scalar types, got " & typeName(left) & " and " & typeName(right),
+        data: nil)
+    return ktgLogic(left.kind == right.kind and valuesEqual(left, right))
   of "<>": return ktgLogic(not valuesEqual(left, right))
   of "<":
     if left.kind in {vkInteger, vkFloat} and right.kind in {vkInteger, vkFloat}:

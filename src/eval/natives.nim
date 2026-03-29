@@ -1,4 +1,4 @@
-import std/[strutils, tables, math, algorithm, sets, os, times]
+import std/[strutils, tables, math, algorithm, sets, os, times, random]
 import ../core/[types, equality]
 import ../parse/parser
 import dialect, evaluator
@@ -20,10 +20,6 @@ proc registerNatives*(eval: Evaluator) =
 
   # --- Output ---
 
-  # --- Import (no-op in interpreter — Playdate SDK uses this at runtime) ---
-  ctx.native("import", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    ktgNone()
-  )
 
   ctx.native("print", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     let eval = cast[Evaluator](ep)
@@ -294,8 +290,9 @@ proc registerNatives*(eval: Evaluator) =
       args[0].blockVals.add(args[1])
       return args[0]
     if args[0].kind == vkString:
-      raise KtgError(kind: "type", msg: "append does not work on strings — use join or rejoin", data: nil)
-    raise KtgError(kind: "type", msg: "append expects block!, got " & typeName(args[0]), data: nil)
+      args[0].strVal.add($args[1])
+      return args[0]
+    raise KtgError(kind: "type", msg: "append expects block! or string!, got " & typeName(args[0]), data: nil)
   )
 
   block:
@@ -417,6 +414,41 @@ proc registerNatives*(eval: Evaluator) =
     ktgNone()
   )
 
+  # --- find: unified search for blocks and strings ---
+
+  ctx.native("find", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    case args[0].kind
+    of vkBlock:
+      for i, v in args[0].blockVals:
+        if valuesEqual(v, args[1]): return ktgInt(int64(i + 1))
+      return ktgNone()
+    of vkString:
+      let needle = $args[1]
+      let idx = args[0].strVal.find(needle)
+      if idx >= 0: return ktgInt(int64(idx + 1))  # 1-based
+      return ktgNone()
+    else:
+      raise KtgError(kind: "type", msg: "find expects block! or string!, got " & typeName(args[0]), data: nil)
+  )
+
+  # --- reverse: unified for blocks and strings ---
+
+  ctx.native("reverse", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    case args[0].kind
+    of vkBlock:
+      var reversed: seq[KtgValue] = @[]
+      for i in countdown(args[0].blockVals.len - 1, 0):
+        reversed.add(args[0].blockVals[i])
+      return ktgBlock(reversed)
+    of vkString:
+      var s = ""
+      for i in countdown(args[0].strVal.len - 1, 0):
+        s.add(args[0].strVal[i])
+      return ktgString(s)
+    else:
+      raise KtgError(kind: "type", msg: "reverse expects block! or string!, got " & typeName(args[0]), data: nil)
+  )
+
   # --- String operations ---
 
   ctx.native("join", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
@@ -492,12 +524,38 @@ proc registerNatives*(eval: Evaluator) =
     ktgNone()
   )
 
-  # override replace with 3-arg version
-  ctx.native("replace", 3, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    if args[0].kind == vkString and args[1].kind == vkString and args[2].kind == vkString:
-      return ktgString(args[0].strVal.replace(args[1].strVal, args[2].strVal))
-    raise KtgError(kind: "type", msg: "replace expects string! string! string!", data: nil)
-  )
+  # override replace with 3-arg version + /first refinement
+  block:
+    let replaceNative = KtgNative(
+      name: "replace",
+      arity: 3,
+      refinements: @[RefinementSpec(name: "first", params: @[])],
+      fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
+        let eval = cast[Evaluator](ep)
+        let firstOnly = "first" in eval.currentRefinements
+        if args[0].kind == vkString and args[1].kind == vkString and args[2].kind == vkString:
+          if firstOnly:
+            let idx = args[0].strVal.find(args[1].strVal)
+            if idx < 0:
+              return ktgString(args[0].strVal)
+            return ktgString(
+              args[0].strVal[0 ..< idx] &
+              args[2].strVal &
+              args[0].strVal[idx + args[1].strVal.len .. ^1])
+          return ktgString(args[0].strVal.replace(args[1].strVal, args[2].strVal))
+        if args[0].kind == vkBlock:
+          var items: seq[KtgValue] = @[]
+          var replaced = false
+          for v in args[0].blockVals:
+            if valuesEqual(v, args[1]) and not (firstOnly and replaced):
+              items.add(args[2])
+              replaced = true
+            else:
+              items.add(v)
+          return ktgBlock(items)
+        raise KtgError(kind: "type", msg: "replace expects string! or block!, got " & typeName(args[0]), data: nil)
+    )
+    ctx.set("replace", KtgValue(kind: vkNative, nativeFn: replaceNative, line: 0))
 
   ctx.native("substring", 3, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     if args[0].kind != vkString:
@@ -534,6 +592,48 @@ proc registerNatives*(eval: Evaluator) =
       raise KtgError(kind: "type", msg: "write-file expects string! as content", data: nil)
     writeFile(path, args[1].strVal)
     ktgNone()
+  )
+
+  # --- Filesystem ---
+
+  ctx.native("read-dir", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    let path = case args[0].kind
+      of vkString: args[0].strVal
+      of vkFile: args[0].filePath
+      else:
+        raise KtgError(kind: "type", msg: "read-dir expects string! or file!", data: nil)
+    if not dirExists(path):
+      raise KtgError(kind: "io", msg: "directory not found: " & path, data: args[0])
+    var entries: seq[KtgValue] = @[]
+    for kind, entry in walkDir(path):
+      entries.add(ktgString(lastPathPart(entry)))
+    entries.sort(proc(a, b: KtgValue): int = cmp(a.strVal, b.strVal))
+    ktgBlock(entries)
+  )
+
+  ctx.native("dir?", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    let path = case args[0].kind
+      of vkString: args[0].strVal
+      of vkFile: args[0].filePath
+      else:
+        raise KtgError(kind: "type", msg: "dir? expects string! or file!", data: nil)
+    ktgLogic(dirExists(path))
+  )
+
+  ctx.native("file?", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    let path = case args[0].kind
+      of vkString: args[0].strVal
+      of vkFile: args[0].filePath
+      else:
+        raise KtgError(kind: "type", msg: "file? expects string! or file!", data: nil)
+    ktgLogic(fileExists(path))
+  )
+
+  ctx.native("exit", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    let code = case args[0].kind
+      of vkInteger: int(args[0].intVal)
+      else: 0
+    raise ExitSignal(code: code)
   )
 
   # --- Time ---
@@ -715,6 +815,146 @@ proc registerNatives*(eval: Evaluator) =
       else: raise KtgError(kind: "type", msg: "sqrt expects number!", data: nil)
     ktgFloat(sqrt(v))
   )
+
+  # Helper to extract float from number arg
+  template numArg(a: KtgValue, fname: string): float64 =
+    case a.kind
+    of vkInteger: float64(a.intVal)
+    of vkFloat: a.floatVal
+    else: raise KtgError(kind: "type", msg: fname & " expects number!", data: nil)
+
+  # --- Trig (radians) ---
+
+  ctx.native("sin", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    ktgFloat(sin(numArg(args[0], "sin")))
+  )
+
+  ctx.native("cos", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    ktgFloat(cos(numArg(args[0], "cos")))
+  )
+
+  ctx.native("tan", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    ktgFloat(tan(numArg(args[0], "tan")))
+  )
+
+  ctx.native("asin", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    ktgFloat(arcsin(numArg(args[0], "asin")))
+  )
+
+  ctx.native("acos", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    ktgFloat(arccos(numArg(args[0], "acos")))
+  )
+
+  ctx.native("atan2", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    ktgFloat(arctan2(numArg(args[0], "atan2"), numArg(args[1], "atan2")))
+  )
+
+  # --- Exponentiation / logarithms ---
+
+  ctx.native("pow", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    let base = numArg(args[0], "pow")
+    let exp = numArg(args[1], "pow")
+    let r = pow(base, exp)
+    if args[0].kind == vkInteger and args[1].kind == vkInteger and
+       exp >= 0.0 and r == floor(r) and r < float64(high(int64)):
+      ktgInt(int64(r))
+    else:
+      ktgFloat(r)
+  )
+
+  ctx.native("exp", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    ktgFloat(exp(numArg(args[0], "exp")))
+  )
+
+  ctx.native("log", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    ktgFloat(ln(numArg(args[0], "log")))
+  )
+
+  ctx.native("log10", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    ktgFloat(log10(numArg(args[0], "log10")))
+  )
+
+  # --- Degree/radian conversion ---
+
+  ctx.native("to-degrees", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    ktgFloat(radToDeg(numArg(args[0], "to-degrees")))
+  )
+
+  ctx.native("to-radians", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    ktgFloat(degToRad(numArg(args[0], "to-radians")))
+  )
+
+  # --- Floor / ceil ---
+
+  ctx.native("floor", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    ktgInt(int64(floor(numArg(args[0], "floor"))))
+  )
+
+  ctx.native("ceil", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    ktgInt(int64(ceil(numArg(args[0], "ceil"))))
+  )
+
+  # --- Constants ---
+
+  ctx.set("pi", ktgFloat(PI))
+
+  # --- Random ---
+  # random N → float in [0, N) or int in [0, N) via /int
+  # random/int N → integer in [0, N)
+  # random/choice block → pick random element
+
+  block:
+    randomize()  # seed from system clock
+    let randomNative = KtgNative(
+      name: "random",
+      arity: 1,
+      refinements: @[
+        RefinementSpec(name: "int", params: @[]),
+        RefinementSpec(name: "range", params: @[ParamSpec(name: "max", typeName: "")]),
+        RefinementSpec(name: "choice", params: @[]),
+        RefinementSpec(name: "seed", params: @[])
+      ],
+      fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
+        let eval = cast[Evaluator](ep)
+
+        if "seed" in eval.currentRefinements:
+          let s = case args[0].kind
+            of vkInteger: int(args[0].intVal)
+            else: raise KtgError(kind: "type", msg: "random/seed expects integer!", data: nil)
+          randomize(s)
+          return ktgNone()
+
+        if "choice" in eval.currentRefinements:
+          if args[0].kind != vkBlock:
+            raise KtgError(kind: "type", msg: "random/choice expects block!", data: nil)
+          let blk = args[0].blockVals
+          if blk.len == 0:
+            return ktgNone()
+          return blk[rand(blk.len - 1)]
+
+        # /range: random/range lo hi → float in [lo, hi)
+        # /int/range: random/int/range lo hi → integer in [lo, hi]
+        if "range" in eval.currentRefinements:
+          let lo = numArg(args[0], "random/range")
+          # /range has 1 param (max), consumed after regular args
+          # args layout: [lo, ...refinement params...]
+          # /int has 0 params, /range has 1 param → args[1] is max
+          let hi = numArg(args[1], "random/range")
+          if "int" in eval.currentRefinements:
+            return ktgInt(int64(rand(int(hi) - int(lo)) + int(lo)))
+          return ktgFloat(lo + rand(hi - lo))
+
+        if "int" in eval.currentRefinements:
+          let n = case args[0].kind
+            of vkInteger: int(args[0].intVal)
+            else: raise KtgError(kind: "type", msg: "random/int expects integer!", data: nil)
+          return ktgInt(int64(rand(n - 1)))
+
+        # Default: float in [0, N)
+        let n = numArg(args[0], "random")
+        ktgFloat(rand(n))
+    )
+    ctx.set("random", KtgValue(kind: vkNative, nativeFn: randomNative, line: 0))
 
   # --- Homoiconic ---
 
@@ -1421,11 +1661,11 @@ proc registerNatives*(eval: Evaluator) =
     ktgNone()
   )
 
-  # --- Require ---
+  # --- Import (module loading) ---
 
   block:
-    let requireNative = KtgNative(
-      name: "require",
+    let importNative = KtgNative(
+      name: "import",
       arity: 1,
       refinements: @[RefinementSpec(name: "fresh", params: @[])],
       fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
@@ -1494,7 +1734,7 @@ proc registerNatives*(eval: Evaluator) =
           eval.moduleLoading.excl(resolvedPath)
           raise
     )
-    ctx.set("require", KtgValue(kind: vkNative, nativeFn: requireNative, line: 0))
+    ctx.set("import", KtgValue(kind: vkNative, nativeFn: importNative, line: 0))
 
   # --- Exports ---
 
@@ -1572,5 +1812,15 @@ proc registerNatives*(eval: Evaluator) =
       else:
         discard
 
+    ktgNone()
+  )
+
+  # --- emit (no-op at top level; functional inside #preprocess) ---
+  ctx.native("emit", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    ktgNone()
+  )
+
+  # --- raw (compile-time only, writes verbatim string to Lua output) ---
+  ctx.native("raw", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     ktgNone()
   )

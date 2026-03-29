@@ -118,7 +118,6 @@ proc initNativeBindings(): Table[string, BindingInfo] =
   # Output
   result["print"] = nativeBinding(1)
   result["probe"] = nativeBinding(1)
-  result["import"] = nativeBinding(1)
   result["assert"] = nativeBinding(1)
   # Control flow
   result["if"] = nativeBinding(2)       # condition block
@@ -149,6 +148,8 @@ proc initNativeBindings(): Table[string, BindingInfo] =
   result["select"] = nativeBinding(2)
   result["has?"] = nativeBinding(2)
   result["index?"] = nativeBinding(2)
+  result["find"] = nativeBinding(2)
+  result["reverse"] = nativeBinding(1)
   result["insert"] = nativeBinding(3)
   result["remove"] = nativeBinding(2)
   # String ops
@@ -171,6 +172,21 @@ proc initNativeBindings(): Table[string, BindingInfo] =
   result["odd?"] = nativeBinding(1)
   result["even?"] = nativeBinding(1)
   result["sqrt"] = nativeBinding(1)
+  result["sin"] = nativeBinding(1)
+  result["cos"] = nativeBinding(1)
+  result["tan"] = nativeBinding(1)
+  result["asin"] = nativeBinding(1)
+  result["acos"] = nativeBinding(1)
+  result["atan2"] = nativeBinding(2)
+  result["pow"] = nativeBinding(2)
+  result["exp"] = nativeBinding(1)
+  result["log"] = nativeBinding(1)
+  result["log10"] = nativeBinding(1)
+  result["to-degrees"] = nativeBinding(1)
+  result["to-radians"] = nativeBinding(1)
+  result["floor"] = nativeBinding(1)
+  result["ceil"] = nativeBinding(1)
+  result["random"] = nativeBinding(1)
   # Homoiconic — do/compose/bind are compile errors in Lua mode
   result["do"] = nativeBinding(1)
   result["reduce"] = nativeBinding(1)
@@ -201,9 +217,13 @@ proc initNativeBindings(): Table[string, BindingInfo] =
   # IO
   result["read-file"] = nativeBinding(1)
   result["write-file"] = nativeBinding(2)
+  result["read-dir"] = nativeBinding(1)
+  result["dir?"] = nativeBinding(1)
+  result["file?"] = nativeBinding(1)
+  result["exit"] = nativeBinding(1)
   result["load"] = nativeBinding(1)
   result["save"] = nativeBinding(2)
-  result["require"] = nativeBinding(1)
+  result["import"] = nativeBinding(1)
   result["exports"] = nativeBinding(1)
   # Set operations
   result["charset"] = nativeBinding(1)
@@ -262,7 +282,7 @@ proc isInfixOp(val: KtgValue): bool =
 
 proc luaOp(op: string): string =
   case op
-  of "=": "=="
+  of "=", "==": "=="
   of "<>": "~="
   of "%": "%"
   of "and": "and"
@@ -952,8 +972,17 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
     of wkWord:
       let name = val.wordName
 
+      # --- raw: write string verbatim to Lua output ---
+      if name == "raw":
+        let arg = e.emitExpr(vals, pos)
+        # Strip quotes from string literal
+        if arg.startsWith("\"") and arg.endsWith("\""):
+          result = arg[1..^2]
+        else:
+          result = arg
+
       # --- Known native refinement calls ---
-      if name == "round/down":
+      elif name == "round/down":
         let arg = e.emitExpr(vals, pos)
         result = "math.floor(" & arg & ")"
       elif name == "round/up":
@@ -1322,6 +1351,41 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
         let arg = e.emitExpr(vals, pos)
         result = "math.sqrt(" & arg & ")"
 
+      elif name == "sin":
+        result = "math.sin(" & e.emitExpr(vals, pos) & ")"
+      elif name == "cos":
+        result = "math.cos(" & e.emitExpr(vals, pos) & ")"
+      elif name == "tan":
+        result = "math.tan(" & e.emitExpr(vals, pos) & ")"
+      elif name == "asin":
+        result = "math.asin(" & e.emitExpr(vals, pos) & ")"
+      elif name == "acos":
+        result = "math.acos(" & e.emitExpr(vals, pos) & ")"
+      elif name == "atan2":
+        let y = e.emitExpr(vals, pos)
+        let x = e.emitExpr(vals, pos)
+        result = "math.atan2(" & y & ", " & x & ")"
+      elif name == "pow":
+        let base = e.emitExpr(vals, pos)
+        let exp = e.emitExpr(vals, pos)
+        result = "math.pow(" & base & ", " & exp & ")"
+      elif name == "exp":
+        result = "math.exp(" & e.emitExpr(vals, pos) & ")"
+      elif name == "log":
+        result = "math.log(" & e.emitExpr(vals, pos) & ")"
+      elif name == "log10":
+        result = "math.log10(" & e.emitExpr(vals, pos) & ")"
+      elif name == "to-degrees":
+        result = "math.deg(" & e.emitExpr(vals, pos) & ")"
+      elif name == "to-radians":
+        result = "math.rad(" & e.emitExpr(vals, pos) & ")"
+      elif name == "floor":
+        result = "math.floor(" & e.emitExpr(vals, pos) & ")"
+      elif name == "ceil":
+        result = "math.ceil(" & e.emitExpr(vals, pos) & ")"
+      elif name == "random":
+        result = "math.random() * " & e.emitExpr(vals, pos)
+
       # --- Type conversion ---
       elif name == "to":
         let typeExpr = e.emitExpr(vals, pos)
@@ -1380,7 +1444,7 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
         result = arg
 
       # --- require: compile dependency and emit Lua require() ---
-      elif name == "require":
+      elif name == "import":
         if pos < vals.len:
           let pathVal = vals[pos]
           pos += 1
@@ -1537,6 +1601,14 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
   var pos = 0
   while pos < vals.len:
     let val = vals[pos]
+
+    # --- raw: write string verbatim as statement ---
+    if val.kind == vkWord and val.wordKind == wkWord and val.wordName == "raw":
+      pos += 1
+      if pos < vals.len and vals[pos].kind == vkString:
+        e.ln(vals[pos].strVal)
+        pos += 1
+      continue
 
     # --- Skip Kintsugi header (Kintsugi [...] or Kintsugi/Lua [...]) ---
     if val.kind == vkWord and val.wordKind == wkWord and val.wordName.startsWith("Kintsugi"):
@@ -1824,13 +1896,6 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
       e.ln("assert(" & arg & ")")
       continue
 
-    # --- import as statement (Playdate SDK) ---
-    if val.kind == vkWord and val.wordKind == wkWord and val.wordName == "import":
-      pos += 1
-      let arg = e.emitExpr(vals, pos)
-      e.ln("import " & arg)
-      continue
-
     # --- exports: skip (handled at module level via findExports) ---
     if val.kind == vkWord and val.wordKind == wkWord and val.wordName == "exports":
       pos += 1
@@ -2004,6 +2069,10 @@ proc findLastStmtStart(e: var LuaEmitter, vals: seq[KtgValue]): int =
         pos += 1
         discard e.emitExpr(vals, pos)
         continue
+      of "raw":
+        pos += 1
+        discard e.emitExpr(vals, pos)
+        continue
       of "set":
         pos += 1
         if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
@@ -2157,6 +2226,7 @@ local function _deep_copy(t)
   if type(t) ~= "table" then return t end
   local r = {}; for k, v in pairs(t) do r[k] = _deep_copy(v) end; return r
 end
+local pi = math.pi
 """
 
 proc prescanBindings(e: var LuaEmitter, blk: seq[KtgValue]) =
@@ -2274,7 +2344,7 @@ proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
           continue
       # name: require %path — prescan the dependency's exports
       elif i + 1 < vals.len and vals[i + 1].kind == vkWord and
-           vals[i + 1].wordKind == wkWord and vals[i + 1].wordName == "require":
+           vals[i + 1].wordKind == wkWord and vals[i + 1].wordName == "import":
         if i + 2 < vals.len and vals[i + 2].kind in {vkFile, vkString}:
           let rawPath = if vals[i + 2].kind == vkFile: vals[i + 2].filePath
                         else: vals[i + 2].strVal

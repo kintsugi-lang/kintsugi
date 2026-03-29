@@ -153,7 +153,7 @@ suite "module isolation":
     let result = eval.evalString("""
       f: function [] [
         caller-local: 999
-        m: require """ & "\"" & modPath & "\"" & """
+        m: import """ & "\"" & modPath & "\"" & """
 
         m/result
       ]
@@ -194,28 +194,28 @@ x: 42
     check result.kind == vkNone
 
 
-# --- 7. load/fresh (via require/fresh) ---
+# --- 7. load/fresh (via import/fresh) ---
 
-suite "require/fresh bypasses cache":
-  test "require/fresh reloads module":
+suite "import/fresh bypasses cache":
+  test "import/fresh reloads module":
     let tmpDir = getTempDir()
     let modPath = tmpDir / "test_fresh_mod.ktg"
 
     # First version
     writeFile(modPath, "val: 1\nexports [val]")
     let eval = makeEval()
-    let r1 = eval.evalString("m: require \"" & modPath & "\"\nm/val")
+    let r1 = eval.evalString("m: import \"" & modPath & "\"\nm/val")
     check $r1 == "1"
 
     # Update the file
     writeFile(modPath, "val: 2\nexports [val]")
 
-    # Regular require returns cached value
-    let r2 = eval.evalString("m2: require \"" & modPath & "\"\nm2/val")
+    # Regular import returns cached value
+    let r2 = eval.evalString("m2: import \"" & modPath & "\"\nm2/val")
     check $r2 == "1"  # cached
 
-    # require/fresh reloads
-    let r3 = eval.evalString("m3: require/fresh \"" & modPath & "\"\nm3/val")
+    # import/fresh reloads
+    let r3 = eval.evalString("m3: import/fresh \"" & modPath & "\"\nm3/val")
     check $r3 == "2"  # fresh load
 
     removeFile(modPath)

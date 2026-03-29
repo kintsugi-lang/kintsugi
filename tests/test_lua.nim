@@ -182,16 +182,16 @@ suite "native refinement calls":
     """))
     check "_deep_copy(items)" in code
 
-suite "require compilation":
-  test "require emits Lua require()":
+suite "import compilation":
+  test "import emits Lua require()":
     let code = emitLua(parseSource("""
-      utils: require %test-module.ktg
+      utils: import %test-module.ktg
     """), "tests/fixtures")
     check "require(\"test-module\")" in code
 
-  test "require compiles dependency":
+  test "import compiles dependency":
     let code = emitLua(parseSource("""
-      utils: require %test-module.ktg
+      utils: import %test-module.ktg
       print utils/double 5
     """), "tests/fixtures")
     check "utils.double(5)" in code

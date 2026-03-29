@@ -5,7 +5,7 @@
 ##   types-advanced.test.ts
 ##
 ## Note: #preprocess uses meta-word syntax, platform = "nim"
-## Note: require returns object! (frozen), not context!
+## Note: import returns object! (frozen), not context!
 ## Note: stdlib functions are defined inline (old .ktg files use TS syntax)
 ## Note: @type custom types are NOT implemented — marked FAILS
 
@@ -103,10 +103,10 @@ suite "Preprocess — emit injects code":
 
 
 # =============================================================================
-# require.test.ts
+# import.test.ts
 # =============================================================================
 
-const testDir = "/tmp/kintsugi-require-test-nim"
+const testDir = "/tmp/kintsugi-import-test-nim"
 
 suite "Require — basic":
   setup:
@@ -136,34 +136,34 @@ suite "Require — basic":
   teardown:
     removeDir(testDir)
 
-  test "require loads a simple module":
+  test "import loads a simple module":
     let eval = makeEval()
-    discard eval.evalString("math: require \"" & testDir / "simple.ktg" & "\"")
+    discard eval.evalString("math: import \"" & testDir / "simple.ktg" & "\"")
     check $eval.evalString("math/add 3 4") == "7"
     check $eval.evalString("math/mul 3 4") == "12"
 
-  test "require returns object!":
+  test "import returns object!":
     let eval = makeEval()
-    discard eval.evalString("m: require \"" & testDir / "simple.ktg" & "\"")
-    # require returns object! (frozen context)
+    discard eval.evalString("m: import \"" & testDir / "simple.ktg" & "\"")
+    # import returns object! (frozen context)
     check $eval.evalString("object? m") == "true"
 
   test "header is consumed, not in returned context":
     let eval = makeEval()
-    discard eval.evalString("m: require \"" & testDir / "math.ktg" & "\"")
+    discard eval.evalString("m: import \"" & testDir / "math.ktg" & "\"")
     check $eval.evalString("m/add 3 4") == "7"
 
   test "without exports, everything is public":
     # Note: _helper path fails because lexer treats s/_x as s / _x (operator)
     # when path segment starts with underscore. Using 'helper' instead.
     let eval = makeEval()
-    discard eval.evalString("m: require \"" & testDir / "math.ktg" & "\"")
+    discard eval.evalString("m: import \"" & testDir / "math.ktg" & "\"")
     check $eval.evalString("m/add 3 4") == "7"
     check $eval.evalString("m/clamp 15 0 10") == "10"
 
   test "with exports, only listed words are visible":
     let eval = makeEval()
-    discard eval.evalString("m: require \"" & testDir / "restricted.ktg" & "\"")
+    discard eval.evalString("m: import \"" & testDir / "restricted.ktg" & "\"")
     check $eval.evalString("m/greet \"Ray\"") == "Hello, Ray"
     # _internal should NOT be accessible
     expect KtgError:
@@ -182,8 +182,8 @@ suite "Require — caching":
 
   test "same path returns cached module":
     let eval = makeEval()
-    discard eval.evalString("a: require \"" & testDir / "simple.ktg" & "\"")
-    discard eval.evalString("b: require \"" & testDir / "simple.ktg" & "\"")
+    discard eval.evalString("a: import \"" & testDir / "simple.ktg" & "\"")
+    discard eval.evalString("b: import \"" & testDir / "simple.ktg" & "\"")
     check $eval.evalString("a/add 1 2") == "3"
     check $eval.evalString("b/add 1 2") == "3"
 

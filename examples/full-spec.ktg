@@ -19,7 +19,7 @@ Kintsugi [
 ;
 ; Headers:
 ;   Kintsugi [...]    - marks a file as an entrypoint (with metadata)
-;   (no header)       - module (loaded via require)
+;   (no header)       - module (loaded via import)
 ;
 ; The header determines prelude inclusion when compiling.
 ; Compilation is always explicit via -c flag.
@@ -186,7 +186,9 @@ print 5 >= 5                            ; true
 print 3 <= 5                            ; true
 
 ; --- Numeric cross-type ---
-print 42 = 42.0                         ; true (integer and float compare by value)
+print 42 = 42.0                         ; true (= compares by value across types)
+print 42 == 42.0                        ; false (== is strict — requires same type)
+print 42 == 42                          ; true (same type, same value)
 
 ; --- Logic ---
 ; and/or are infix operators. They do NOT short-circuit --
@@ -293,13 +295,13 @@ print counter                           ; 10
 ; Use all/any for short-circuit:
 ;   all [false expensive-call]  ; stops at false, never calls
 
-; --- append is for blocks only ---
-; append mutates blocks in place (like push). It does NOT
-; work on strings. Use join or rejoin to build strings.
+; --- append works on blocks AND strings ---
+; append mutates in place and returns the series.
 ;   data: [1 2]
 ;   append data 3               ; data is now [1 2 3]
-;   join "hello" " world"       ; => "hello world"
-;   rejoin ["a" "b" "c"]        ; => "abc"
+;   s: "hello"
+;   append s " world"           ; s is now "hello world"
+; join and rejoin still exist for building new strings.
 
 ; --- Division returns integer when exact ---
 ; 10 / 2 => 5 (integer!), 10 / 3 => 3.33 (float!).
@@ -308,7 +310,7 @@ print counter                           ; 10
 10 / 3                                   ; => 3.3333 (float!)
 
 ; --- replace replaces ALL occurrences ---
-; Unlike C's strtok or JS's String.replace, Kintsugi's
+; Unlike C's strtok or JS's String#replace, Kintsugi's
 ; replace is replace-all by default.
 print replace "aabaa" "a" "x"           ; xxbxx
 
@@ -349,12 +351,6 @@ print if [] ["empty block is truthy"]  ; empty block is truthy
 ; ============================================================
 ; Kintsugi is in the REBOL lineage but runs on Lua, not
 ; a custom VM. Some things had to change.
-;
-; --- Strings are immutable ---
-; No mutable string series. append does NOT work on strings.
-; Use join or rejoin instead:
-;   append "hello" " world"     ; ERROR
-;   join "hello" " world"       ; => "hello world"
 ;
 ; --- No char! type ---
 ; Single characters are just string! values. "A" is a string,
@@ -408,9 +404,9 @@ print if [] ["empty block is truthy"]  ; empty block is truthy
 ; --- exports is a body-level word, not a header field ---
 ; Put exports [...] in the module body, not in the header.
 ;
-; --- require is sugar for load/eval/freeze/cache ---
-; require %lib/math.ktg is equivalent to load/eval %lib/math.ktg.
-; load is the primitive. require = load + evaluate + freeze + cache.
+; --- import is sugar for load/eval/freeze/cache ---
+; import %lib/math.ktg is equivalent to load/eval %lib/math.ktg.
+; load is the primitive. import = load + evaluate + freeze + cache.
 ;
 ; --- parse returns a context!, not logic! ---
 ; result: parse "abc" [some alpha]
@@ -629,13 +625,27 @@ print replace "hello world" "world" "Ray" ; hello Ray
 print replace "aabaa" "a" "x"          ; xxbxx (replace-all by default)
 
 ; --- Series operations on strings ---
-; first, second, last, pick work on strings (1-based).
-; They return single-character strings.
+; first, second, last, pick, find, reverse work on both
+; blocks and strings. They are the unified series interface.
 
 print first "hello"                     ; h
 print second "hello"                    ; e
 print last "hello"                      ; o
 print pick "hello" 3                    ; l
+
+; find — returns 1-based index or none
+print find "hello world" "world"        ; 7
+print find "hello" "xyz"                ; none
+print find [10 20 30] 20               ; 2
+
+; reverse — returns new value
+print reverse "hello"                   ; olleh
+print reverse [1 2 3]                   ; [3 2 1]
+
+; append — mutates strings in place
+spec-str: "hello"
+append spec-str " world"
+print spec-str                          ; hello world
 
 ; substring extracts a range (1-based start, length)
 print substring "hello world" 7 5       ; world
@@ -797,17 +807,6 @@ print MAX-SPEED                          ; 100
 
 
 ; ============================================================
-; IMPORT STATEMENT
-; ============================================================
-; import loads a Lua module path (for Playdate SDK, LOVE2D).
-; In Script mode, import is a native that returns none.
-; In Lua compilation, it emits: import "path"
-;
-;   import "CoreLibs/graphics"
-;   import "CoreLibs/sprites"
-
-
-; ============================================================
 ; MAP TYPE
 ; ============================================================
 ; map! is a hash-based key-value store for fast lookup.
@@ -922,6 +921,24 @@ print negate 5                          ; -5
 print odd? 7                            ; true
 print even? 8                           ; true
 print sqrt 9                            ; 3.0
+print floor 3.7                         ; 3
+print ceil 3.2                          ; 4
+print pow 2 10                          ; 1024
+print log10 100                         ; 2.0
+
+; --- Trig (radians) ---
+print sin 0                             ; 0.0
+print cos 0                             ; 1.0
+print pi                                ; 3.141592653589793
+print to-degrees pi                     ; 180.0
+print to-radians 180                    ; 3.141592653589793
+
+; --- Random ---
+random/seed 42
+print random 1.0                        ; (float in [0, 1))
+print random/int 100                    ; (integer in [0, 100))
+print random/int/range 1 6              ; (integer in [1, 6])
+print random/choice [10 20 30]          ; (one of 10, 20, 30)
 
 
 ; ============================================================
@@ -1604,6 +1621,12 @@ print pp-double 5                       ; 10
 ;   interpreter          -> platform = 'script
 ;   compiled via -c      -> platform = 'lua
 
+; --- raw: emit verbatim Lua (compile-time only) ---
+; raw writes a string directly to the compiled Lua output.
+; In the interpreter, it is a no-op.
+;   raw {import "CoreLibs/graphics"}    ; Playdate SDK import
+;   raw {local ffi = require("ffi")}    ; LuaJIT FFI
+
 
 ; ============================================================
 ; LOADING & MODULES
@@ -1616,12 +1639,12 @@ print pp-double 5                       ; 10
 ;   load/freeze %file      -- parse as data + freeze = object!
 ;   load/header %file      -- return just the header block
 ;   load/fresh %file       -- skip cache for one call
-;   require/fresh %file    -- require, bypassing cache
+;   import/fresh %file    -- import, bypassing cache
 ;
-; require is sugar for load/eval/freeze/cache. load is
+; import is sugar for load/eval/freeze/cache. load is
 ; the primitive. Results are immutable object! values,
 ; cached by absolute path.
-; require/fresh forces a reload even if the module is cached.
+; import/fresh forces a reload even if the module is cached.
 ;
 ; Example:
 ;   math: load/eval %lib/math.ktg
@@ -1664,7 +1687,7 @@ print pp-double 5                       ; 10
 ; the file as an entrypoint. Files without headers are modules.
 ;
 ; When compiling (-c), entrypoints get the runtime prelude.
-; Modules don't — they're loaded via require.
+; Modules don't — they're loaded via import.
 ;
 ; Header contents are optional metadata for tooling.
 ; No required fields. No fields with language-level effects.
