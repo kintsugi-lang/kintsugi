@@ -412,6 +412,82 @@ suite "read/stdin":
     check readVal.kind == vkNative
     check readVal.nativeFn.refinements.len >= 3
 
+suite "does":
+  test "does creates zero-arg function":
+    let eval = makeEval()
+    discard eval.evalString("""greet: does [42]""")
+    check $eval.evalString("greet") == "42"
+
+  test "does captures closure":
+    let eval = makeEval()
+    let r = eval.evalString("""
+      n: 10
+      get-n: does [n]
+      get-n
+    """)
+    check $r == "10"
+
+suite "@global":
+  test "@global word: value declares and sets":
+    let eval = makeEval()
+    let r = eval.evalString("""
+      @global counter: 0
+      adder: does [counter: counter + 1]
+      adder
+      adder
+      adder
+      counter
+    """)
+    check $r == "3"
+
+  test "@global word marks existing binding":
+    let eval = makeEval()
+    let r = eval.evalString("""
+      total: 0
+      @global total
+      accumulate: function [n] [total: total + n]
+      accumulate 5
+      accumulate 3
+      total
+    """)
+    check $r == "8"
+
+  test "@global [words] marks multiple":
+    let eval = makeEval()
+    discard eval.evalString("""
+      @global [a b]
+      a: 0
+      b: 0
+      inc: does [a: a + 1  b: b + 10]
+      inc
+      inc
+    """)
+    check $eval.evalString("a") == "2"
+    check $eval.evalString("b") == "20"
+
+  test "non-global words still shadow":
+    let eval = makeEval()
+    discard eval.evalString("""
+      x: 99
+      f: function [n] [x: n * 2  x]
+    """)
+    check $eval.evalString("f 5") == "10"
+    check $eval.evalString("x") == "99"
+
+  test "@global from nested function writes to global":
+    let eval = makeEval()
+    let r = eval.evalString("""
+      @global score: 0
+      outer: function [] [
+        inner: does [score: score + 100]
+        inner
+        inner
+      ]
+      outer
+      score
+    """)
+    check $r == "200"
+
 suite "unified series operations":
   test "find on block":
     let eval = makeEval()

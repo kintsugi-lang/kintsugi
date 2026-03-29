@@ -194,6 +194,7 @@ proc initNativeBindings(): Table[string, BindingInfo] =
   result["any"] = nativeBinding(1)
   # Function creation
   result["function"] = nativeBinding(2)
+  result["does"] = nativeBinding(1)
   # Context/Object
   result["context"] = nativeBinding(1)
   result["freeze"] = nativeBinding(1)
@@ -1164,6 +1165,17 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
         else:
           result = "nil"
 
+      elif name == "does":
+        if pos < vals.len and vals[pos].kind == vkBlock:
+          let bodyBlock = vals[pos].blockVals
+          pos += 1
+          let saved = e.output
+          e.output = ""
+          result = e.emitFuncDef(@[], bodyBlock)
+          e.output = saved
+        else:
+          result = "nil"
+
       # --- context: block -> Lua table ---
       elif name == "context":
         if pos < vals.len and vals[pos].kind == vkBlock:
@@ -1768,6 +1780,26 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
             e.locals.incl(p)
           e.indent += 1
           e.emitBody(bodyBlock, asReturn = not (isPath or isBound or isOverride))
+          e.indent -= 1
+          e.locals = savedLocals
+          e.ln("end")
+          continue
+
+      # Check if RHS is a does (zero-arg function)
+      if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkWord and
+         vals[pos].wordName == "does":
+        pos += 1
+        if pos < vals.len and vals[pos].kind == vkBlock:
+          let bodyBlock = vals[pos].blockVals
+          pos += 1
+          if isPath or isBound:
+            e.ln(name & " = function()")
+          else:
+            e.ln(prefix & "function " & name & "()")
+          let savedLocals = e.locals
+          e.locals = initHashSet[string]()
+          e.indent += 1
+          e.emitBody(bodyBlock, asReturn = not (isPath or isBound))
           e.indent -= 1
           e.locals = savedLocals
           e.ln("end")

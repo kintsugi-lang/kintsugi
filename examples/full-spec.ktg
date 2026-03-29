@@ -362,6 +362,10 @@ print add5 10                           ; 15
 greet-world: function [] [print "Hello, world!"]
 greet-world                             ; Hello, world!
 
+; does -- shorthand for function [] [body]
+say-hi: does [print "hi"]
+say-hi                                  ; hi
+
 
 ; ============================================================
 ; LOOP DIALECT
@@ -1021,6 +1025,29 @@ loop [from 1 to 10 [
 ]]
 print state/counter                     ; 10
 
+; --- @global: opt-in write-through ---
+; @global marks a word so set-word writes to the global scope
+; from any depth. Without @global, set-word always shadows.
+;
+;   @global word: value   -- declare + set in global
+;   @global word          -- mark existing word
+;   @global [words]       -- mark multiple words
+
+@global g-counter: 0
+g-tick: does [g-counter: g-counter + 1]
+g-tick
+g-tick
+g-tick
+print g-counter                         ; 3
+
+; Note: @global is only needed for reassigning a word (name:).
+; Mutating through a reference (ctx/field:) works from any
+; scope without @global -- like JavaScript, where obj.field = x
+; works in closures but obj = newObj creates a local.
+;   state: context [n: 0]
+;   inc: does [state/n: state/n + 1]    ; works without @global
+;   state: context [n: 99]              ; THIS needs @global
+
 ; --- Assignment is by reference ---
 ; Compound values (blocks, contexts, maps) are shared.
 ; copy creates an independent value.
@@ -1327,11 +1354,10 @@ result: parse [1 "a" 2 "b" 3] [
 print result/nums                       ; [1 2 3]
 
 ; --- Composable rules ---
-; Note: composable rules (using word references to rule blocks)
-; are planned but not yet implemented.
+; Store rules in words and reference them by name.
 digit-run: [some digit]
-; date-rule: [year: digit-run "-" month: digit-run "-" day: digit-run]
-; parse "2026-03-15" date-rule
+result: parse "12345" digit-run
+print result/ok                         ; true
 
 ; --- parse/ok refinement ---
 ; Returns bare logic! when you only care about success.

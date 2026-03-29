@@ -194,6 +194,18 @@ proc set*(ctx: KtgContext, name: string, val: KtgValue) =
   ## Always sets in current scope (shadowing).
   ctx.entries[name] = val
 
+proc setThrough*(ctx: KtgContext, name: string, val: KtgValue) =
+  ## Write-through: if name exists in a parent scope, write there.
+  ## If not, create in current scope (new local).
+  var c = ctx.parent
+  while c != nil:
+    if name in c.entries:
+      c.entries[name] = val
+      return
+    c = c.parent
+  # Not found in any parent — create local
+  ctx.entries[name] = val
+
 proc has*(ctx: KtgContext, name: string): bool =
   var c = ctx
   while c != nil:

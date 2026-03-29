@@ -11,6 +11,7 @@ type
     dialects*: seq[Dialect]
     moduleCache*: Table[string, KtgValue]
     moduleLoading*: HashSet[string]
+    globals*: HashSet[string]  ## words declared with @global
 
   Dialect* = ref object of RootObj
     name*: string

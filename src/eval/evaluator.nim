@@ -430,6 +430,11 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
           msg: "cannot rebind self",
           data: nil)
 
+      # @global words write to global scope
+      if val.wordName in eval.globals:
+        eval.global.set(val.wordName, rhs)
+        return rhs
+
       # set-path: word/field/field: value
       if val.wordName.contains('/'):
         let (head, segments) = parsePath(val.wordName)
@@ -664,6 +669,34 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
           eval.applyInfix(rhs, vals, pos, ctx)
           ctx.set(setWord.wordName, rhs)
           return rhs
+        return val
+
+      # @global word: value — declare and set in global scope
+      # @global word — mark existing word as global
+      # @global [words] — mark multiple words as global
+      if val.wordName == "global":
+        if pos < vals.len:
+          let next = vals[pos]
+          # @global word: value
+          if next.kind == vkWord and next.wordKind == wkSetWord:
+            pos += 1
+            var rhs = eval.evalNext(vals, pos, ctx)
+            eval.applyInfix(rhs, vals, pos, ctx)
+            eval.global.set(next.wordName, rhs)
+            eval.globals.incl(next.wordName)
+            return rhs
+          # @global [words]
+          if next.kind == vkBlock:
+            pos += 1
+            for v in next.blockVals:
+              if v.kind == vkWord and v.wordKind == wkWord:
+                eval.globals.incl(v.wordName)
+            return ktgNone()
+          # @global word
+          if next.kind == vkWord and next.wordKind == wkWord:
+            pos += 1
+            eval.globals.incl(next.wordName)
+            return ktgNone()
         return val
 
       # lifecycle hooks — for now return self

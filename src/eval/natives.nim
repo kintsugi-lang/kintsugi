@@ -1215,6 +1215,22 @@ proc registerNatives*(eval: Evaluator) =
     KtgValue(kind: vkFunction, fn: fn, line: 0)
   )
 
+  # --- does: zero-arg function shorthand ---
+
+  ctx.native("does", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    let eval = cast[Evaluator](ep)
+    if args[0].kind != vkBlock:
+      raise KtgError(kind: "type", msg: "does expects [body]", data: nil)
+    let fn = KtgFunc(
+      params: @[],
+      refinements: @[],
+      returnType: "",
+      body: args[0].blockVals,
+      closure: eval.currentCtx
+    )
+    KtgValue(kind: vkFunction, fn: fn, line: 0)
+  )
+
   # --- Error handling ---
 
   ctx.native("error", 3, proc(args: seq[KtgValue], ep: pointer): KtgValue =
