@@ -130,7 +130,7 @@ suite "preprocess":
     let eval = makeEval()
     let r = eval.evalString("""
       #preprocess [
-        if platform = 'script [
+        if system/platform = 'script [
           emit [result: "on-script"]
         ]
       ]

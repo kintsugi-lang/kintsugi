@@ -1,52 +1,108 @@
 # Kintsugi Handoff Document
 
-Last updated: 2026-03-26
+Last updated: 2026-03-29
 
 ---
 
 ## Project Status
 
-**Version:** 0.3.0 (nimble), header says 0.4.0
+**Version:** 0.4.0
 **Language:** Nim (compiles to C)
-**Source:** ~7,200 lines of Nim across 13 files in `src/`
-**Tests:** 855 passing across 20 test files (~7,400 lines)
-**Executable spec:** `examples/full-spec.ktg` (~1,700 lines, runs clean)
+**Source:** ~8,200 lines of Nim across 14 files in `src/`
+**Tests:** 977 passing across 22 test files
+**Executable spec:** `examples/full-spec.ktg` (~1,800 lines, runs clean)
+**Love2D:** Tic-tac-toe compiles and runs in Love2D
 
 ### What's Implemented
 
-The core language is complete and usable:
+The core language is complete:
 
-- **Lexer + parser** -- tokenizes all 20+ datatypes, parses into AST
+- **Lexer + parser** -- tokenizes 20+ datatypes, parses into AST
 - **Evaluator** -- left-to-right, no precedence, greedy function consumption
-- **Type system** -- runtime type checks, `is?`, `to`, function param constraints, custom types via `object`
+- **Type system** -- runtime type checks, `is?`, `to`, function param constraints, custom types via `object`, `==` strict equality
 - **Datatypes** -- integer, float, string, logic, none, pair, tuple, date, time, file, url, email, money, block, paren, map, set, context, object, function, native, op, type
-- **Control flow** -- `if`, `either`, `unless`, `loop` (the only loop construct)
-- **Error handling** -- `error`, `try` (returns result context), `rethrow`
-- **Dialects** -- loop, parse, match, attempt, object, bindings, header
+- **Control flow** -- `if`, `either`, `unless`, `loop` (the only loop construct, `do` required before body)
+- **Error handling** -- `error`, `try` (returns result context), `rethrow`, `attempt` dialect (pipelines with catch/retries/fallback)
+- **Dialects** -- loop, parse, match, attempt, object, bindings
 - **Objects** -- prototype-based with `field/required`, `field/optional`, `fields` bulk form, `make`, auto-generated types and constructors
-- **Parse dialect** -- PEG-style with backtracking, string and block modes, captures, collect/keep
-- **Preprocessing** -- `#preprocess [...]` and `#[expr]` inline form, full language at preprocess time
-- **Modules** -- `load`, `load/eval`, `load/header`, `load/fresh`, `require`, `require/fresh`, `exports`, caching
-- **Lua emitter** -- compiles Kintsugi to Lua 5.1 source via -c flag
+- **Parse dialect** -- PEG-style with backtracking, string and block modes, captures, collect/keep, composable rules, `parse/ok?` refinement
+- **Preprocessing** -- `#preprocess [...]` and `#[expr]` (block splicing), full language at preprocess time, runs before compilation
+- **Modules** -- `import` (load/eval/freeze/cache), `import/fresh`, `exports`, `load`/`load/eval`/`load/eval/freeze`, recursive compilation with cycle detection
+- **Lua emitter** -- compiles Kintsugi to Lua 5.1 via `-c` flag, recursive binding prescan, refinements as positional booleans, `= none` → `_is_none()`, prelude only on entrypoints
+- **Functions** -- `function`, `does` (zero-arg shorthand), refinements (`/name`), closures
 - **Chain operator** -- `->` for method-style calls
-- **Natives** -- 80+ built-in functions including string ops, file I/O, date/time, freeze/copy with /deep refinements
-- **Emacs mode** -- syntax highlighting, indentation
+- **Scoping** -- set-word always shadows, `@global` for opt-in write-through, `@const` for constant annotation
+- **Dynamic paths** -- `board/cells/:pos` for get/set with variable index
+- **I/O** -- `read`/`read/dir`/`read/lines`/`read/stdin`, `write`, `print`/`print/no-newline`, `save`/`load` round-trip, `dir?`, `file?`, `exit`
+- **Math** -- trig (sin/cos/tan/asin/acos/atan2), pow/exp/log/log10, floor/ceil, pi, random with /int /range /choice /seed refinements
+- **Series** -- unified: `find`, `reverse`, `append`, `first`/`last`/`pick` work on both blocks and strings, `replace`/`replace/first` on both, `byte`/`char` for character codes
+- **Compilation** -- `raw` for verbatim Lua output, `bindings` dialect with `'call`/`'const`/`'alias`/`'assign`/`'override` kinds, directory compilation, `--dry-run`
+- **Emacs mode** -- syntax highlighting and indentation (separate repo: `kintsugi-mode/`)
 
 ### What's Solid
 
 - Core evaluation model
 - Type system and conversions
-- Loop dialect (collect, fold, partition, filter)
-- Object dialect (field declarations, make, auto-generation)
-- Parse dialect (backtracking, captures, collect/keep)
-- Error handling (try/rethrow)
-- Module loading and caching
+- All five dialects (loop, parse, match, attempt, object)
+- Module system (import/exports/caching)
+- Lua emitter for core constructs (functions, control flow, loops, match, contexts, paths)
 - The executable spec (`full-spec.ktg`) as a living test
+- Love2D compilation (tic-tac-toe verified running)
 
-### What Needs Work
+---
 
-- Lua emitter uses recursive binding tracking and context-aware dispatch; foreign API calls need `bindings` dialect to declare arities
-- No LSP, debugger, or formatter
+## What's Next: Two Changesets
+
+### Changeset 1: Emitter Unified Dispatch
+
+**Problem:** The emitter has three dispatch paths that duplicate logic:
+
+1. `emitExpr` -- expression context (returns a Lua expression string)
+2. `emitBlock` -- statement context (writes Lua statements to output)
+3. `emitBlockReturn` / `findLastStmtStart` -- return context (last expression gets `return`)
+
+Each construct (`if`, `either`, `match`, `loop`, `print`, etc.) is handled separately in each path. Adding a new construct means touching 2-3 places.
+
+**Solution:** Collapse into one `emitVal(vals, pos, ctx: EmitContext)` where `EmitContext = ecStatement | ecExpression | ecReturn`. Each construct branches on context:
+
+- `if`: ecStatement → `if/then/end`, ecExpression → IIFE, ecReturn → `if/then return/end`
+- `match`: ecStatement → if-chain, ecExpression → IIFE, ecReturn → if-chain with returns
+- `loop`: ecStatement → for loop, ecReturn → for loop (no return)
+
+Kill `emitBlockReturn` and `findLastStmtStart`. Replace with `emitBody(vals, asReturn)` that calls `emitVal(ecStatement)` for all but last, `emitVal(ecReturn)` for last.
+
+**Files:** `src/emit/lua.nim` (~2,477 lines, the only file changed)
+
+**Risk:** High -- touches every emission path. Must verify all 977 tests pass + full-spec + all compiled examples.
+
+**Benefit:** Every subsequent emitter addition (Changeset 2) is 1 implementation instead of 2-3.
+
+### Changeset 2: Complete Dialect Emission
+
+**Problem:** These constructs work in the interpreter but don't compile:
+
+| Construct | Status | Effort |
+|-----------|--------|--------|
+| `loop/collect` | Not emitted | ~40 lines (for loop building result table) |
+| `loop/fold` | Not emitted | ~30 lines (for loop with accumulator) |
+| `loop/partition` | Not emitted | ~40 lines (for loop splitting into two tables) |
+| `attempt` dialect | Not emitted | ~50 lines (pcall chains with retry/catch/fallback) |
+| `parse` dialect | Not emitted | ~150+ lines (PEG engine in Lua, or compile error) |
+| `@global` | Not emitted | ~10 lines (emit as global variable, no `local`) |
+| `does` | Partially emitted | ~5 lines (statement-level path done, expression done) |
+| `find` | Not emitted | ~15 lines (helper function or inline) |
+| `reverse` | Not emitted | ~15 lines (helper function) |
+| `byte`/`char` | Not emitted | ~5 lines each (string.byte/string.char) |
+| `getenv` | Not implemented | ~5 lines (os.getenv) |
+
+**Decision needed for `parse`:** The parse dialect is a ~700-line PEG engine. Options:
+1. Compile error: "parse is interpreter-only, use #preprocess"
+2. Emit a Lua PEG runtime (~200 lines of Lua helpers + rule compilation)
+3. Defer
+
+**Files:** `src/emit/lua.nim` primarily, possibly `src/eval/natives.nim` for `getenv`
+
+**Order:** Do Changeset 1 first. Then Changeset 2 is easy — each dialect's emission is one `case ctx` block in the unified dispatch.
 
 ---
 
@@ -56,25 +112,25 @@ The core language is complete and usable:
 
 ```
 src/
-  kintsugi.nim              -- entry point (REPL, file runner, compiler CLI)  171 lines
+  kintsugi.nim              -- entry point (REPL, file runner, compiler CLI)  278 lines
   core/
-    types.nim               -- all value types (KtgValue variant object)      339 lines
+    types.nim               -- all value types (KtgValue, KtgContext, etc.)   351 lines
     equality.nim            -- structural equality                             99 lines
   parse/
-    lexer.nim               -- tokenizer for all datatypes                   392 lines
+    lexer.nim               -- tokenizer for all datatypes                   410 lines
     parser.nim              -- token stream -> AST                            65 lines
   eval/
-    evaluator.nim           -- the main eval loop                            977 lines
-    natives.nim             -- all built-in functions                        1582 lines
-    dialect.nim             -- dialect dispatch interface                      35 lines
+    evaluator.nim           -- the main eval loop                           1112 lines
+    natives.nim             -- all built-in functions (~100 natives)         1884 lines
+    dialect.nim             -- dialect dispatch interface + Evaluator type     36 lines
   dialects/
-    loop_dialect.nim        -- for/in/from/to/by/when/collect/fold/partition  204 lines
+    loop_dialect.nim        -- for/in/from/to/by/when/do/collect/fold/part  208 lines
     parse_dialect.nim       -- PEG parser with backtracking                  698 lines
     match_dialect.nim       -- pattern matching with destructuring           213 lines
     attempt_dialect.nim     -- resilient pipelines                           284 lines
     object_dialect.nim      -- prototype objects with typed fields           278 lines
   emit/
-    lua.nim                 -- Kintsugi AST -> Lua 5.1 source               2066 lines
+    lua.nim                 -- Kintsugi AST -> Lua 5.1 source              2477 lines
 ```
 
 ### How the Evaluator Works
@@ -82,32 +138,41 @@ src/
 The evaluator (`eval/evaluator.nim`) walks a flat list of values left-to-right:
 
 1. Encounter a value -- if it's a literal type (integer, string, etc.), return it
-2. If it's a `word!`, look it up in the context chain. If the result is callable, consume N arguments from the stream and call it
-3. After evaluating a value, check if the next value is an `op!` (infix operator). If so, consume the right operand and apply the operator
-4. `set-word!` evaluates the RHS (including any infix), then binds the result in the **current** scope (always shadows, never writes through)
+2. If it's a `word!`, look it up in the context chain. If callable, consume N arguments and call it
+3. After evaluating a value, check for infix ops. If so, consume the right operand and apply
+4. `set-word!` evaluates the RHS (including infix), then:
+   - If the word is `@global`, writes to `eval.global`
+   - Otherwise, creates in the current scope (shadows)
 5. `paren!` evaluates its contents recursively
-6. `block!` returns itself unevaluated (blocks are data until someone calls `do`)
+6. `block!` returns itself unevaluated (data until `do`)
 
-Context chain: each scope has a parent pointer. Lookup walks up the chain. Set-word always creates in the current scope.
-
-### How Dialects Work
-
-Dialects are scoped vocabularies. When the evaluator encounters a dialect word (`loop`, `parse`, `match`, `attempt`, `object`), it hands the argument block to the dialect handler in `dialects/`. The dialect interprets the block's contents with its own rules -- keywords like `for`, `in`, `from`, `some`, `keep` only have special meaning inside their dialect.
-
-The dispatch is in `eval/dialect.nim`. Each dialect module exports a proc that takes the block and the evaluator pointer and returns a `KtgValue`.
+Context chain: each scope has a parent pointer. Lookup (`get`) walks up the chain. Set-word creates in current scope unless `@global`.
 
 ### How the Emitter Works
 
-`emit/lua.nim` walks the AST and generates Lua 5.1 source. It handles:
-- Variable declarations (`local`)
-- Function definitions
-- Object/make patterns
-- Bindings (foreign API declarations)
-- `->` chain operator (emits Lua `:` method calls)
-- `@const` (emits `<const>` in Lua 5.4)
-- Control flow, loops, match
+`emit/lua.nim` walks the same AST the evaluator walks and generates Lua 5.1 source.
 
-The emitter is heuristic-based -- it pattern-matches on AST shapes rather than having a formal IR. This means some complex patterns (implicit returns in certain contexts, deeply nested expressions) may not emit correctly.
+**Prescan phase:** Recursive `prescanBlock` walks the entire AST before emission. Builds a `bindings: Table[string, BindingInfo]` that tracks:
+- Is this name a function or a value?
+- What's its arity?
+- What refinements does it have?
+- What are its exported symbols? (for `import`)
+
+**Emission phase:** Walks the AST with `emitBlock` (statements) and `emitExpr` (expressions). Key behaviors:
+- Paths: known-value paths (`board/cells`) → field access, known-function paths (`greet/loud`) → function call with refinement flags
+- Unknown paths default to field access (safe: won't consume args)
+- `= none` / `<> none` → `_is_none()` calls (handles `_NONE` sentinel)
+- Refinements → positional booleans: `greet/loud "world"` → `greet("world", true)`
+- `import` → recursive compilation of dependency, `require("module")` in output
+- `exports` → `return {name = name, ...}` at end of module
+- Prelude (`_NONE`, `_is_none`, `_deep_copy`, `pi`) only on entrypoints (files with `Kintsugi [...]` header)
+
+**Bindings dialect:** Declares foreign API arities for compilation.
+- `'call N` -- function with fixed arity N
+- `'const` -- bare value reference
+- `'alias` -- local variable declaration
+- `'assign` -- callback assignment (`lua.path = function(...)`)
+- `'override` -- function definition form (`function lua.path(...)`)
 
 ### How to Add a New Native Function
 
@@ -115,8 +180,6 @@ In `src/eval/natives.nim`:
 
 ```nim
 ctx.native("my-func", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-  # args[0] and args[1] are the two arguments
-  # ep is the evaluator pointer (cast to Evaluator if needed)
   ktgInt(args[0].intVal + args[1].intVal)
 )
 ```
@@ -137,61 +200,55 @@ let myNative = KtgNative(
 ctx.set("my-func", KtgValue(kind: vkNative, nativeFn: myNative, line: 0))
 ```
 
-### How to Add a New Dialect
-
-1. Create `src/dialects/my_dialect.nim`
-2. Export a proc: `proc evalMyDialect*(body: seq[KtgValue], ep: pointer): KtgValue`
-3. Register in `src/eval/dialect.nim`
-4. Register the dialect word as a native in `natives.nim` that calls your dialect proc
+Then add to emitter's `initNativeBindings()` and add emission special-case if needed.
 
 ---
 
 ## Key Design Decisions
 
-The living spec is `docs/language-spec-questions.md` (34+ decisions documented). The most important ones:
-
 1. **Contexts are universal** -- closures, objects, modules, scopes are all contexts. `context!` is mutable, `object!` is frozen.
-2. **Set-word always shadows** -- `x: 5` inside a function creates a new local binding, never writes to the parent scope. Mutate shared state through context paths: `state/counter: state/counter + 1`.
-3. **Dialects are scoped vocabularies** -- `for`, `in`, `some`, `keep` are only keywords inside their respective dialects. Outside, they're just words.
-4. **No operator precedence** -- `2 + 3 * 4` evaluates to 20, not 14. Use parens.
+2. **Set-word shadows by default** -- `x: 5` inside a function creates a new local. Use `@global` for write-through to global scope. Use context + set-path (`state/counter:`) for shared mutable state.
+3. **Dialects are scoped vocabularies** -- `for`, `in`, `some`, `keep` are only keywords inside their respective dialects.
+4. **No operator precedence** -- `2 + 3 * 4` = 20. Use parens.
 5. **Only false and none are falsy** -- 0, "", and [] are truthy.
-6. **Strings are immutable** -- no mutable string operations. Use `join`/`rejoin`.
-7. **Try returns a result context** -- not the error itself. Access via path: `result/ok`, `result/message`.
-8. **Objects use stamp model** -- `make` copies fields, no prototype chains, no delegation.
-9. **Exports are body-level** -- `exports [...]` in the module body, not the header.
-10. **Parse captures go into the result context** -- not the caller's scope.
+6. **Strings are mutable** -- `append` works on both blocks and strings.
+7. **Try returns a result context** -- `result/ok`, `result/message`, `result/kind`.
+8. **Objects use stamp model** -- `make` copies fields, no prototype chains.
+9. **Exports are body-level** -- `exports [...]` in the module body.
+10. **Parse captures go into result context** -- not the caller's scope.
+11. **Loop requires `do`** -- `loop [for [i] from 1 to 5 do [body]]`. Infinite loops don't need `do`.
+12. **`=` is loose, `==` is strict** -- `1 = 1.0` is true, `1 == 1.0` is false. `==` errors on non-scalars.
+13. **Dynamic paths** -- `items/:i` evaluates `i` as index. Matches Rebol behavior.
+14. **Fixed-arity bindings** -- no variadic. Use parens for extra args: `(set-color r g b a)`.
+15. **Refinements are one token** -- `/loud` not `/ loud`.
+16. **`import` not `require`** -- `import %module.ktg`. Frozen, cached.
+17. **`raw` for verbatim Lua** -- `raw "import \"CoreLibs/graphics\""`. No-op in interpreter.
+18. **Header = entrypoint** -- `Kintsugi [...]` marks entrypoint (gets prelude). No header = module.
 
 ---
 
 ## Known Limitations
 
-- **Lua emitter** -- uses recursive binding tracking to distinguish functions from values. Foreign API calls (Love2D, Playdate) need `bindings` dialect to declare arities. Unknown paths default to field access.
-- **`some`/`any` backtracking** -- greedy with backtracking like REBOL. Has exponential worst-case potential on pathological inputs (e.g., deeply nested alternatives with overlapping prefixes).
-- **No LSP, no debugger, no formatter** -- editor support is Emacs syntax highlighting only.
-
----
-
-## Next Steps
-
-1. **Build Chronodistort** -- the autobattler game is the whole point of the language. Building a real game drives every future decision.
-2. **Game dialects emerge from building the game** -- entity, scene, input, tween dialects should be discovered through actual game code, not designed in a vacuum.
-3. **Lua emitter needs architectural rewrite** -- replace heuristic pattern-matching with a proper IR or at least a more systematic AST walk. This is the biggest technical debt.
-4. **Self-hosting roadmap** -- lexer + parser + emitter in Kintsugi itself, estimated ~1000 lines. The parse dialect is already powerful enough for the lexer.
-5. **Nim compiles to C** -- Playdate native embedding is possible (Playdate SDK is C-based). This is a real deployment target.
-6. **`nim js` gives browser playground for free** -- Nim's JavaScript backend means a web REPL is achievable with minimal effort.
+- **Emitter dispatch is split** -- three paths (emitExpr/emitBlock/emitBlockReturn) duplicate logic. Unified dispatch is Changeset 1.
+- **Dialect emission incomplete** -- loop/collect, loop/fold, loop/partition, attempt, parse don't compile. Changeset 2.
+- **`some`/`any` backtracking** -- greedy, exponential worst-case on pathological inputs.
+- **No LSP, no debugger, no formatter** -- Emacs syntax highlighting only.
 
 ---
 
 ## How to Build and Test
 
 ```bash
-nimble build    # release binary in bin/
-nimble test     # run all tests (855 passing)
-bin/kintsugi                          # REPL
-bin/kintsugi file.ktg                 # run a file
-bin/kintsugi -c file.ktg              # compile to Lua
-bin/kintsugi -c file.ktg -o out.lua   # compile to specific output
-bin/kintsugi -c file.ktg --stdout     # compile to stdout
+nimble build                              # release binary in bin/
+nimble test                               # run all tests (977 passing)
+bin/kintsugi                              # REPL
+bin/kintsugi file.ktg                     # run a file
+bin/kintsugi dir/                         # run all .ktg in directory
+bin/kintsugi -e 'print 1 + 2'            # evaluate expression
+bin/kintsugi -c file.ktg                  # compile to Lua
+bin/kintsugi -c file.ktg -o out.lua       # compile to specific output
+bin/kintsugi -c dir/                      # compile all .ktg in directory
+bin/kintsugi -c file.ktg --dry-run        # print compiled Lua to stdout
 ```
 
 ---
@@ -201,12 +258,13 @@ bin/kintsugi -c file.ktg --stdout     # compile to stdout
 | File | Purpose |
 |------|---------|
 | `docs/language-spec-questions.md` | The living spec (34+ decisions) |
-| `examples/full-spec.ktg` | Executable spec (THE test -- 1,700 lines) |
+| `examples/full-spec.ktg` | Executable spec (~1,800 lines) |
 | `lib/playdate.ktg` | Playdate SDK bindings |
 | `lib/love2d.ktg` | LOVE2D bindings |
-| `editors/emacs/kintsugi.el` | Emacs major mode |
+| `lib/math.ktg` | Math stdlib (clamp, lerp, smoothstep, etc.) |
+| `lib/string.ktg` | String stdlib (pad, repeat, etc.) |
+| `lib/collections.ktg` | Collections stdlib (flatten, zip, unique, etc.) |
 | `examples/tic-tac-toe/` | Working game example (terminal + LOVE2D) |
 | `examples/playdate-hello/` | Playdate SDK example |
-| `docs/TODO.md` | Outstanding tasks |
-| `docs/engineering-audit.md` | Code quality audit |
-| `docs/language-design-audit.md` | Language design audit |
+| `examples/love2d/` | Minimal LOVE2D example |
+| `docs/HANDOFF.md` | This document |

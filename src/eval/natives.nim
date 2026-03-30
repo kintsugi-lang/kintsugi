@@ -295,15 +295,29 @@ proc registerNatives*(eval: Evaluator) =
       raise KtgError(kind: "type", msg: "pick expects block! or string!, got " & typeName(args[0]), data: nil)
   )
 
-  ctx.native("append", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    if args[0].kind == vkBlock:
-      args[0].blockVals.add(args[1])
-      return args[0]
-    if args[0].kind == vkString:
-      args[0].strVal.add($args[1])
-      return args[0]
-    raise KtgError(kind: "type", msg: "append expects block! or string!, got " & typeName(args[0]), data: nil)
-  )
+  block:
+    let appendNative = KtgNative(
+      name: "append",
+      arity: 2,
+      refinements: @[RefinementSpec(name: "only", params: @[])],
+      fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
+        let eval = cast[Evaluator](ep)
+        let only = "only" in eval.currentRefinements
+        if args[0].kind == vkBlock:
+          if args[1].kind == vkBlock and not only:
+            # Splice: append [1 2] [3 4] → [1 2 3 4]
+            for v in args[1].blockVals:
+              args[0].blockVals.add(v)
+          else:
+            # Single element (or /only): append [1 2] 3 → [1 2 3]
+            args[0].blockVals.add(args[1])
+          return args[0]
+        if args[0].kind == vkString:
+          args[0].strVal.add($args[1])
+          return args[0]
+        raise KtgError(kind: "type", msg: "append expects block! or string!, got " & typeName(args[0]), data: nil)
+    )
+    ctx.set("append", KtgValue(kind: vkNative, nativeFn: appendNative, line: 0))
 
   block:
     proc deepCopy(val: KtgValue): KtgValue =
@@ -1315,10 +1329,19 @@ proc registerNatives*(eval: Evaluator) =
     let source = args[1]
 
     if source.kind == vkBlock:
-      # positional destructuring
+      # positional destructuring with @rest support
+      var srcIdx = 0
       for i, name in names:
-        if name.kind == vkWord and i < source.blockVals.len:
-          eval.currentCtx.set(name.wordName, source.blockVals[i])
+        if name.kind == vkWord and name.wordKind == wkMetaWord:
+          # @name — collect remaining elements into a block
+          var remaining: seq[KtgValue] = @[]
+          for j in srcIdx ..< source.blockVals.len:
+            remaining.add(source.blockVals[j])
+          eval.currentCtx.set(name.wordName, ktgBlock(remaining))
+          break  # @rest consumes everything, nothing after it
+        elif name.kind == vkWord and srcIdx < source.blockVals.len:
+          eval.currentCtx.set(name.wordName, source.blockVals[srcIdx])
+          srcIdx += 1
     elif source.kind == vkContext:
       # named destructuring
       for name in names:
@@ -1882,3 +1905,14 @@ proc registerNatives*(eval: Evaluator) =
   ctx.native("raw", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     ktgNone()
   )
+
+  # --- system: platform, env ---
+  block:
+    let envCtx = newContext()
+    for key, value in envPairs():
+      envCtx.set(key, ktgString(value))
+
+    let systemCtx = newContext()
+    systemCtx.set("platform", ktgWord("script", wkLitWord))
+    systemCtx.set("env", KtgValue(kind: vkContext, ctx: envCtx, line: 0))
+    ctx.set("system", KtgValue(kind: vkContext, ctx: systemCtx, line: 0))

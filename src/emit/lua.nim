@@ -162,6 +162,8 @@ proc initNativeBindings(): Table[string, BindingInfo] =
   result["substring"] = nativeBinding(3)
   result["starts-with?"] = nativeBinding(2)
   result["ends-with?"] = nativeBinding(2)
+  result["byte"] = nativeBinding(1)
+  result["char"] = nativeBinding(1)
   # Math
   result["abs"] = nativeBinding(1)
   result["negate"] = nativeBinding(1)
@@ -263,9 +265,9 @@ proc resolvedName(e: LuaEmitter, name: string): string =
 
 proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string
 proc emitBody(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false)
-proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue])
-proc emitBlockReturn(e: var LuaEmitter, vals: seq[KtgValue])
+proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false)
 proc emitMatchExpr(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValue]): string
+proc emitAttemptExpr(e: var LuaEmitter, blk: seq[KtgValue]): string
 proc emitEitherExpr(e: var LuaEmitter, cond: string, trueBlock, falseBlock: seq[KtgValue]): string
 proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
                     compiling: HashSet[string] = initHashSet[string]()): string
@@ -466,7 +468,59 @@ proc skipDo(blk: seq[KtgValue], pos: var int) =
   if pos < blk.len and blk[pos].kind == vkWord and blk[pos].wordName == "do":
     pos += 1
 
-proc emitLoop(e: var LuaEmitter, blk: seq[KtgValue]) =
+proc emitLoopBody(e: var LuaEmitter, bodyVals: seq[KtgValue], refinement: string,
+                  iterVar: string) =
+  ## Emit the loop body, wrapping for collect/fold/partition refinements.
+  case refinement
+  of "collect":
+    # Body result appended to result table
+    e.ln("_collect_r[#_collect_r+1] = (function()")
+    e.indent += 1
+    e.emitBlock(bodyVals, asReturn = true)
+    e.indent -= 1
+    e.ln("end)()")
+  of "fold":
+    # Body result becomes new accumulator
+    e.ln("_fold_acc = (function()")
+    e.indent += 1
+    e.emitBlock(bodyVals, asReturn = true)
+    e.indent -= 1
+    e.ln("end)()")
+  of "partition":
+    # Body is predicate — element goes to true or false bucket
+    e.ln("if (function()")
+    e.indent += 1
+    e.emitBlock(bodyVals, asReturn = true)
+    e.indent -= 1
+    e.ln("end)() then")
+    e.indent += 1
+    e.ln("_part_true[#_part_true+1] = " & iterVar)
+    e.indent -= 1
+    e.ln("else")
+    e.indent += 1
+    e.ln("_part_false[#_part_false+1] = " & iterVar)
+    e.indent -= 1
+    e.ln("end")
+  else:
+    e.emitBlock(bodyVals)
+
+proc emitLoop(e: var LuaEmitter, blk: seq[KtgValue], refinement: string = ""): string =
+  ## Emit a loop. Returns result variable name for collect/fold/partition, "" otherwise.
+  result = ""
+
+  # Set up result variables for refinements
+  case refinement
+  of "collect":
+    result = "_collect_r"
+    e.ln("local _collect_r = {}")
+  of "fold":
+    result = "_fold_acc"
+  of "partition":
+    result = "{_part_true, _part_false}"
+    e.ln("local _part_true = {}")
+    e.ln("local _part_false = {}")
+  else: discard
+
   var pos = 0
 
   # Check for 'for' keyword
@@ -498,19 +552,41 @@ proc emitLoop(e: var LuaEmitter, blk: seq[KtgValue]) =
 
         skipDo(blk, pos)
         if pos < blk.len and blk[pos].kind == vkBlock:
-          let varStr = if vars.len > 0: "_, " & vars[0] else: "_"
-          e.ln("for " & varStr & " in ipairs(" & series & ") do")
-          e.indent += 1
-          if guard.len > 0:
-            e.ln("if " & guard & " then")
+          let iterVar = if vars.len > 0: vars[0] else: "_"
+          # fold: initialize accumulator to first element, iterate from 2
+          if refinement == "fold":
+            e.ln("local _fold_acc = " & series & "[1]")
+            let accVar = if vars.len >= 2: vars[0] else: iterVar
+            let elemVar = if vars.len >= 2: vars[1] else: iterVar
+            e.ln("for _i = 2, #" & series & " do")
             e.indent += 1
-            e.emitBlock(blk[pos].blockVals)
+            e.ln("local " & elemVar & " = " & series & "[_i]")
+            if vars.len >= 2:
+              e.ln("local " & accVar & " = _fold_acc")
+            if guard.len > 0:
+              e.ln("if " & guard & " then")
+              e.indent += 1
+              e.emitLoopBody(blk[pos].blockVals, refinement, elemVar)
+              e.indent -= 1
+              e.ln("end")
+            else:
+              e.emitLoopBody(blk[pos].blockVals, refinement, elemVar)
             e.indent -= 1
             e.ln("end")
           else:
-            e.emitBlock(blk[pos].blockVals)
-          e.indent -= 1
-          e.ln("end")
+            let varStr = if vars.len > 0: "_, " & vars[0] else: "_"
+            e.ln("for " & varStr & " in ipairs(" & series & ") do")
+            e.indent += 1
+            if guard.len > 0:
+              e.ln("if " & guard & " then")
+              e.indent += 1
+              e.emitLoopBody(blk[pos].blockVals, refinement, if vars.len > 0: vars[0] else: "_")
+              e.indent -= 1
+              e.ln("end")
+            else:
+              e.emitLoopBody(blk[pos].blockVals, refinement, if vars.len > 0: vars[0] else: "_")
+            e.indent -= 1
+            e.ln("end")
 
       of "from":
         # for [i] from N to M [by S] [body]
@@ -547,11 +623,11 @@ proc emitLoop(e: var LuaEmitter, blk: seq[KtgValue]) =
           if guard.len > 0:
             e.ln("if " & guard & " then")
             e.indent += 1
-            e.emitBlock(blk[pos].blockVals)
+            e.emitLoopBody(blk[pos].blockVals, refinement, varName)
             e.indent -= 1
             e.ln("end")
           else:
-            e.emitBlock(blk[pos].blockVals)
+            e.emitLoopBody(blk[pos].blockVals, refinement, varName)
           e.indent -= 1
           e.ln("end")
       else: discard
@@ -575,7 +651,7 @@ proc emitLoop(e: var LuaEmitter, blk: seq[KtgValue]) =
         forHeader &= ", " & stepExpr
       e.ln(forHeader & " do")
       e.indent += 1
-      e.emitBlock(blk[pos].blockVals)
+      e.emitLoopBody(blk[pos].blockVals, refinement, "it")
       e.indent -= 1
       e.ln("end")
 
@@ -614,7 +690,7 @@ proc emitMatchStmt(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValu
           e.ln("else")
         e.indent += 1
         if asReturn:
-          e.emitBlockReturn(rulesBlock[pos].blockVals)
+          e.emitBlock(rulesBlock[pos].blockVals, asReturn = true)
         else:
           e.emitBlock(rulesBlock[pos].blockVals)
         e.indent -= 1
@@ -710,7 +786,7 @@ proc emitMatchStmt(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValu
       e.ln("local " & name & " = " & expr)
 
     if asReturn:
-      e.emitBlockReturn(handler)
+      e.emitBlock(handler, asReturn = true)
     else:
       e.emitBlock(handler)
     e.indent -= 1
@@ -865,6 +941,150 @@ proc emitEitherExpr(e: var LuaEmitter, cond: string, trueBlock, falseBlock: seq[
     code &= baseIndent & "  end\n"
     code &= baseIndent & "end)()"
     result = code
+
+# ---------------------------------------------------------------------------
+# Emit attempt dialect as pcall chain
+# ---------------------------------------------------------------------------
+
+proc emitAttemptExpr(e: var LuaEmitter, blk: seq[KtgValue]): string =
+  ## Emit an attempt pipeline as a pcall-based expression.
+  ## attempt [source [...] then [...] when [...] catch 'kind [...] fallback [...] retries N]
+  var sourceBody: seq[KtgValue] = @[]
+  var thenBodies: seq[seq[KtgValue]] = @[]
+  var whenBodies: seq[seq[KtgValue]] = @[]
+  var catches: seq[(string, seq[KtgValue])] = @[]
+  var fallbackBody: seq[KtgValue] = @[]
+  var retryCount = 0
+  var hasSource = false
+
+  # Parse the pipeline block
+  var ppos = 0
+  while ppos < blk.len:
+    let cur = blk[ppos]
+    if cur.kind == vkWord and cur.wordKind == wkWord:
+      case cur.wordName
+      of "source":
+        ppos += 1
+        if ppos < blk.len and blk[ppos].kind == vkBlock:
+          sourceBody = blk[ppos].blockVals
+          hasSource = true
+          ppos += 1
+      of "then":
+        ppos += 1
+        if ppos < blk.len and blk[ppos].kind == vkBlock:
+          thenBodies.add(blk[ppos].blockVals)
+          ppos += 1
+      of "when":
+        ppos += 1
+        if ppos < blk.len and blk[ppos].kind == vkBlock:
+          whenBodies.add(blk[ppos].blockVals)
+          ppos += 1
+      of "catch":
+        ppos += 1
+        if ppos < blk.len and blk[ppos].kind == vkWord and blk[ppos].wordKind == wkLitWord:
+          let errorKind = blk[ppos].wordName
+          ppos += 1
+          if ppos < blk.len and blk[ppos].kind == vkBlock:
+            catches.add((errorKind, blk[ppos].blockVals))
+            ppos += 1
+      of "fallback":
+        ppos += 1
+        if ppos < blk.len and blk[ppos].kind == vkBlock:
+          fallbackBody = blk[ppos].blockVals
+          ppos += 1
+      of "retries":
+        ppos += 1
+        if ppos < blk.len and blk[ppos].kind == vkInteger:
+          retryCount = int(blk[ppos].intVal)
+          ppos += 1
+      else:
+        ppos += 1
+    else:
+      ppos += 1
+
+  if not hasSource:
+    # No source → return a function (pipeline factory)
+    # For now, emit as compile error since closures need runtime eval
+    return "nil  --[[ attempt without source not compiled ]]"
+
+  let baseIndent = e.pad
+  var code = "(function()\n"
+
+  # Emit source + then chain wrapped in pcall for error handling
+  let saved = e.output
+  let savedIndent = e.indent
+
+  # If retries, wrap in a for loop
+  if retryCount > 0:
+    code &= baseIndent & "  for _attempt = 1, " & $(retryCount + 1) & " do\n"
+    e.indent = savedIndent + 2
+  else:
+    e.indent = savedIndent + 1
+
+  let bodyIndent = repeat("  ", e.indent)
+
+  # Emit: local ok, it = pcall(function() <source> end)
+  e.output = ""
+  e.indent += 1
+  e.emitBlock(sourceBody, asReturn = true)
+  let srcCode = e.output
+  code &= bodyIndent & "local _ok, it = pcall(function()\n"
+  code &= srcCode
+  code &= bodyIndent & "end)\n"
+  code &= bodyIndent & "if not _ok then\n"
+
+  # Error handling: check catches, then fallback
+  if catches.len > 0 or fallbackBody.len > 0:
+    e.indent = savedIndent + (if retryCount > 0: 3 else: 2)
+    let errIndent = repeat("  ", e.indent)
+    if retryCount > 0:
+      code &= errIndent & "if _attempt < " & $(retryCount + 1) & " then\n"
+      code &= errIndent & "  -- retry\n"
+      code &= errIndent & "else\n"
+      e.indent += 1
+    if fallbackBody.len > 0:
+      e.output = ""
+      e.indent += 1
+      e.emitBlock(fallbackBody, asReturn = true)
+      let fbCode = e.output
+      code &= repeat("  ", e.indent - 1) & "return (function() local error = it\n"
+      code &= fbCode
+      code &= repeat("  ", e.indent - 1) & "end)()\n"
+    else:
+      code &= repeat("  ", e.indent) & "error(it)\n"
+    if retryCount > 0:
+      code &= errIndent & "end\n"
+  else:
+    code &= bodyIndent & "  error(it)\n"
+  code &= bodyIndent & "end\n"
+
+  # Emit then steps
+  for thenBody in thenBodies:
+    e.output = ""
+    e.indent = savedIndent + (if retryCount > 0: 3 else: 2)
+    e.emitBlock(thenBody, asReturn = true)
+    let thenCode = e.output
+    code &= bodyIndent & "it = (function()\n"
+    code &= thenCode
+    code &= bodyIndent & "end)()\n"
+
+  # Emit when guards
+  for whenBody in whenBodies:
+    e.output = ""
+    e.indent = savedIndent + (if retryCount > 0: 3 else: 2)
+    var wpos = 0
+    let guardExpr = e.emitExpr(whenBody, wpos)
+    code &= bodyIndent & "if not (" & guardExpr & ") then return nil end\n"
+
+  code &= bodyIndent & "return it\n"
+
+  if retryCount > 0:
+    code &= baseIndent & "  end\n"
+
+  code &= baseIndent & "end)()"
+  e.output = saved
+  e.indent = savedIndent
+  result = code
 
 # ---------------------------------------------------------------------------
 # Compile-error guards for interpreter-only features
@@ -1044,6 +1264,36 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
         # No-op in compiled output, just pass through
         result = e.emitExpr(vals, pos)
 
+      # --- Dialect refinement paths (must come before generic path handler) ---
+      elif name.startsWith("loop/") and name.split('/')[1] in ["collect", "fold", "partition"]:
+        let refinement = name.split('/')[1]
+        if pos < vals.len and vals[pos].kind == vkBlock:
+          let blk = vals[pos].blockVals
+          pos += 1
+          let saved = e.output
+          e.output = ""
+          e.indent += 1
+          let resultVar = e.emitLoop(blk, refinement)
+          e.ln("return " & resultVar)
+          let loopCode = e.output
+          e.output = saved
+          e.indent -= 1
+          result = "(function()\n" & loopCode & e.pad & "end)()"
+        else:
+          result = "nil"
+
+      elif name == "parse" or name.startsWith("parse/"):
+        compileError("parse", "parse is interpreter-only — use #preprocess to run parse at compile time", val.line)
+
+      # --- system/platform → compile-time constant ---
+      elif name == "system/platform":
+        result = "\"lua\""
+
+      # --- system/env/NAME → os.getenv("NAME") ---
+      elif name.startsWith("system/env/"):
+        let envName = name.split('/')[2]
+        result = "os.getenv(\"" & envName & "\")"
+
       # --- Path access or call: obj/field/sub ---
       elif name.contains('/'):
         let parts = name.split('/')
@@ -1199,11 +1449,20 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
           pos += 1
           let saved = e.output
           e.output = ""
-          e.emitLoop(blk)
+          discard e.emitLoop(blk)
           let loopCode = e.output
           e.output = saved
           e.raw(loopCode)
           result = "nil"
+        else:
+          result = "nil"
+
+      # --- attempt dialect ---
+      elif name == "attempt":
+        if pos < vals.len and vals[pos].kind == vkBlock:
+          let pipelineBlk = vals[pos].blockVals
+          pos += 1
+          result = e.emitAttemptExpr(pipelineBlk)
         else:
           result = "nil"
 
@@ -1298,6 +1557,11 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
       elif name == "append":
         let blk = e.emitExpr(vals, pos)
         let val_expr = e.emitExpr(vals, pos)
+        result = "_append(" & blk & ", " & val_expr & ")"
+
+      elif name == "append/only":
+        let blk = e.emitExpr(vals, pos)
+        let val_expr = e.emitExpr(vals, pos)
         result = "(function() table.insert(" & blk & ", " & val_expr & "); return " & blk & " end)()"
 
       elif name == "copy":
@@ -1325,6 +1589,49 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
         let val_expr = e.emitExpr(vals, pos)
         result = "(" & blk & "[" & val_expr & "] ~= nil)"
 
+      elif name == "find":
+        let series = e.emitExpr(vals, pos)
+        let needle = e.emitExpr(vals, pos)
+        # Works for both strings (string.find) and tables (linear scan)
+        result = "(function() " &
+                 "if type(" & series & ") == \"string\" then " &
+                 "local i = string.find(" & series & ", " & needle & ", 1, true); " &
+                 "if i then return i end; return nil " &
+                 "else " &
+                 "for i, v in ipairs(" & series & ") do if v == " & needle & " then return i end end; return nil " &
+                 "end " &
+                 "end)()"
+
+      elif name == "reverse":
+        let arg = e.emitExpr(vals, pos)
+        result = "(function() " &
+                 "if type(" & arg & ") == \"string\" then return string.reverse(" & arg & ") " &
+                 "else local r={}; for i=#" & arg & ",1,-1 do r[#r+1]=" & arg & "[i] end; return r end " &
+                 "end)()"
+
+      elif name == "byte":
+        let arg = e.emitExpr(vals, pos)
+        result = "string.byte(" & arg & ", 1)"
+
+      elif name == "char":
+        let arg = e.emitExpr(vals, pos)
+        result = "string.char(" & arg & ")"
+
+      elif name == "starts-with?":
+        let str = e.emitExpr(vals, pos)
+        let prefix = e.emitExpr(vals, pos)
+        result = "(string.sub(" & str & ", 1, #" & prefix & ") == " & prefix & ")"
+
+      elif name == "ends-with?":
+        let str = e.emitExpr(vals, pos)
+        let suffix = e.emitExpr(vals, pos)
+        result = "(string.sub(" & str & ", -#" & suffix & ") == " & suffix & ")"
+
+      elif name == "substring":
+        let str = e.emitExpr(vals, pos)
+        let start = e.emitExpr(vals, pos)
+        let length = e.emitExpr(vals, pos)
+        result = "string.sub(" & str & ", " & start & ", " & start & " + " & length & " - 1)"
 
       # --- Type predicates (none?, integer?, etc.) ---
       elif isTypePredicate(name):
@@ -1610,8 +1917,224 @@ proc emitExprWithChain(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): st
 # Emit a sequence of values as Lua statements
 # ---------------------------------------------------------------------------
 
-proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
-  ## Emit a block of values as statements. Does not add implicit return.
+proc findLastStmtStart(e: var LuaEmitter, vals: seq[KtgValue]): int =
+  ## Dry-run through vals to find where the last statement starts.
+  ## Uses emitExpr with output discarded to correctly advance position.
+  var stmtStarts: seq[int] = @[]
+  var pos = 0
+  let saved = e.output
+  e.output = ""
+  while pos < vals.len:
+    stmtStarts.add(pos)
+    let val = vals[pos]
+    # Skip headers, bindings, exports
+    if val.kind == vkWord and val.wordKind == wkWord and
+       val.wordName.startsWith("Kintsugi"):
+      pos += 1
+      if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+      continue
+    if val.kind == vkWord and val.wordKind == wkWord and
+       val.wordName in ["bindings", "exports"]:
+      pos += 1
+      if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+      continue
+    # @const prefix
+    if val.kind == vkWord and val.wordKind == wkMetaWord and val.wordName == "const":
+      pos += 1
+      if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkSetWord:
+        pos += 1
+        discard e.emitExprWithChain(vals, pos)
+        continue
+      continue
+    # @global prefix
+    if val.kind == vkWord and val.wordKind == wkMetaWord and val.wordName == "global":
+      pos += 1
+      if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkSetWord:
+        pos += 1
+        discard e.emitExprWithChain(vals, pos)
+        continue
+      continue
+    # Set-word
+    if val.kind == vkWord and val.wordKind == wkSetWord:
+      pos += 1
+      discard e.emitExprWithChain(vals, pos)
+      continue
+    # Keywords with known token counts
+    if val.kind == vkWord and val.wordKind == wkWord:
+      case val.wordName
+      of "if", "unless":
+        pos += 1
+        discard e.emitExpr(vals, pos)
+        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+        continue
+      of "either":
+        pos += 1
+        discard e.emitExpr(vals, pos)
+        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+        continue
+      of "loop":
+        pos += 1
+        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+        continue
+      of "match":
+        pos += 1
+        discard e.emitExpr(vals, pos)
+        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+        continue
+      of "return":
+        pos += 1
+        discard e.emitExpr(vals, pos)
+        continue
+      of "break":
+        pos += 1
+        continue
+      of "print", "assert":
+        pos += 1
+        discard e.emitExpr(vals, pos)
+        continue
+      of "raw":
+        pos += 1
+        discard e.emitExpr(vals, pos)
+        continue
+      of "set":
+        pos += 1
+        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+        discard e.emitExpr(vals, pos)
+        continue
+      of "remove":
+        pos += 1
+        discard e.emitExpr(vals, pos)
+        discard e.emitExpr(vals, pos)
+        continue
+      of "insert":
+        pos += 1
+        discard e.emitExpr(vals, pos)
+        discard e.emitExpr(vals, pos)
+        discard e.emitExpr(vals, pos)
+        continue
+      of "append":
+        pos += 1
+        discard e.emitExpr(vals, pos)
+        discard e.emitExpr(vals, pos)
+        continue
+      else: discard
+      # Loop refinement paths (loop/collect, loop/fold, loop/partition)
+      if val.wordName.startsWith("loop/"):
+        pos += 1
+        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+        continue
+    # Generic expression
+    discard e.emitExprWithChain(vals, pos)
+  e.output = saved
+  if stmtStarts.len > 0: stmtStarts[^1] else: 0
+
+proc emitLastWithReturn(e: var LuaEmitter, vals: seq[KtgValue]) =
+  ## Emit the last statement of a block with implicit return.
+  if vals.len == 0: return
+
+  let lastVal = vals[0]
+
+  # return/break already emit themselves
+  if lastVal.kind == vkWord and lastVal.wordKind == wkWord and
+     lastVal.wordName in ["return", "break"]:
+    e.emitBlock(vals)
+    return
+
+  # set-word: emit assignment, then return the variable
+  if lastVal.kind == vkWord and lastVal.wordKind == wkSetWord:
+    e.emitBlock(vals)
+    let name = if lastVal.wordName.contains('/'):
+                 emitPath(lastVal.wordName)
+               else:
+                 luaName(lastVal.wordName)
+    e.ln("return " & name)
+    return
+
+  # if/unless: emit with return inside body
+  if lastVal.kind == vkWord and lastVal.wordKind == wkWord and
+     lastVal.wordName in ["if", "unless"]:
+    var lpos = 1
+    let cond = e.emitExpr(vals, lpos)
+    if lpos < vals.len and vals[lpos].kind == vkBlock:
+      let body = vals[lpos].blockVals
+      if lastVal.wordName == "unless":
+        e.ln("if not (" & cond & ") then")
+      else:
+        e.ln("if " & cond & " then")
+      e.indent += 1
+      e.emitBlock(body, asReturn = true)
+      e.indent -= 1
+      e.ln("end")
+      return
+
+  # either: return in both branches
+  if lastVal.kind == vkWord and lastVal.wordKind == wkWord and
+     lastVal.wordName == "either":
+    var lpos = 1
+    let cond = e.emitExpr(vals, lpos)
+    var trueBlock: seq[KtgValue] = @[]
+    var falseBlock: seq[KtgValue] = @[]
+    if lpos < vals.len and vals[lpos].kind == vkBlock:
+      trueBlock = vals[lpos].blockVals
+      lpos += 1
+    if lpos < vals.len and vals[lpos].kind == vkBlock:
+      falseBlock = vals[lpos].blockVals
+    e.ln("if " & cond & " then")
+    e.indent += 1
+    e.emitBlock(trueBlock, asReturn = true)
+    e.indent -= 1
+    e.ln("else")
+    e.indent += 1
+    e.emitBlock(falseBlock, asReturn = true)
+    e.indent -= 1
+    e.ln("end")
+    return
+
+  # match: return in handlers
+  if lastVal.kind == vkWord and lastVal.wordKind == wkWord and
+     lastVal.wordName == "match":
+    var lpos = 1
+    let valueExpr = e.emitExpr(vals, lpos)
+    if lpos < vals.len and vals[lpos].kind == vkBlock:
+      let rulesBlock = vals[lpos].blockVals
+      e.emitMatchStmt(valueExpr, rulesBlock, asReturn = true)
+      return
+
+  # loop, print: no return value
+  if lastVal.kind == vkWord and lastVal.wordKind == wkWord and
+     lastVal.wordName in ["loop", "print"]:
+    e.emitBlock(vals)
+    return
+
+  # loop refinements: return the result
+  if lastVal.kind == vkWord and lastVal.wordKind == wkWord and
+     lastVal.wordName.startsWith("loop/"):
+    let refinement = lastVal.wordName.split('/')[1]
+    if vals.len > 1 and vals[1].kind == vkBlock:
+      let resultVar = e.emitLoop(vals[1].blockVals, refinement)
+      if resultVar.len > 0:
+        e.ln("return " & resultVar)
+      return
+
+  # Generic expression: return it
+  var lpos = 0
+  let expr = e.emitExprWithChain(vals, lpos)
+  if expr != "nil":
+    e.ln("return " & expr)
+
+proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
+  ## Emit a block of values as statements. If asReturn, the last expression
+  ## gets an implicit `return`.
+  if vals.len == 0: return
+
+  if asReturn:
+    let lastStart = e.findLastStmtStart(vals)
+    if lastStart > 0:
+      e.emitBlock(vals[0 ..< lastStart])
+    e.emitLastWithReturn(vals[lastStart .. ^1])
+    return
+
   var pos = 0
   while pos < vals.len:
     let val = vals[pos]
@@ -1669,7 +2192,7 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
         pos += 1
       continue
 
-    # --- set [names] value — destructuring assignment ---
+    # --- set [names] value — destructuring assignment with @rest support ---
     if val.kind == vkWord and val.wordKind == wkWord and val.wordName == "set":
       pos += 1
       if pos < vals.len and vals[pos].kind == vkBlock:
@@ -1677,18 +2200,27 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
         pos += 1
         let valueExpr = e.emitExpr(vals, pos)
         var names: seq[string] = @[]
+        var restName = ""
+        var restAfter = 0  # how many positional names before @rest
         for v in namesBlock:
-          if v.kind == vkWord and v.wordKind == wkWord:
+          if v.kind == vkWord and v.wordKind == wkMetaWord:
+            restName = luaName(v.wordName)
+            restAfter = names.len
+            e.locals.incl(restName)
+          elif v.kind == vkWord and v.wordKind == wkWord:
             let n = luaName(v.wordName)
             names.add(n)
             e.locals.incl(n)
-        # Use temp var to avoid evaluating the expression multiple times
         let tmp = "_set_tmp"
         e.ln("local " & tmp & " = " & valueExpr)
-        var indices: seq[string] = @[]
-        for i in 1 .. names.len:
-          indices.add(tmp & "[" & $i & "]")
-        e.ln("local " & names.join(", ") & " = " & indices.join(", "))
+        if names.len > 0:
+          var indices: seq[string] = @[]
+          for i in 1 .. names.len:
+            indices.add(tmp & "[" & $i & "]")
+          e.ln("local " & names.join(", ") & " = " & indices.join(", "))
+        if restName.len > 0:
+          # Collect remaining elements: {unpack(tmp, N+1)}
+          e.ln("local " & restName & " = {unpack(" & tmp & ", " & $(restAfter + 1) & ")}")
         continue
 
     # --- Bound name as statement (e.g., update-sprites -> gfx.sprite.update()) ---
@@ -1718,6 +2250,23 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
         # const or alias — emit bare
         e.ln(resolvedLua)
         continue
+
+    # --- @global prefix: @global x: value — emit without 'local' ---
+    if val.kind == vkWord and val.wordKind == wkMetaWord and val.wordName == "global":
+      pos += 1
+      if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkSetWord:
+        let rawName = vals[pos].wordName
+        let name = luaName(rawName)
+        pos += 1
+        let expr = e.emitExprWithChain(vals, pos)
+        e.ln(name & " = " & expr)  # no 'local' prefix — global
+        continue
+      # @global word or @global [words] — mark as global (no-op in compiled output)
+      if pos < vals.len and vals[pos].kind == vkBlock:
+        pos += 1  # skip the block
+      elif pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkWord:
+        pos += 1  # skip the word
+      continue
 
     # --- @const prefix: @const x: value ---
     if val.kind == vkWord and val.wordKind == wkMetaWord and val.wordName == "const":
@@ -1910,7 +2459,7 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
       if pos < vals.len and vals[pos].kind == vkBlock:
         let blk = vals[pos].blockVals
         pos += 1
-        e.emitLoop(blk)
+        discard e.emitLoop(blk)
         continue
 
     # --- match as statement ---
@@ -2022,7 +2571,7 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
       pos += 1
       let blk = e.emitExpr(vals, pos)
       let val_expr = e.emitExpr(vals, pos)
-      e.ln("table.insert(" & blk & ", " & val_expr & ")")
+      e.ln("_append(" & blk & ", " & val_expr & ")")
       continue
 
     # --- Generic expression as statement (with -> chain support) ---
@@ -2035,218 +2584,9 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
       else:
         e.ln(expr)
 
-proc findLastStmtStart(e: var LuaEmitter, vals: seq[KtgValue]): int =
-  ## Dry-run through vals to find where the last statement starts.
-  ## Uses emitBlock with output discarded to correctly advance position.
-  var stmtStarts: seq[int] = @[]
-  var pos = 0
-  let saved = e.output
-  e.output = ""
-  while pos < vals.len:
-    stmtStarts.add(pos)
-    let val = vals[pos]
-    # Skip headers, bindings, exports
-    if val.kind == vkWord and val.wordKind == wkWord and
-       val.wordName.startsWith("Kintsugi"):
-      pos += 1
-      if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
-      continue
-    if val.kind == vkWord and val.wordKind == wkWord and
-       val.wordName in ["bindings", "exports"]:
-      pos += 1
-      if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
-      continue
-    # @const prefix
-    if val.kind == vkWord and val.wordKind == wkMetaWord and val.wordName == "const":
-      pos += 1
-      if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkSetWord:
-        pos += 1
-        discard e.emitExprWithChain(vals, pos)
-        continue
-      continue
-    # Set-word
-    if val.kind == vkWord and val.wordKind == wkSetWord:
-      pos += 1
-      discard e.emitExprWithChain(vals, pos)
-      continue
-    # Keywords with known token counts
-    if val.kind == vkWord and val.wordKind == wkWord:
-      case val.wordName
-      of "if", "unless":
-        pos += 1
-        discard e.emitExpr(vals, pos)
-        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
-        continue
-      of "either":
-        pos += 1
-        discard e.emitExpr(vals, pos)
-        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
-        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
-        continue
-      of "loop":
-        pos += 1
-        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
-        continue
-      of "match":
-        pos += 1
-        discard e.emitExpr(vals, pos)
-        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
-        continue
-      of "return":
-        pos += 1
-        discard e.emitExpr(vals, pos)
-        continue
-      of "break":
-        pos += 1
-        continue
-      of "print", "assert":
-        pos += 1
-        discard e.emitExpr(vals, pos)
-        continue
-      of "raw":
-        pos += 1
-        discard e.emitExpr(vals, pos)
-        continue
-      of "set":
-        pos += 1
-        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
-        discard e.emitExpr(vals, pos)
-        continue
-      of "remove":
-        pos += 1
-        discard e.emitExpr(vals, pos)
-        discard e.emitExpr(vals, pos)
-        continue
-      of "insert":
-        pos += 1
-        discard e.emitExpr(vals, pos)
-        discard e.emitExpr(vals, pos)
-        discard e.emitExpr(vals, pos)
-        continue
-      of "append":
-        pos += 1
-        discard e.emitExpr(vals, pos)
-        discard e.emitExpr(vals, pos)
-        continue
-      else: discard
-    # Generic expression
-    discard e.emitExprWithChain(vals, pos)
-  e.output = saved
-  if stmtStarts.len > 0: stmtStarts[^1] else: 0
-
-proc emitBlockReturn(e: var LuaEmitter, vals: seq[KtgValue]) =
-  ## Like emitBlock but adds implicit return to the last expression.
-  if vals.len == 0:
-    return
-
-  let lastStart = e.findLastStmtStart(vals)
-
-  # Emit all statements except the last normally
-  if lastStart > 0:
-    e.emitBlock(vals[0 ..< lastStart])
-
-  # Handle the last statement with implicit return
-  let lastVals = vals[lastStart .. ^1]
-  if lastVals.len == 0:
-    return
-
-  let lastVal = lastVals[0]
-
-  # If last statement starts with return or break, just emit normally
-  if lastVal.kind == vkWord and lastVal.wordKind == wkWord and
-     lastVal.wordName in ["return", "break"]:
-    e.emitBlock(lastVals)
-    return
-
-  # If last statement is a set-word, emit the assignment then return the variable
-  if lastVal.kind == vkWord and lastVal.wordKind == wkSetWord:
-    e.emitBlock(lastVals)
-    let name = if lastVal.wordName.contains('/'):
-                 emitPath(lastVal.wordName)
-               else:
-                 luaName(lastVal.wordName)
-    e.ln("return " & name)
-    return
-
-  # If last statement is if/unless, emit with return inside the block
-  if lastVal.kind == vkWord and lastVal.wordKind == wkWord and
-     lastVal.wordName in ["if", "unless"]:
-    var lpos = 1
-    let cond = e.emitExpr(lastVals, lpos)
-    if lpos < lastVals.len and lastVals[lpos].kind == vkBlock:
-      let body = lastVals[lpos].blockVals
-      if lastVal.wordName == "unless":
-        e.ln("if not (" & cond & ") then")
-      else:
-        e.ln("if " & cond & " then")
-      e.indent += 1
-      e.emitBlockReturn(body)
-      e.indent -= 1
-      e.ln("end")
-      return
-
-  # If last statement is either, emit with return in both branches
-  if lastVal.kind == vkWord and lastVal.wordKind == wkWord and
-     lastVal.wordName == "either":
-    var lpos = 1
-    let cond = e.emitExpr(lastVals, lpos)
-    var trueBlock: seq[KtgValue] = @[]
-    var falseBlock: seq[KtgValue] = @[]
-    if lpos < lastVals.len and lastVals[lpos].kind == vkBlock:
-      trueBlock = lastVals[lpos].blockVals
-      lpos += 1
-    if lpos < lastVals.len and lastVals[lpos].kind == vkBlock:
-      falseBlock = lastVals[lpos].blockVals
-    e.ln("if " & cond & " then")
-    e.indent += 1
-    e.emitBlockReturn(trueBlock)
-    e.indent -= 1
-    e.ln("else")
-    e.indent += 1
-    e.emitBlockReturn(falseBlock)
-    e.indent -= 1
-    e.ln("end")
-    return
-
-  # If last statement is match, emit with return in handlers
-  if lastVal.kind == vkWord and lastVal.wordKind == wkWord and
-     lastVal.wordName == "match":
-    var lpos = 1
-    let valueExpr = e.emitExpr(lastVals, lpos)
-    if lpos < lastVals.len and lastVals[lpos].kind == vkBlock:
-      let rulesBlock = lastVals[lpos].blockVals
-      e.emitMatchStmt(valueExpr, rulesBlock, asReturn = true)
-      return
-
-  # If last statement is loop, emit normally (loops don't produce values)
-  if lastVal.kind == vkWord and lastVal.wordKind == wkWord and
-     lastVal.wordName == "loop":
-    e.emitBlock(lastVals)
-    return
-
-  # If last statement is print, emit normally (print returns none)
-  if lastVal.kind == vkWord and lastVal.wordKind == wkWord and
-     lastVal.wordName == "print":
-    e.emitBlock(lastVals)
-    return
-
-  # Generic expression: emit with return (include -> chains)
-  var lpos = 0
-  let expr = e.emitExprWithChain(lastVals, lpos)
-  if expr != "nil":
-    e.ln("return " & expr)
-
 proc emitBody(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
-  ## Emit a function body. If asReturn is true, the last expression gets
-  ## an implicit `return` prepended.
-  if vals.len == 0:
-    return
-
-  if not asReturn:
-    e.emitBlock(vals)
-    return
-
-  e.emitBlockReturn(vals)
+  ## Emit a function body. Delegates to emitBlock.
+  e.emitBlock(vals, asReturn)
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -2261,6 +2601,14 @@ local function _deep_copy(t)
   local r = {}; for k, v in pairs(t) do r[k] = _deep_copy(v) end; return r
 end
 local pi = math.pi
+local function _append(t, v)
+  if type(v) == "table" then
+    for i = 1, #v do t[#t+1] = v[i] end
+  else
+    t[#t+1] = v
+  end
+  return t
+end
 """
 
 proc prescanBindings(e: var LuaEmitter, blk: seq[KtgValue]) =

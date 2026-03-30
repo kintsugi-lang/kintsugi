@@ -38,7 +38,7 @@ suite "Preprocess — emit injects code":
     let eval = makeEval()
     discard eval.evalString("""
       #preprocess [
-        either platform = 'script [
+        either system/platform = 'script [
           emit [target: "script"]
         ] [
           emit [target: "other"]

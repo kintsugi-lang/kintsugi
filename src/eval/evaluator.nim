@@ -1067,11 +1067,9 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue]): seq[KtgValue] =
     elif ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
        ast[i].wordName == "#preprocess" and i + 1 < ast.len and
        ast[i + 1].kind == vkBlock:
-      # Set up a preprocess context with `emit` and `platform`
+      # Set up a preprocess context with `emit`
       let ppCtx = eval.global.child
       var emitted: seq[KtgValue] = @[]
-
-      ppCtx.set("platform", ktgWord("script", wkLitWord))
 
       ppCtx.set("emit", KtgValue(kind: vkNative,
         nativeFn: KtgNative(name: "emit", arity: 1, fn: proc(

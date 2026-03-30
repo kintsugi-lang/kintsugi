@@ -1468,11 +1468,11 @@ print "world"                           ; hello world (on one line)
 ;   #[expr]              -- inline; evaluate expr, inject result
 ;
 ; Available in the preprocess context:
-;   platform  - current target ('script or 'lua)
-;   emit      - inject a block into the output program
+;   system/platform  - current target ('script or 'lua)
+;   emit             - inject a block into the output program
 
 #preprocess [
-  either platform = 'script [
+  either system/platform = 'script [
     emit [print "Running in Script mode"]
   ] [
     emit [print "Running on Lua"]
@@ -1505,8 +1505,23 @@ print pp-val                            ; 3
 print pp-double 5                       ; 10
 
 ; Platform values:
-;   interpreter          -> platform = 'script
-;   compiled via -c      -> platform = 'lua
+;   interpreter          -> system/platform = 'script
+;   compiled via -c      -> system/platform = 'lua
+
+; --- system: platform and environment ---
+; system is a mutable context available everywhere (not just preprocess).
+; system/platform tells you what runtime you're on.
+; system/env gives path access to environment variables.
+
+print system/platform                   ; 'script (in interpreter)
+
+; Environment variables are auto-populated from the OS:
+; print system/env/HOME                 ; /home/raycat
+; print system/env/PATH                 ; /usr/bin:...
+
+; You can set env vars locally (program-scoped, not OS-level):
+; system/env/MY_APP_MODE: "debug"
+; print system/env/MY_APP_MODE          ; debug
 
 ; --- raw: emit verbatim Lua (compile-time only) ---
 ; raw writes a string directly to the compiled Lua output.
@@ -1696,15 +1711,10 @@ print if [] ["empty block is truthy"]  ; empty block is truthy
 ; loop/partition and recursion.
 
 qsort: function [blk] [
-  if (size? blk) <= 1 [return blk]
-  pivot: first blk
-  rest: copy blk
-  remove rest 1
+  if size? blk <= 1 [return blk]
+  set [pivot @rest] blk
   set [lo hi] loop/partition [for [x] in rest do [x < pivot]]
-  result: qsort lo
-  append result pivot
-  loop [for [x] in qsort hi do [append result x]]
-  result
+  append (append qsort lo pivot) qsort hi
 ]
 
 unsorted: [3 1 4 1 5 9 2 6 5 3]
