@@ -137,25 +137,25 @@ suite "loop":
   test "from/to":
     let eval = makeEval()
     eval.clearOutput
-    discard eval.evalString("loop [for [x] from 1 to 5 [print x]]")
+    discard eval.evalString("loop [for [x] from 1 to 5 do [print x]]")
     check eval.output == @["1", "2", "3", "4", "5"]
 
   test "for/in":
     let eval = makeEval()
     eval.clearOutput
-    discard eval.evalString("""loop [for [item] in ["a" "b" "c"] [print item]]""")
+    discard eval.evalString("""loop [for [item] in ["a" "b" "c"] do [print item]]""")
     check eval.output == @["a", "b", "c"]
 
   test "with break":
     let eval = makeEval()
     eval.clearOutput
-    discard eval.evalString("loop [for [x] from 1 to 10 [if x = 4 [break] print x]]")
+    discard eval.evalString("loop [for [x] from 1 to 10 do [if x = 4 [break] print x]]")
     check eval.output == @["1", "2", "3"]
 
   test "scoped vars":
     let eval = makeEval()
     discard eval.evalString("x: 99")
-    discard eval.evalString("loop [for [x] from 1 to 3 [x]]")
+    discard eval.evalString("loop [for [x] from 1 to 3 do [x]]")
     check $eval.evalString("x") == "99"
 
 suite "conversions":

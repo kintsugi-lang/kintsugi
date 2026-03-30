@@ -63,7 +63,7 @@ suite "Preprocess — emit injects code":
     discard eval.evalString("""
       #preprocess [
         loop [
-          for [field] in [name age email] [
+          for [field] in [name age email] do [
             emit compose/deep [
               (to set-word! join "get-" field) function [obj] [
                 select obj (to lit-word! field)
@@ -430,9 +430,9 @@ suite "Stdlib collections — flatten (inline)":
       flatten: function [blk] [
         result: []
         loop [
-          for [item] in blk [
+          for [item] in blk do [
             either block? item [
-              loop [for [sub] in item [append result sub]]
+              loop [for [sub] in item do [append result sub]]
             ] [
               append result item
             ]
@@ -453,9 +453,9 @@ suite "Stdlib collections — flatten (inline)":
       flatten: function [blk] [
         result: []
         loop [
-          for [item] in blk [
+          for [item] in blk do [
             either block? item [
-              loop [for [sub] in item [append result sub]]
+              loop [for [sub] in item do [append result sub]]
             ] [
               append result item
             ]
@@ -474,9 +474,9 @@ suite "Stdlib collections — flatten (inline)":
       flatten: function [blk] [
         result: []
         loop [
-          for [item] in blk [
+          for [item] in blk do [
             either block? item [
-              loop [for [sub] in item [append result sub]]
+              loop [for [sub] in item do [append result sub]]
             ] [
               append result item
             ]
@@ -499,7 +499,7 @@ suite "Stdlib collections — reverse-block (inline)":
         either len = 0 [[]] [
           result: []
           loop [
-            for [i] from len to 1 by -1 [
+            for [i] from len to 1 by -1 do [
               append result (pick blk i)
             ]
           ]
@@ -522,7 +522,7 @@ suite "Stdlib collections — reverse-block (inline)":
         either len = 0 [[]] [
           result: []
           loop [
-            for [i] from len to 1 by -1 [
+            for [i] from len to 1 by -1 do [
               append result (pick blk i)
             ]
           ]
@@ -543,7 +543,7 @@ suite "Stdlib collections — reverse-block (inline)":
         either len = 0 [[]] [
           result: []
           loop [
-            for [i] from len to 1 by -1 [
+            for [i] from len to 1 by -1 do [
               append result (pick blk i)
             ]
           ]
@@ -562,7 +562,7 @@ suite "Stdlib collections — unique (inline)":
       unique: function [blk] [
         result: []
         loop [
-          for [item] in blk [
+          for [item] in blk do [
             unless has? result item [
               append result item
             ]
@@ -585,7 +585,7 @@ suite "Stdlib collections — unique (inline)":
       unique: function [blk] [
         result: []
         loop [
-          for [item] in blk [
+          for [item] in blk do [
             unless has? result item [
               append result item
             ]
@@ -604,7 +604,7 @@ suite "Stdlib collections — unique (inline)":
       unique: function [blk] [
         result: []
         loop [
-          for [item] in blk [
+          for [item] in blk do [
             unless has? result item [
               append result item
             ]
@@ -625,7 +625,7 @@ suite "Stdlib collections — find-where (inline)":
       find-where: function [blk pred] [
         box: context [val: none]
         loop [
-          for [item] in blk [
+          for [item] in blk do [
             if pred item [
               box/val: item
               break
@@ -643,7 +643,7 @@ suite "Stdlib collections — find-where (inline)":
       find-where: function [blk pred] [
         box: context [val: none]
         loop [
-          for [item] in blk [
+          for [item] in blk do [
             if pred item [
               box/val: item
               break
@@ -661,7 +661,7 @@ suite "Stdlib collections — find-where (inline)":
       find-where: function [blk pred] [
         box: context [val: none]
         loop [
-          for [item] in blk [
+          for [item] in blk do [
             if pred item [
               box/val: item
               break
@@ -809,7 +809,7 @@ suite "Validation — interpreter output":
     let eval = makeEval()
     eval.clearOutput()
     discard eval.evalString("""
-      loop [for [n] from 1 to 5 [print n]]
+      loop [for [n] from 1 to 5 do [print n]]
     """)
     check eval.output.len == 5
     check eval.output[0] == "1"
@@ -903,7 +903,7 @@ suite "Type matching in match":
 suite "Typed blocks":
   test "block with element type constraint":
     let eval = makeEval()
-    discard eval.evalString("""sum: function [nums [block! integer!]] [loop/fold [for [acc n] in nums [acc + n]]]""")
+    discard eval.evalString("""sum: function [nums [block! integer!]] [loop/fold [for [acc n] in nums do [acc + n]]]""")
     check $eval.evalString("sum [1 2 3 4]") == "10"
 
   test "untyped block accepts anything":

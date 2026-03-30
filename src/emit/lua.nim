@@ -147,7 +147,6 @@ proc initNativeBindings(): Table[string, BindingInfo] =
   result["copy"] = nativeBinding(1)
   result["select"] = nativeBinding(2)
   result["has?"] = nativeBinding(2)
-  result["index?"] = nativeBinding(2)
   result["find"] = nativeBinding(2)
   result["reverse"] = nativeBinding(1)
   result["insert"] = nativeBinding(3)
@@ -462,6 +461,11 @@ proc emitFuncDef(e: var LuaEmitter, specBlock, bodyBlock: seq[KtgValue]): string
 # Emit loop dialect
 # ---------------------------------------------------------------------------
 
+proc skipDo(blk: seq[KtgValue], pos: var int) =
+  ## Skip optional 'do' keyword before body block
+  if pos < blk.len and blk[pos].kind == vkWord and blk[pos].wordName == "do":
+    pos += 1
+
 proc emitLoop(e: var LuaEmitter, blk: seq[KtgValue]) =
   var pos = 0
 
@@ -492,6 +496,7 @@ proc emitLoop(e: var LuaEmitter, blk: seq[KtgValue]) =
             guard = e.emitExpr(blk[pos].blockVals, guardPos)
             pos += 1
 
+        skipDo(blk, pos)
         if pos < blk.len and blk[pos].kind == vkBlock:
           let varStr = if vars.len > 0: "_, " & vars[0] else: "_"
           e.ln("for " & varStr & " in ipairs(" & series & ") do")
@@ -531,6 +536,7 @@ proc emitLoop(e: var LuaEmitter, blk: seq[KtgValue]) =
             guard = e.emitExpr(blk[pos].blockVals, guardPos)
             pos += 1
 
+        skipDo(blk, pos)
         if pos < blk.len and blk[pos].kind == vkBlock:
           let varName = if vars.len > 0: vars[0] else: "_"
           var forHeader = "for " & varName & " = " & fromExpr & ", " & toExpr
@@ -562,6 +568,7 @@ proc emitLoop(e: var LuaEmitter, blk: seq[KtgValue]) =
     if pos < blk.len and blk[pos].kind == vkWord and blk[pos].wordName == "by":
       pos += 1
       stepExpr = e.emitExpr(blk, pos)
+    skipDo(blk, pos)
     if pos < blk.len and blk[pos].kind == vkBlock:
       var forHeader = "for it = " & fromExpr & ", " & toExpr
       if stepExpr.len > 0:
@@ -1318,10 +1325,6 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
         let val_expr = e.emitExpr(vals, pos)
         result = "(" & blk & "[" & val_expr & "] ~= nil)"
 
-      elif name == "index?":
-        let blk = e.emitExpr(vals, pos)
-        let val_expr = e.emitExpr(vals, pos)
-        result = "(function() for i,v in ipairs(" & blk & ") do if v == " & val_expr & " then return i end end; return nil end)()"
 
       # --- Type predicates (none?, integer?, etc.) ---
       elif isTypePredicate(name):

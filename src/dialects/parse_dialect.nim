@@ -645,7 +645,7 @@ proc registerParse*(eval: Evaluator) =
 
   ctx.set("parse", KtgValue(kind: vkNative,
     nativeFn: KtgNative(name: "parse", arity: 2,
-      refinements: @[RefinementSpec(name: "ok", params: @[])],
+      refinements: @[RefinementSpec(name: "ok?", params: @[])],
       fn: proc(
         args: seq[KtgValue], ep: pointer): KtgValue =
       let eval = cast[Evaluator](ep)
@@ -690,7 +690,7 @@ proc registerParse*(eval: Evaluator) =
           resultCtx.set(name, val)
 
       # If /ok refinement, return just the logic value
-      if "ok" in eval.currentRefinements:
+      if "ok?" in eval.currentRefinements:
         return ktgLogic(ok)
 
       KtgValue(kind: vkContext, ctx: resultCtx, line: 0)

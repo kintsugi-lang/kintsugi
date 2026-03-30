@@ -44,7 +44,7 @@ suite "binding tracking":
   test "context field in loop is not a call":
     let code = emitLua(parseSource("""
       board: context [cells: [1 2 3]]
-      loop [for [c] in board/cells [print c]]
+      loop [for [c] in board/cells do [print c]]
     """))
     check "ipairs(board.cells)" in code
     check "board.cells()" notin code
@@ -113,7 +113,7 @@ suite "emission context":
 
   test "loop body does not have return on loop statement":
     let code = emitLua(parseSource("""
-      loop [for [i] from 1 to 3 [print i]]
+      loop [for [i] from 1 to 3 do [print i]]
     """))
     # Loop should not have return in its body
     check "return print" notin code

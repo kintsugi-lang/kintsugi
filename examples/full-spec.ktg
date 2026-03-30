@@ -388,15 +388,14 @@ say-hi                                  ; hi
 ;   to    - counting end value
 ;   by    - step value (default 1 or -1 based on direction)
 ;   when  - guard clause (filter)
-;   do    - optional keyword before body block (improves readability)
+;   do    - required before body block
 ;   it    - implicit variable when for is omitted
 
 ; --- Basic iteration ---
 
-; Body can follow the series directly, or use 'do' for clarity:
-loop [for [item] in [1 2 3 4 5] [print item]]
+loop [for [item] in [1 2 3 4 5] do [print item]]
 
-; With 'do' -- same result, reads better in multi-line:
+; Multi-line:
 loop [
   for [item] in [6 7 8]
   do [print item]
@@ -404,7 +403,7 @@ loop [
 
 ; --- Counting ---
 
-loop [for [n] from 1 to 5 [print n]]
+loop [for [n] from 1 to 5 do [print n]]
 ; 1
 ; 2
 ; 3
@@ -412,13 +411,13 @@ loop [for [n] from 1 to 5 [print n]]
 ; 5
 
 ; Counting with step
-loop [from 0 to 10 by 5 [print it]]
+loop [from 0 to 10 by 5 do [print it]]
 ; 0
 ; 5
 ; 10
 
 ; Counting down (direction inferred)
-loop [from 5 to 1 [print it]]
+loop [from 5 to 1 do [print it]]
 ; 5
 ; 4
 ; 3
@@ -427,7 +426,7 @@ loop [from 5 to 1 [print it]]
 
 ; --- Collecting ---
 
-squares: loop/collect [for [n] from 1 to 5 [n * n]]
+squares: loop/collect [for [n] from 1 to 5 do [n * n]]
 probe squares                           ; 1 4 9 16 25
 
 ; --- Filtering ---
@@ -435,25 +434,25 @@ probe squares                           ; 1 4 9 16 25
 evens: loop/collect [
   for [n] in [1 2 3 4 5 6 7 8]
   when [even? n]
-  [n]
+  do [n]
 ]
 probe evens                             ; 2 4 6 8
 
 ; --- Folding ---
 
-total: loop/fold [for [acc n] from 1 to 10 [acc + n]]
+total: loop/fold [for [acc n] from 1 to 10 do [acc + n]]
 print total                             ; 55
 
 ; --- Partitioning ---
 
-set [evens odds] loop/partition [for [x] from 1 to 8 [even? x]]
+set [evens odds] loop/partition [for [x] from 1 to 8 do [even? x]]
 probe evens                             ; 2 4 6 8
 probe odds                              ; 1 3 5 7
 
 ; --- Break inside loop ---
 
 partial: loop/collect [
-  for [x] from 1 to 5 [
+  for [x] from 1 to 5 do [
     if x = 4 [break]
     x * 10
   ]
@@ -464,7 +463,7 @@ probe partial                           ; 10 20 30
 ; After the loop, iteration variables do not exist in the
 ; parent scope. This prevents accidental leaks.
 ; Use loop/fold or loop/collect to get values out.
-;   loop [for [i] from 1 to 5 [i]]
+;   loop [for [i] from 1 to 5 do [i]]
 ;   print i                             ; ERROR: i has no value
 
 
@@ -529,7 +528,7 @@ print last data                         ; 50
 
 ; Membership and lookup
 print has? data 30                      ; true
-print index? data 30                    ; 3 (1-based)
+print find data 30                    ; 3 (1-based)
 print has? "hello world" "world"        ; true
 
 ; Select -- key-value lookup in flat blocks
@@ -618,7 +617,7 @@ print rejoin ["2 + 2 = " (2 + 2)]               ; 2 + 2 = 4
 print size? "hello"                     ; 5
 print join "hello" " world"             ; hello world
 print trim "  hello  "                  ; hello
-print index? "hello world" "world"      ; 7
+print find "hello world" "world"      ; 7
 print has? "hello world" "world"        ; true
 print split "a,b,c" ","                 ; ["a" "b" "c"]
 print uppercase "hello"                 ; HELLO
@@ -963,11 +962,23 @@ print clean "  HELLO  "                 ; hello
 ; Error handling in pipelines
 result: attempt [
   source [error 'test "fail" none]
-  then   [it]
-  catch 'test [print "caught test error" none]
-  fallback [none]
+  catch 'test ["caught"]
+  fallback ["fallback"]
 ]
-print result                            ; none
+print result                            ; caught
+
+; Retries — retry source N times before giving up
+@global retry-count: 0
+result: attempt [
+  source [
+    retry-count: retry-count + 1
+    if retry-count < 3 [error 'test "not ready" none]
+    "ok"
+  ]
+  retries 5
+]
+print result                            ; ok
+print retry-count                       ; 3
 
 
 ; ============================================================
@@ -1020,7 +1031,7 @@ print frozen? point                     ; false
 ;
 ; To mutate shared state, use a context and set-path:
 state: context [counter: 0]
-loop [from 1 to 10 [
+loop [from 1 to 10 do [
   state/counter: state/counter + 1     ; mutates through reference
 ]]
 print state/counter                     ; 10
@@ -1276,7 +1287,7 @@ do [
 ; scope. This is intentional -- dialects don't silently
 ; modify the caller.
 ;
-; Use parse/ok to get a bare logic! result.
+; Use parse/ok? to get a bare logic! result.
 ;
 ; Combinators:
 ;   |         - ordered alternative (lowest precedence)
@@ -1359,9 +1370,9 @@ digit-run: [some digit]
 result: parse "12345" digit-run
 print result/ok                         ; true
 
-; --- parse/ok refinement ---
+; --- parse/ok? refinement ---
 ; Returns bare logic! when you only care about success.
-; if parse/ok input [some digit] [print "all numbers"]
+; if parse/ok? input [some digit] [print "all numbers"]
 
 ; --- Backtracking ---
 ; some and any are greedy but backtrack on failure, like REBOL.
@@ -1471,7 +1482,7 @@ print "world"                           ; hello world (on one line)
 ; Code generation -- generates get-name, get-age, get-email
 #preprocess [
   loop [
-    for [field] in [name age email] [
+    for [field] in [name age email] do [
       emit compose [
         (to set-word! join "get-" field) function [obj] [
           select obj (to lit-word! field)
@@ -1689,10 +1700,10 @@ qsort: function [blk] [
   pivot: first blk
   rest: copy blk
   remove rest 1
-  set [lo hi] loop/partition [for [x] in rest [x < pivot]]
+  set [lo hi] loop/partition [for [x] in rest do [x < pivot]]
   result: qsort lo
   append result pivot
-  loop [for [x] in qsort hi [append result x]]
+  loop [for [x] in qsort hi do [append result x]]
   result
 ]
 
@@ -1705,7 +1716,7 @@ probe sorted                            ; 1 1 2 3 3 4 5 5 6 9
 fib: function [n] [
   seq: [0 1]
   loop [
-    from 1 to (n - 2) [
+    from 1 to (n - 2) do [
       a: pick seq ((size? seq) - 1)
       b: last seq
       append seq (a + b)
@@ -1779,13 +1790,13 @@ data: [1 2 3 4 5 6 7 8 9 10]
 big-evens: loop/collect [
   for [n] in data
   when [n > 5 and even? n]
-  [n]
+  do [n]
 ]
 probe big-evens                         ; 6 8 10
 
 ; --- Accumulator with fold ---
 
-sum: loop/fold [for [acc n] in [10 20 30 40 50] [acc + n]]
+sum: loop/fold [for [acc n] in [10 20 30 40 50] do [acc + n]]
 print sum                               ; 150
 
 ; --- Safe division with try ---

@@ -412,17 +412,7 @@ proc registerNatives*(eval: Evaluator) =
     ktgLogic(false)
   )
 
-  ctx.native("index?", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    if args[0].kind == vkBlock:
-      for i, v in args[0].blockVals:
-        if valuesEqual(v, args[1]): return ktgInt(int64(i + 1))
-      return ktgNone()
-    if args[0].kind == vkString and args[1].kind == vkString:
-      let idx = args[0].strVal.find(args[1].strVal)
-      if idx >= 0: return ktgInt(int64(idx + 1))
-      return ktgNone()
-    ktgNone()
-  )
+
 
   # --- find: unified search for blocks and strings ---
 

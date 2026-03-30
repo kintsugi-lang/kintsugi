@@ -78,9 +78,13 @@ proc parseLoopSpec(blk: seq[KtgValue], eval: Evaluator, ctx: KtgContext): LoopSp
       spec.guardBlock = blk[pos].blockVals
       pos += 1
 
-  # optional 'do' before body block
+  # 'do' before body block — required for for/in and from/to
   if pos < blk.len and blk[pos].kind == vkWord and blk[pos].wordName == "do":
     pos += 1
+  elif spec.mode != lmInfinite:
+    raise KtgError(kind: "parse",
+      msg: "loop body requires 'do' before the body block",
+      data: nil)
 
   # body — remaining block
   if pos < blk.len and blk[pos].kind == vkBlock:

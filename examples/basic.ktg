@@ -24,7 +24,7 @@ print fact 10
 either 5 > 3 [print "yes"] [print "no"]
 
 ; Loops
-loop [for [n] from 1 to 5 [print n]]
+loop [for [n] from 1 to 5 do [print n]]
 
 ; Context
 point: context [x: 10 y: 20]

@@ -24,17 +24,17 @@ suite "Loop tests":
 
   test "for-in with side effects":
     let eval = makeEval()
-    discard eval.evalString("state: context [sum: 0] loop [for [x] in [1 2 3] [state/sum: state/sum + x]]")
+    discard eval.evalString("state: context [sum: 0] loop [for [x] in [1 2 3] do [state/sum: state/sum + x]]")
     check $eval.evalString("state/sum") == "6"
 
   test "from-to range":
     let eval = makeEval()
-    discard eval.evalString("state: context [sum: 0] loop [for [n] from 1 to 5 [state/sum: state/sum + n]]")
+    discard eval.evalString("state: context [sum: 0] loop [for [n] from 1 to 5 do [state/sum: state/sum + n]]")
     check $eval.evalString("state/sum") == "15"
 
   test "loop variables do not leak":
     let eval = makeEval()
-    discard eval.evalString("loop [for [x] in [1 2 3] [x]]")
+    discard eval.evalString("loop [for [x] in [1 2 3] do [x]]")
     var caught = false
     try:
       discard eval.evalString("x")
@@ -44,15 +44,15 @@ suite "Loop tests":
 
   test "loop/fold sum 1 to 10":
     let eval = makeEval()
-    check $eval.evalString("loop/fold [for [acc n] from 1 to 10 [acc + n]]") == "55"
+    check $eval.evalString("loop/fold [for [acc n] from 1 to 10 do [acc + n]]") == "55"
 
   test "loop/fold over series":
     let eval = makeEval()
-    check $eval.evalString("loop/fold [for [acc x] in [1 2 3 4] [acc + x]]") == "10"
+    check $eval.evalString("loop/fold [for [acc x] in [1 2 3 4] do [acc + x]]") == "10"
 
   test "loop/partition evens and odds":
     let eval = makeEval()
-    discard eval.evalString("set [evens odds] loop/partition [for [x] from 1 to 8 [even? x]]")
+    discard eval.evalString("set [evens odds] loop/partition [for [x] from 1 to 8 do [even? x]]")
     check $eval.evalString("evens") == "[2 4 6 8]"
     check $eval.evalString("odds") == "[1 3 5 7]"
 
@@ -1489,15 +1489,15 @@ suite "Natives tests":
     check $eval.evalString("""has? "hello world" "world" """) == "true"
     check $eval.evalString("""has? "hello" "xyz" """) == "false"
 
-  test "index? block":
+  test "find block":
     let eval = makeEval()
-    check $eval.evalString("index? [10 20 30] 20") == "2"
-    check $eval.evalString("index? [1 2 3] 9") == "none"
+    check $eval.evalString("find [10 20 30] 20") == "2"
+    check $eval.evalString("find [1 2 3] 9") == "none"
 
-  test "index? string":
+  test "find string":
     let eval = makeEval()
-    check $eval.evalString("""index? "hello world" "world" """) == "7"
-    check $eval.evalString("""index? "hello" "xyz" """) == "none"
+    check $eval.evalString("""find "hello world" "world" """) == "7"
+    check $eval.evalString("""find "hello" "xyz" """) == "none"
 
   # -- type operations --
 

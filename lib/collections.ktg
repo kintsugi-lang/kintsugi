@@ -7,10 +7,10 @@ Kintsugi [name: 'collections]
 
 flatten-deep: function [data [block!]] [
   result: []
-  loop [for [sub] in data [
+  loop [for [sub] in data do [
     either block? sub [
       flat-sub: flatten-deep sub
-      loop [for [item] in flat-sub [append result item]]
+      loop [for [item] in flat-sub do [append result item]]
     ] [
       append result sub
     ]
@@ -23,9 +23,9 @@ flatten: function [data [block!] /deep] [
     flatten-deep data
   ] [
     result: []
-    loop [for [sub] in data [
+    loop [for [sub] in data do [
       either block? sub [
-        loop [for [item] in sub [append result item]]
+        loop [for [item] in sub do [append result item]]
       ] [
         append result sub
       ]
@@ -43,7 +43,7 @@ zip: function [a [block!] b [block!]] [
   len: min length? a length? b
   if len <= 0 [return []]
   result: []
-  loop [for [i] from 1 to len [
+  loop [for [i] from 1 to len do [
     pair: []
     append pair pick a i
     append pair pick b i
@@ -60,7 +60,7 @@ reverse-block: function [data [block!]] [
   len: length? data
   if len <= 0 [return []]
   result: []
-  loop [for [i] from len to 1 [append result pick data i]]
+  loop [for [i] from len to 1 do [append result pick data i]]
   result
 ]
 
@@ -71,7 +71,7 @@ reverse-block: function [data [block!]] [
 
 unique: function [data [block!]] [
   result: []
-  loop [for [item] in data [
+  loop [for [item] in data do [
     unless has? result item [append result item]
   ]]
   result
@@ -85,7 +85,7 @@ shuffle: function [data [block!]] [
   result: copy data
   len: length? result
   if len <= 1 [return result]
-  loop [for [i] from len to 2 [
+  loop [for [i] from len to 2 do [
     j: (random i) + 1
     temp: pick result i
     ; swap i and j
@@ -101,7 +101,7 @@ shuffle: function [data [block!]] [
 ; find-where [1 2 3 4] function [x] [x > 2]  => 3
 
 find-where: function [data [block!] pred [function!]] [
-  loop [for [item] in data [
+  loop [for [item] in data do [
     if pred item [return item]
   ]]
   none

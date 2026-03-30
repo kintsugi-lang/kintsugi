@@ -14,7 +14,7 @@ StudentRecord: object [
   scores [block!] @default []
   average: function [] [
     total: 0
-    loop [for [s] in self/scores [total: total + s]]
+    loop [for [s] in self/scores do [total: total + s]]
     total / (length? self/scores)
   ]
 ]
@@ -33,7 +33,7 @@ records: parse raw [
 ]
 
 students: loop/collect [
-  for [record] in records [
+  for [record] in records do [
     make StudentRecord [
       name: record/name
       scores: reduce [
@@ -47,7 +47,7 @@ students: loop/collect [
 
 ranked: sort/by students function [s] [negate s/average]
 loop [
-  for [s] in ranked [
+  for [s] in ranked do [
     print rejoin ["  " s/name " — avg: " round s/average]
   ]
 ]

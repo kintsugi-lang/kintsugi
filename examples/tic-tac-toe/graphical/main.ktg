@@ -61,7 +61,7 @@ check-end: function [] [
     [1 4 7] [2 5 8] [3 6 9]
     [1 5 9] [3 5 7]
   ]
-  loop [for [line] in lines [
+  loop [for [line] in lines do [
     a: cell-at (pick line 1)
     b: cell-at (pick line 2)
     c: cell-at (pick line 3)
@@ -73,7 +73,7 @@ check-end: function [] [
     ]
   ]]
   state: context [full: true]
-  loop [for [c] in board/cells [
+  loop [for [c] in board/cells do [
     if none? c [state/full: false]
   ]]
   if state/full [board/status: 'draw]
@@ -106,7 +106,7 @@ find-winning: function [mark [any-word!]] [
     [1 5 9] [3 5 7]
   ]
   state: context [result: none]
-  loop [for [line] in lines [
+  loop [for [line] in lines do [
     a: pick line 1
     b: pick line 2
     c: pick line 3
@@ -127,11 +127,11 @@ ai-move: function [] [
   if not none? b [return b]
   if none? cell-at 5 [return 5]
   state: context [choice: none]
-  loop [for [c] in [1 3 7 9] [
+  loop [for [c] in [1 3 7 9] do [
     if none? cell-at c [state/choice: c]
   ]]
   if not none? state/choice [return state/choice]
-  loop [for [i] from 1 to 9 [
+  loop [for [i] from 1 to 9 do [
     if none? cell-at i [return i]
   ]]
   none
@@ -164,7 +164,7 @@ love/draw: function [] [
   ; grid lines
   lg/setColor (pick grid 1) (pick grid 2) (pick grid 3)
   lg/setLineWidth 2
-  loop [for [i] from 1 to 2 [
+  loop [for [i] from 1 to 2 do [
     x: offset + padding + i * cell-size
     y: offset + padding + i * cell-size
     lg/line x (offset + padding) x (offset + padding + cell-size * 3)
@@ -172,7 +172,7 @@ love/draw: function [] [
   ]]
 
   ; marks
-  loop [for [pos] from 1 to 9 [
+  loop [for [pos] from 1 to 9 do [
     cell: cell-at pos
     if not none? cell [
       coords: pos-to-xy pos

@@ -642,6 +642,55 @@ suite "replace refinements":
     check $eval.evalString("""replace "hello" "xyz" "!" """) == "hello"
     check $eval.evalString("replace [1 2 3] 9 0") == "[1 2 3]"
 
+suite "attempt retries":
+  test "retries source until success":
+    let eval = makeEval()
+    let r = eval.evalString("""
+      @global attempts: 0
+      attempt [
+        source [
+          attempts: attempts + 1
+          if attempts < 3 [error 'test "not ready" none]
+          "success"
+        ]
+        retries 5
+      ]
+    """)
+    check $r == "success"
+    check $eval.evalString("attempts") == "3"
+
+  test "fallback after retries exhausted":
+    let eval = makeEval()
+    let r = eval.evalString("""
+      attempt [
+        source [error 'test "always fails" none]
+        retries 2
+        fallback ["gave up"]
+      ]
+    """)
+    check $r == "gave up"
+
+  test "catch handles specific error kind":
+    let eval = makeEval()
+    let r = eval.evalString("""
+      attempt [
+        source [error 'network "timeout" none]
+        catch 'network [join "caught: " error]
+      ]
+    """)
+    check $r == "caught: timeout"
+
+  test "catch does not handle wrong kind":
+    let eval = makeEval()
+    let r = eval.evalString("""
+      attempt [
+        source [error 'math "divide by zero" none]
+        catch 'network [join "caught: " error]
+        fallback ["unhandled"]
+      ]
+    """)
+    check $r == "unhandled"
+
 suite "math compilation":
   test "trig compiles to math.*":
     let code = emitLua(parseSource("x: sin pi"))
