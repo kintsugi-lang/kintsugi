@@ -314,6 +314,22 @@ proc navigatePath*(eval: Evaluator, head: KtgValue, segments: seq[string],
         current = current.mapEntries[seg]
       else:
         raise KtgError(kind: "undefined", msg: seg & " not found in map", data: nil)
+    elif current.kind == vkPair:
+      case seg
+      of "x": current = ktgInt(int64(current.px))
+      of "y": current = ktgInt(int64(current.py))
+      else:
+        raise KtgError(kind: "undefined", msg: seg & " not found on pair (use /x or /y)", data: nil)
+    elif current.kind == vkTuple:
+      # tuple/1, tuple/2, tuple/3 for indexed access
+      try:
+        let idx = parseInt(seg)
+        if idx >= 1 and idx <= current.tupleVals.len:
+          current = ktgInt(int64(current.tupleVals[idx - 1]))
+        else:
+          raise KtgError(kind: "range", msg: "tuple index " & seg & " out of range", data: nil)
+      except ValueError:
+        raise KtgError(kind: "undefined", msg: seg & " not found on tuple (use /1, /2, etc.)", data: nil)
     else:
       raise KtgError(kind: "type",
         msg: "cannot navigate path on " & typeName(current), data: nil)
@@ -339,14 +355,17 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
   case val.kind
 
   # --- Scalars: return self ---
-  of vkInteger, vkFloat, vkString, vkLogic, vkNone,
+  of vkInteger, vkFloat, vkLogic, vkNone,
      vkMoney, vkPair, vkTuple, vkDate, vkTime,
      vkFile, vkUrl, vkEmail, vkType, vkMap, vkSet:
     return val
 
-  # --- Block: return self (inert) ---
+  # --- Mutable types: return a copy so mutation doesn't affect the AST ---
+  of vkString:
+    return ktgString(val.strVal, val.line)
+
   of vkBlock:
-    return val
+    return ktgBlock(val.blockVals[0..^1], val.line)
 
   # --- Paren: evaluate contents, return last ---
   of vkParen:
@@ -398,11 +417,26 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
           finally:
             eval.currentRefinements = @[]
 
-        let resolved = eval.navigatePath(headVal, segments, ctx)
-        # if resolved is callable, call it
-        if isCallable(resolved):
-          return eval.callCallable(resolved, vals, pos, ctx, headVal)
-        return resolved
+        # Navigate segments one at a time, stopping at callable values
+        # to treat remaining segments as refinements (e.g., module/func/refinement)
+        var current = headVal
+        var segIdx = 0
+        while segIdx < segments.len:
+          let seg = segments[segIdx]
+          let next = eval.navigatePath(current, @[seg], ctx)
+          # If resolved is callable and there are more segments, treat as refinements
+          if isCallable(next) and segIdx + 1 < segments.len:
+            eval.currentRefinements = segments[segIdx + 1 .. ^1]
+            try:
+              return eval.callCallable(next, vals, pos, ctx, current)
+            finally:
+              eval.currentRefinements = @[]
+          current = next
+          segIdx += 1
+        # Final value: if callable, call it
+        if isCallable(current):
+          return eval.callCallable(current, vals, pos, ctx, headVal)
+        return current
 
       # check if it's a dialect first (before word lookup)
       let dialect = eval.findDialect(val.wordName)

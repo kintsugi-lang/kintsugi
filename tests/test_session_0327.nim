@@ -694,7 +694,7 @@ suite "attempt retries":
 suite "math compilation":
   test "trig compiles to math.*":
     let code = emitLua(parseSource("x: sin pi"))
-    check "math.sin(pi)" in code
+    check "math.sin(math.pi)" in code
 
   test "pow compiles":
     let code = emitLua(parseSource("x: pow 2 10"))

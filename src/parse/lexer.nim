@@ -172,7 +172,7 @@ proc readWord(lex: var Lexer): string =
   var w = ""
   while not lex.atEnd and isWordChar(lex.peek):
     w &= lex.advance
-  # consume path segments: word/segment/segment or word/:get-word
+  # consume path segments: word/segment/segment or word/:get-word or word/1
   while not lex.atEnd and lex.peek == '/':
     if lex.peekAt(1).isAlpha:
       w &= lex.advance  # /
@@ -183,6 +183,11 @@ proc readWord(lex: var Lexer): string =
       w &= lex.advance  # /
       w &= lex.advance  # :
       while not lex.atEnd and isWordChar(lex.peek):
+        w &= lex.advance
+    elif lex.peekAt(1).isDigit:
+      # numeric path segment: word/1 (tuple/block indexing)
+      w &= lex.advance  # /
+      while not lex.atEnd and lex.peek.isDigit:
         w &= lex.advance
     else:
       break

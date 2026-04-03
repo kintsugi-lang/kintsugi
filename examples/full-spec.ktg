@@ -567,6 +567,36 @@ set [name age] ctx
 print name                              ; Ray
 print age                               ; 30
 
+; @rest captures remaining elements into a block
+set [first-item @rest] [10 20 30 40 50]
+print first-item                        ; 10
+probe rest                              ; [20 30 40 50]
+
+; --- capture: declarative keyword extraction ---
+; capture scans a block for keywords defined by meta-words in a schema.
+; @name     — greedy: captures everything until next keyword
+; @name/N   — exact: captures N values after keyword
+
+parts: capture [source [42] then [it + 1] then [it * 2] retries 3] [
+  @source @then @retries
+]
+print parts/source                      ; [42]
+probe parts/then                        ; [[it + 1] [it * 2]]
+print parts/retries                     ; 3
+
+; capture enables user-defined dialects — a function that takes
+; a block and interprets its keywords:
+;
+;   entity: function [spec [block!]] [
+;     parts: capture spec [@name @hp @attack @defense]
+;     ctx: context []
+;     ctx/name: parts/name
+;     ctx/hp: parts/hp
+;     ctx/max-hp: parts/hp
+;     ctx
+;   ]
+;   warrior: entity [name "Warrior" hp 100 attack 15 defense 10]
+
 ; Dynamic path indexing -- use :var in a path to evaluate the variable
 items: [10 20 30]
 i: 2
@@ -639,14 +669,21 @@ print find "hello world" "world"        ; 7
 print find "hello" "xyz"                ; none
 print find [10 20 30] 20               ; 2
 
+; find/where -- first element matching a predicate
+print find/where [1 2 3 4 5] function [x] [x > 3]  ; 4
+
 ; reverse -- returns new value
 print reverse "hello"                   ; olleh
 print reverse [1 2 3]                   ; [3 2 1]
 
-; append -- mutates strings in place
+; append -- mutates in place. Splices blocks by default.
 spec-str: "hello"
 append spec-str " world"
 print spec-str                          ; hello world
+
+spec-blk: [1 2]
+append spec-blk [3 4]                   ; splice: [1 2 3 4]
+append/only spec-blk [5 6]             ; single element: [1 2 3 4 [5 6]]
 
 ; substring extracts a range (1-based start, length)
 print substring "hello world" 7 5       ; world
@@ -661,6 +698,15 @@ print starts-with? "hello" "xyz"          ; false
 ; \n = newline, \" = quote, \\ = backslash, \t = tab
 
 print "line one\nline two"
+
+; --- Padding ---
+; pad fills to a width. Left-pad by default, /right for right-pad.
+; Works on strings and blocks.
+
+print pad "42" 5 "0"                    ; 00042
+print pad/right "hi" 6 "."             ; hi....
+probe pad [1 2] 5 0                     ; [0 0 0 1 2]
+probe pad/right [1] 4 none              ; [1 none none none]
 
 ; --- Character codes ---
 print byte "A"                          ; 65
@@ -1711,7 +1757,7 @@ print if [] ["empty block is truthy"]  ; empty block is truthy
 ; loop/partition and recursion.
 
 qsort: function [blk] [
-  if size? blk <= 1 [return blk]
+  if (size? blk) <= 1 [return blk]
   set [pivot @rest] blk
   set [lo hi] loop/partition [for [x] in rest do [x < pivot]]
   append (append qsort lo pivot) qsort hi
@@ -1740,20 +1786,22 @@ probe fib 10                            ; 0 1 1 2 3 5 8 13 21 34
 ; --- State Machine ---
 ; Objects with match for state transitions.
 
+traffic-light-color!: @type/enum ['red | 'yellow | 'green]
+
 TrafficLight: object [
-  field/optional [state [string!] "red"]
+  field/optional [state [traffic-light-color!] 'red]
   field/optional [timer [integer!] 0]
 
   advance: function [] [
     match self/state [
-      ["red"]    [self/state: "green"  self/timer: 30]
-      ["green"]  [self/state: "yellow" self/timer: 5]
-      ["yellow"] [self/state: "red"    self/timer: 45]
+      ['red]    [self/state: 'green  self/timer: 30]
+      ['green]  [self/state: 'yellow self/timer: 5]
+      ['yellow] [self/state: 'red    self/timer: 45]
     ]
   ]
 
   display: function [] [
-    rejoin ["[" (uppercase self/state) "] " self/timer "s"]
+    rejoin ["[" (uppercase to string! self/state) "] " self/timer "s"]
   ]
 ]
 

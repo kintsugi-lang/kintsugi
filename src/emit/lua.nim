@@ -50,6 +50,8 @@ type
     sourceDir: string
     ## Modules currently being compiled (cycle detection).
     compiling: HashSet[string]
+    ## Track which prelude helpers are actually used.
+    usedHelpers: HashSet[string]
 
   EmitError* = ref object of CatchableError
 
@@ -60,6 +62,13 @@ type
 
 proc pad(e: LuaEmitter): string =
   repeat("  ", e.indent)
+
+proc useHelper(e: var LuaEmitter, name: string) =
+  ## Mark a prelude helper as used. Dependencies are automatic:
+  ## _is_none and _NONE depend on each other, unpack is always included.
+  e.usedHelpers.incl(name)
+  if name == "_is_none": e.usedHelpers.incl("_NONE")
+  if name == "_NONE": e.usedHelpers.incl("_is_none")
 
 proc ln(e: var LuaEmitter, s: string) =
   e.output &= e.pad & s & "\n"
@@ -232,6 +241,7 @@ proc initNativeBindings(): Table[string, BindingInfo] =
   result["intersect"] = nativeBinding(2)
   # Bindings is a compile-time dialect — handled specially in prescan
   result["bindings"] = nativeBinding(1)
+  result["capture"] = nativeBinding(2)
   # Loop is a dialect — handled specially, not via arity
 
 # ---------------------------------------------------------------------------
@@ -349,6 +359,7 @@ proc emitBlockLiteral(e: var LuaEmitter, vals: seq[KtgValue]): string =
     let expr = e.emitExpr(vals, pos)
     # Replace nil with _NONE in array contexts so Lua preserves the element
     if expr == "nil":
+      e.useHelper("_NONE")
       parts.add("_NONE")
     else:
       parts.add(expr)
@@ -1117,12 +1128,13 @@ proc needsParens(expr: string): bool =
   ## Needed when the expression contains and/or which have lower precedence than ==.
   " and " in expr or " or " in expr
 
-proc emitTypePredicateCall(name: string, argExpr: string): string =
+proc emitTypePredicateCall(e: var LuaEmitter, name: string, argExpr: string): string =
   ## Emit a type predicate as an efficient Lua expression.
   let baseName = name[0..^2]  # strip trailing ?
   let safeArg = if needsParens(argExpr): "(" & argExpr & ")" else: argExpr
   case baseName
   of "none":
+    e.useHelper("_is_none")
     result = "_is_none(" & safeArg & ")"
   of "integer":
     result = "(type(" & argExpr & ") == \"number\" and math.floor(" & argExpr & ") == " & argExpr & ")"
@@ -1217,6 +1229,7 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
         result = "math.ceil(" & arg & ")"
       elif name == "copy/deep":
         let arg = e.emitExpr(vals, pos)
+        e.useHelper("_deep_copy")
         result = "_deep_copy(" & arg & ")"
       elif name == "sort/by":
         let arr = e.emitExpr(vals, pos)
@@ -1466,6 +1479,74 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
         else:
           result = "nil"
 
+      # --- capture: declarative keyword extraction ---
+      elif name == "capture":
+        # Parse schema (second arg) at compile time to get keyword names
+        let dataStart = pos
+        # Skip first arg to peek at schema
+        var schemaPos = pos
+        discard e.emitExpr(vals, schemaPos)  # skip data arg
+        var keywords: seq[string] = @[]
+        var specs: seq[(string, int)] = @[]  # (keyword, exact) where -1 = greedy
+        if schemaPos < vals.len and vals[schemaPos].kind == vkBlock:
+          for s in vals[schemaPos].blockVals:
+            if s.kind == vkWord and s.wordKind == wkMetaWord:
+              let parts = s.wordName.split('/')
+              var keyword = s.wordName
+              var exact = -1
+              if parts.len >= 2:
+                var allDigits = true
+                for c in parts[^1]:
+                  if c notin {'0'..'9'}: allDigits = false; break
+                if allDigits and parts[^1].len > 0:
+                  exact = parseInt(parts[^1])
+                  keyword = parts[0 .. ^2].join("/")
+              keywords.add(keyword)
+              specs.add((keyword, exact))
+        # Now emit the data block with keyword-matching words as strings
+        pos = dataStart
+        if pos < vals.len and vals[pos].kind == vkBlock:
+          let dataBlock = vals[pos].blockVals
+          pos += 1
+          var dataParts: seq[string] = @[]
+          var dpos = 0
+          while dpos < dataBlock.len:
+            let dval = dataBlock[dpos]
+            if dval.kind == vkWord and dval.wordKind == wkWord and dval.wordName in keywords:
+              dataParts.add("\"" & dval.wordName & "\"")
+              dpos += 1
+            else:
+              dataParts.add(e.emitExpr(dataBlock, dpos))
+          let dataStr = "{" & dataParts.join(", ") & "}"
+          # Emit specs table
+          var specParts: seq[string] = @[]
+          for (kw, exact) in specs:
+            if exact >= 0:
+              specParts.add("{\"" & kw & "\", " & $exact & "}")
+            else:
+              specParts.add("\"" & kw & "\"")
+          let specStr = "{" & specParts.join(", ") & "}"
+          # Skip the schema block
+          if pos < vals.len and vals[pos].kind == vkBlock:
+            pos += 1
+          e.useHelper("_capture")
+          result = "_capture(" & dataStr & ", " & specStr & ")"
+        else:
+          # Data is a variable — can't rewrite keywords
+          let dataExpr = e.emitExpr(vals, pos)
+          if pos < vals.len and vals[pos].kind == vkBlock:
+            var specParts: seq[string] = @[]
+            for (kw, exact) in specs:
+              if exact >= 0:
+                specParts.add("{\"" & kw & "\", " & $exact & "}")
+              else:
+                specParts.add("\"" & kw & "\"")
+            pos += 1
+            e.useHelper("_capture")
+            result = "_capture(" & dataExpr & ", {" & specParts.join(", ") & "})"
+          else:
+            result = "nil"
+
       # --- match dialect ---
       elif name == "match":
         let valueExpr = e.emitExpr(vals, pos)
@@ -1557,6 +1638,7 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
       elif name == "append":
         let blk = e.emitExpr(vals, pos)
         let val_expr = e.emitExpr(vals, pos)
+        e.useHelper("_append")
         result = "_append(" & blk & ", " & val_expr & ")"
 
       elif name == "append/only":
@@ -1636,7 +1718,7 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
       # --- Type predicates (none?, integer?, etc.) ---
       elif isTypePredicate(name):
         let arg = e.emitExpr(vals, pos)
-        result = emitTypePredicateCall(name, arg)
+        result = e.emitTypePredicateCall(name, arg)
 
       # --- Math ---
       elif name == "abs":
@@ -1704,6 +1786,9 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
         result = "math.floor(" & e.emitExpr(vals, pos) & ")"
       elif name == "ceil":
         result = "math.ceil(" & e.emitExpr(vals, pos) & ")"
+      elif name == "pi":
+        result = "math.pi"
+
       elif name == "random":
         result = "math.random() * " & e.emitExpr(vals, pos)
 
@@ -1876,12 +1961,16 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
     let right = e.emitExpr(vals, pos)
     # Special case: = none / <> none → _is_none() / not _is_none()
     if right == "nil" and opStr == "==":
+      e.useHelper("_is_none")
       result = "_is_none(" & result & ")"
     elif right == "nil" and opStr == "~=":
+      e.useHelper("_is_none")
       result = "not _is_none(" & result & ")"
     elif result == "nil" and opStr == "==":
+      e.useHelper("_is_none")
       result = "_is_none(" & right & ")"
     elif result == "nil" and opStr == "~=":
+      e.useHelper("_is_none")
       result = "not _is_none(" & right & ")"
     else:
       result = result & " " & opStr & " " & right
@@ -2571,6 +2660,7 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
       pos += 1
       let blk = e.emitExpr(vals, pos)
       let val_expr = e.emitExpr(vals, pos)
+      e.useHelper("_append")
       e.ln("_append(" & blk & ", " & val_expr & ")")
       continue
 
@@ -2592,16 +2682,59 @@ proc emitBody(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
 # Public API
 # ---------------------------------------------------------------------------
 
-const LuaPrelude = """-- Kintsugi runtime support
-local unpack = unpack or table.unpack
-local _NONE = setmetatable({}, {__tostring = function() return "none" end})
+const PreludeUnpack = "local unpack = unpack or table.unpack\n"
+
+const PreludeNone = """local _NONE = setmetatable({}, {__tostring = function() return "none" end})
 local function _is_none(v) return v == nil or v == _NONE end
-local function _deep_copy(t)
+"""
+
+const PreludeDeepCopy = """local function _deep_copy(t)
   if type(t) ~= "table" then return t end
   local r = {}; for k, v in pairs(t) do r[k] = _deep_copy(v) end; return r
 end
-local pi = math.pi
-local function _append(t, v)
+"""
+
+
+const PreludeCapture = """local function _capture(data, specs)
+  local keywords, spec_map = {}, {}
+  for _, s in ipairs(specs) do
+    local name, exact = s, -1
+    if type(s) == "table" then name, exact = s[1], s[2] end
+    keywords[name] = true
+    spec_map[name] = exact
+  end
+  local result, i = {}, 1
+  while i <= #data do
+    local val = data[i]
+    if type(val) == "string" and spec_map[val] ~= nil then
+      local name, exact = val, spec_map[val]
+      i = i + 1
+      if exact >= 0 then
+        local cap = {}
+        for j = 1, exact do if i <= #data then cap[#cap+1] = data[i]; i = i + 1 end end
+        if result[name] == nil then
+          if #cap == 1 then result[name] = cap[1] else result[name] = cap end
+        else
+          if type(result[name]) ~= "table" then result[name] = {result[name]} end
+          for _, v in ipairs(cap) do result[name][#result[name]+1] = v end
+        end
+      else
+        local cap = {}
+        while i <= #data do
+          local cur = data[i]
+          if type(cur) == "string" and keywords[cur] and cur ~= name then break end
+          if type(cur) == "string" and cur == name then i = i + 1
+          else cap[#cap+1] = cur; i = i + 1 end
+        end
+        if #cap == 1 then result[name] = cap[1] elseif #cap > 1 then result[name] = cap end
+      end
+    else i = i + 1 end
+  end
+  return result
+end
+"""
+
+const PreludeAppend = """local function _append(t, v)
   if type(v) == "table" then
     for i = 1, #v do t[#t+1] = v[i] end
   else
@@ -2610,6 +2743,19 @@ local function _append(t, v)
   return t
 end
 """
+
+proc buildPrelude(e: LuaEmitter): string =
+  if e.usedHelpers.len == 0: return ""
+  result = "-- Kintsugi runtime support\n"
+  result &= PreludeUnpack
+  if "_NONE" in e.usedHelpers or "_is_none" in e.usedHelpers:
+    result &= PreludeNone
+  if "_deep_copy" in e.usedHelpers:
+    result &= PreludeDeepCopy
+  if "_capture" in e.usedHelpers:
+    result &= PreludeCapture
+  if "_append" in e.usedHelpers:
+    result &= PreludeAppend
 
 proc prescanBindings(e: var LuaEmitter, blk: seq[KtgValue]) =
   ## Parse a bindings block and populate nameMap, arities, and bindingKinds.
@@ -2822,4 +2968,4 @@ proc emitLua*(ast: seq[KtgValue], sourceDir: string = ""): string =
   )
   e.prescanBlock(ast)
   e.emitBlock(ast)
-  LuaPrelude & e.output
+  e.buildPrelude() & e.output

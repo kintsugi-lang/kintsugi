@@ -430,20 +430,39 @@ proc registerNatives*(eval: Evaluator) =
 
   # --- find: unified search for blocks and strings ---
 
-  ctx.native("find", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    case args[0].kind
-    of vkBlock:
-      for i, v in args[0].blockVals:
-        if valuesEqual(v, args[1]): return ktgInt(int64(i + 1))
-      return ktgNone()
-    of vkString:
-      let needle = $args[1]
-      let idx = args[0].strVal.find(needle)
-      if idx >= 0: return ktgInt(int64(idx + 1))  # 1-based
-      return ktgNone()
-    else:
-      raise KtgError(kind: "type", msg: "find expects block! or string!, got " & typeName(args[0]), data: nil)
-  )
+  block:
+    let findNative = KtgNative(
+      name: "find",
+      arity: 2,
+      refinements: @[RefinementSpec(name: "where", params: @[])],
+      fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
+        let eval = cast[Evaluator](ep)
+        if "where" in eval.currentRefinements:
+          # find/where block predicate — first element matching predicate
+          if args[0].kind != vkBlock:
+            raise KtgError(kind: "type", msg: "find/where expects block!", data: nil)
+          if not isCallable(args[1]):
+            raise KtgError(kind: "type", msg: "find/where expects function as predicate", data: nil)
+          for item in args[0].blockVals:
+            var predArgs = @[item]
+            var predPos = 0
+            let res = eval.callCallable(args[1], predArgs, predPos, eval.currentCtx)
+            if isTruthy(res): return item
+          return ktgNone()
+        case args[0].kind
+        of vkBlock:
+          for i, v in args[0].blockVals:
+            if valuesEqual(v, args[1]): return ktgInt(int64(i + 1))
+          return ktgNone()
+        of vkString:
+          let needle = $args[1]
+          let idx = args[0].strVal.find(needle)
+          if idx >= 0: return ktgInt(int64(idx + 1))
+          return ktgNone()
+        else:
+          raise KtgError(kind: "type", msg: "find expects block! or string!, got " & typeName(args[0]), data: nil)
+    )
+    ctx.set("find", KtgValue(kind: vkNative, nativeFn: findNative, line: 0))
 
   # --- reverse: unified for blocks and strings ---
 
@@ -519,6 +538,33 @@ proc registerNatives*(eval: Evaluator) =
       return ktgLogic(args[0].strVal.endsWith(args[1].strVal))
     raise KtgError(kind: "type", msg: "ends-with? expects string! and string!", data: nil)
   )
+
+  block:
+    let padNative = KtgNative(
+      name: "pad",
+      arity: 3,
+      refinements: @[RefinementSpec(name: "right", params: @[])],
+      fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
+        let eval = cast[Evaluator](ep)
+        let isRight = "right" in eval.currentRefinements
+        if args[0].kind == vkString:
+          let fill = $args[2]
+          let width = if args[1].kind == vkInteger: int(args[1].intVal) else: 0
+          var s = args[0].strVal
+          while s.len < width:
+            if isRight: s = s & fill
+            else: s = fill & s
+          return ktgString(s)
+        if args[0].kind == vkBlock:
+          let width = if args[1].kind == vkInteger: int(args[1].intVal) else: 0
+          var blk = ktgBlock(args[0].blockVals[0..^1])
+          while blk.blockVals.len < width:
+            if isRight: blk.blockVals.add(args[2])
+            else: blk.blockVals.insert(args[2], 0)
+          return blk
+        raise KtgError(kind: "type", msg: "pad expects string! or block!, got " & typeName(args[0]), data: nil)
+    )
+    ctx.set("pad", KtgValue(kind: vkNative, nativeFn: padNative, line: 0))
 
   ctx.native("split", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     if args[0].kind == vkString and args[1].kind == vkString:
@@ -1387,6 +1433,8 @@ proc registerNatives*(eval: Evaluator) =
       else: raise KtgError(kind: "type", msg: "cannot convert " & typeName(val) & " to float!", data: val)
 
     of "string!":
+      if val.kind == vkWord:
+        return ktgString(val.wordName)
       return ktgString($val)
 
     of "block!":
@@ -1916,3 +1964,127 @@ proc registerNatives*(eval: Evaluator) =
     systemCtx.set("platform", ktgWord("script", wkLitWord))
     systemCtx.set("env", KtgValue(kind: vkContext, ctx: envCtx, line: 0))
     ctx.set("system", KtgValue(kind: vkContext, ctx: systemCtx, line: 0))
+
+  # --- capture: declarative keyword extraction from blocks ---
+  # capture data [@source @then @retries]
+  #   @name    — greedy: captures everything from keyword to next keyword, strips self-references
+  #   @name/N  — exact: captures N values after keyword
+  # Returns a context with each keyword mapped to its captured value(s).
+  # Missing keywords are none. Single greedy value unwraps (no block wrapper).
+
+  ctx.native("capture", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    if args[0].kind != vkBlock:
+      raise KtgError(kind: "type", msg: "capture expects block! as first argument", data: nil)
+    if args[1].kind != vkBlock:
+      raise KtgError(kind: "type", msg: "capture expects block! as schema", data: nil)
+
+    let data = args[0].blockVals
+    let schema = args[1].blockVals
+
+    type CaptureSpec = object
+      keyword: string    ## the keyword to match (e.g., "source", "then", "field/required")
+      bindName: string   ## context key (same as keyword but sanitized)
+      exact: int         ## -1 = greedy, N = capture exactly N values
+
+    # Parse schema: extract keyword names and modes
+    var specs: seq[CaptureSpec] = @[]
+    var allKeywords: seq[string] = @[]  # all keyword names for boundary detection
+
+    for s in schema:
+      if s.kind != vkWord or s.wordKind != wkMetaWord:
+        continue
+      let fullName = s.wordName
+      # Split on / to check for /N suffix
+      let parts = fullName.split('/')
+      var keyword = fullName
+      var exact = -1  # -1 = greedy
+
+      # Check if last segment is a digit (exact count)
+      if parts.len >= 2:
+        var allDigits = true
+        for c in parts[^1]:
+          if c notin {'0'..'9'}:
+            allDigits = false
+            break
+        if allDigits and parts[^1].len > 0:
+          exact = parseInt(parts[^1])
+          keyword = parts[0 .. ^2].join("/")
+
+      specs.add(CaptureSpec(keyword: keyword, bindName: keyword, exact: exact))
+      allKeywords.add(keyword)
+
+    # Scan data block for keywords and capture values
+    let resultCtx = newContext()
+
+    # Initialize all captures to none
+    for spec in specs:
+      resultCtx.set(spec.bindName, ktgNone())
+
+    # Walk data looking for keywords
+    var pos = 0
+    while pos < data.len:
+      let val = data[pos]
+
+      # Check if this value matches a schema keyword
+      var matched = false
+      for spec in specs:
+        # Match: word with same name as keyword
+        if val.kind == vkWord and val.wordKind == wkWord and val.wordName == spec.keyword:
+          pos += 1  # skip the keyword word
+          matched = true
+
+          if spec.exact >= 0:
+            # Exact mode: capture exactly N values
+            var captured: seq[KtgValue] = @[]
+            for j in 0 ..< spec.exact:
+              if pos < data.len:
+                captured.add(data[pos])
+                pos += 1
+            # If already has a value, this keyword repeats — append
+            let existing = resultCtx.get(spec.bindName)
+            if existing.kind == vkNone:
+              if captured.len == 1:
+                resultCtx.set(spec.bindName, captured[0])
+              else:
+                resultCtx.set(spec.bindName, ktgBlock(captured))
+            else:
+              # Repeating: wrap existing into block if needed, append
+              var collected: seq[KtgValue] = @[]
+              if existing.kind == vkBlock:
+                for v in existing.blockVals:
+                  collected.add(v)
+              else:
+                collected.add(existing)
+              for v in captured:
+                collected.add(v)
+              resultCtx.set(spec.bindName, ktgBlock(collected))
+          else:
+            # Greedy mode: capture until next different keyword
+            var captured: seq[KtgValue] = @[]
+            while pos < data.len:
+              let cur = data[pos]
+              # Stop at a different keyword
+              if cur.kind == vkWord and cur.wordKind == wkWord and
+                 cur.wordName in allKeywords and cur.wordName != spec.keyword:
+                break
+              # Skip self-references (repeated keyword name)
+              if cur.kind == vkWord and cur.wordKind == wkWord and
+                 cur.wordName == spec.keyword:
+                pos += 1
+                continue
+              captured.add(cur)
+              pos += 1
+            # Unwrap single value
+            if captured.len == 0:
+              resultCtx.set(spec.bindName, ktgNone())
+            elif captured.len == 1:
+              resultCtx.set(spec.bindName, captured[0])
+            else:
+              resultCtx.set(spec.bindName, ktgBlock(captured))
+          break
+
+      if not matched:
+        pos += 1
+
+    KtgValue(kind: vkContext, ctx: resultCtx, line: 0)
+  )

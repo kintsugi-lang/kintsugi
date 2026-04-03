@@ -12,8 +12,21 @@ lerp: function [a b t] [
   a + ((b - a) * t)
 ]
 
+inverse-lerp: function [a b val] [
+  (val - a) / (b - a)
+]
+
+; Move val toward target by step amount per call.
+; approach 10 0 3  => 7  (moved 3 closer to 0)
+approach: function [val target step] [
+  if val < target [return min (val + step) target]
+  if val > target [return max (val - step) target]
+  val
+]
+
+; --- Easing ---
+
 ; Hermite interpolation — smooth ease in/out.
-; Input should be 0.0 to 1.0.
 smoothstep: function [t] [
   t * t * (3.0 - (2.0 * t))
 ]
@@ -23,12 +36,27 @@ smootherstep: function [t] [
   t * t * t * (t * ((t * 6.0) - 15.0) + 10.0)
 ]
 
-; Fractional part — useful for repeating animations.
+; Quadratic easing — t should be 0.0 to 1.0.
+; ease t           — ease-in (default)
+; ease/out t       — ease-out
+; ease/in/out t    — ease-in-out
+ease: function [t /in /out] [
+  if all [in out] [
+    return either t < 0.5 [
+      2.0 * t * t
+    ] [
+      -1.0 + ((4.0 - (2.0 * t)) * t)
+    ]
+  ]
+  if out [return t * (2.0 - t)]
+  t * t
+]
+
+; --- Fractional / sign ---
+
 fraction: function [n] [
   n - (floor n)
 ]
-
-; --- Sign & direction ---
 
 sign: function [n] [
   if n > 0 [return 1]
@@ -36,9 +64,14 @@ sign: function [n] [
   0
 ]
 
-; --- Distance & vectors (works with pairs) ---
+; --- Distance & vectors ---
 
-distance: function [a [pair!] b [pair!]] [
+; distance a b              — Euclidean (straight line)
+; distance/manhattan a b    — 4-directional grid (taxicab)
+; distance/chebyshev a b    — 8-directional grid (chess king)
+distance: function [a [pair!] b [pair!] /manhattan /chebyshev] [
+  if manhattan [return (abs a/x - b/x) + (abs a/y - b/y)]
+  if chebyshev [return max (abs a/x - b/x) (abs a/y - b/y)]
   dx: a/x - b/x
   dy: a/y - b/y
   sqrt (dx * dx + (dy * dy))
@@ -54,13 +87,31 @@ normalize: function [v [pair!]] [
   to pair! reduce [(round v/x / len) (round v/y / len)]
 ]
 
-; Rotate a pair by angle (degrees).
-rotate2d: function [v [pair!] angle] [
-  c: cos angle
-  s: sin angle
-  nx: (v/x * c) - (v/y * s)
-  ny: (v/x * s) + (v/y * c)
-  to pair! reduce [(round nx) (round ny)]
+angle-between: function [a [pair!] b [pair!]] [
+  atan2 (b/y - a/y) (b/x - a/x)
+]
+
+; --- Grid helpers ---
+; Convert between 1D index and 2D position for any grid width.
+
+grid-index: function [pos [pair!] width [integer!]] [
+  ((pos/y - 1) * width) + pos/x
+]
+
+grid-pos: function [index [integer!] width [integer!]] [
+  x: ((index - 1) % width) + 1
+  y: ((index - 1) / width) + 1
+  to pair! reduce [x (floor y)]
+]
+
+; --- Rect / AABB ---
+
+point-in-rect?: function [px py rx ry rw rh] [
+  all [(px >= rx) (px < (rx + rw)) (py >= ry) (py < (ry + rh))]
+]
+
+rects-overlap?: function [ax ay aw ah bx by bw bh] [
+  not any [(ax >= (bx + bw)) ((ax + aw) <= bx) (ay >= (by + bh)) ((ay + ah) <= by)]
 ]
 
 ; --- Wrapping ---
@@ -90,3 +141,4 @@ remap: function [val in-lo in-hi out-lo out-hi] [
   t: (val - in-lo) / (in-hi - in-lo)
   lerp out-lo out-hi t
 ]
+
