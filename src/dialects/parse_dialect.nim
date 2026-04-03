@@ -86,7 +86,7 @@ proc typeNameToKind(name: string): ValueKind =
   of "map!": vkMap
   of "set!": vkSet
   of "context!": vkContext
-  of "object!": vkObject
+  of "prototype!": vkPrototype
   of "function!": vkFunction
   of "native!": vkNative
   of "word!": vkWord

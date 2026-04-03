@@ -11,7 +11,7 @@ proc makeEval(): Evaluator =
   eval.registerNatives()
   eval.registerDialect(newLoopDialect())
   eval.registerMatch()
-  eval.registerObjectDialect()
+  eval.registerPrototypeDialect()
   eval.registerAttempt()
   eval.registerParse()
   eval

@@ -5,7 +5,7 @@
 ##   types-advanced.test.ts
 ##
 ## Note: @preprocess uses meta-word syntax, platform = "nim"
-## Note: import returns object! (frozen), not context!
+## Note: import returns context!
 ## Note: stdlib functions are defined inline (old .ktg files use TS syntax)
 ## Note: @type custom types are NOT implemented — marked FAILS
 
@@ -19,7 +19,7 @@ proc makeEval(): Evaluator =
   eval.registerNatives()
   eval.registerDialect(newLoopDialect())
   eval.registerMatch()
-  eval.registerObjectDialect()
+  eval.registerPrototypeDialect()
   eval.registerAttempt()
   eval.registerParse()
   eval
@@ -142,11 +142,10 @@ suite "Require — basic":
     check $eval.evalString("math/add 3 4") == "7"
     check $eval.evalString("math/mul 3 4") == "12"
 
-  test "import returns object!":
+  test "import returns context!":
     let eval = makeEval()
     discard eval.evalString("m: import \"" & testDir / "simple.ktg" & "\"")
-    # import returns object! (frozen context)
-    check $eval.evalString("object? m") == "true"
+    check $eval.evalString("context? m") == "true"
 
   test "header is consumed, not in returned context":
     let eval = makeEval()
@@ -189,7 +188,7 @@ suite "Require — caching":
 
 
 # =============================================================================
-# object.test.ts — tests not already covered by test_object.nim
+# object.test.ts — tests not already covered by test_object.nim (now prototype)
 # =============================================================================
 
 suite "Object — context tests (from object.test.ts)":

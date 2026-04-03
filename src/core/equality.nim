@@ -72,11 +72,11 @@ proc valuesEqual*(a, b: KtgValue): bool =
       if not valuesEqual(aVal, b.ctx.entries[key]): return false
     return true
 
-  of vkObject:
-    if a.obj.entries.len != b.obj.entries.len: return false
-    for key, aVal in a.obj.entries:
-      if key notin b.obj.entries: return false
-      if not valuesEqual(aVal, b.obj.entries[key]): return false
+  of vkPrototype:
+    if a.proto.entries.len != b.proto.entries.len: return false
+    for key, aVal in a.proto.entries:
+      if key notin b.proto.entries: return false
+      if not valuesEqual(aVal, b.proto.entries[key]): return false
     return true
 
   of vkSet:

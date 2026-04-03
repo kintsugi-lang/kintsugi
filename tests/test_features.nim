@@ -7,7 +7,7 @@ proc makeEval(): Evaluator =
   let eval = newEvaluator()
   eval.registerNatives()
   eval.registerDialect(newLoopDialect())
-  eval.registerObjectDialect()
+  eval.registerPrototypeDialect()
   eval
 
 suite "make map!":

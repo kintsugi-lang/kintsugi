@@ -7,25 +7,25 @@ proc makeEval(): Evaluator =
   let eval = newEvaluator()
   eval.registerNatives()
   eval.registerDialect(newLoopDialect())
-  eval.registerObjectDialect()
+  eval.registerPrototypeDialect()
   eval
 
-suite "object creation":
-  test "basic object creation":
+suite "prototype creation":
+  test "basic prototype creation":
     let eval = makeEval()
     let result = eval.evalString("""
-      Point: object [
+      Point: prototype [
         field/optional [x [integer!] 0]
         field/optional [y [integer!] 0]
       ]
       type Point
     """)
-    check $result == "object!"
+    check $result == "prototype!"
 
   test "make creates mutable instance":
     let eval = makeEval()
     let result = eval.evalString("""
-      Point: object [
+      Point: prototype [
         field/optional [x [integer!] 0]
         field/optional [y [integer!] 0]
       ]
@@ -37,7 +37,7 @@ suite "object creation":
   test "auto-generated constructor":
     let eval = makeEval()
     let result = eval.evalString("""
-      Point: object [
+      Point: prototype [
         field/required [x [integer!]]
         field/required [y [integer!]]
       ]
@@ -49,7 +49,7 @@ suite "object creation":
   test "auto-generated type predicate":
     let eval = makeEval()
     let result = eval.evalString("""
-      Point: object [
+      Point: prototype [
         field/required [x [integer!]]
         field/required [y [integer!]]
       ]
@@ -58,12 +58,12 @@ suite "object creation":
     """)
     check $result == "true"
 
-suite "object fields":
+suite "prototype fields":
   test "required field validation":
     let eval = makeEval()
     expect KtgError:
       discard eval.evalString("""
-        Person: object [
+        Person: prototype [
           field/required [name [string!]]
           field/required [age [integer!]]
         ]
@@ -74,7 +74,7 @@ suite "object fields":
     let eval = makeEval()
     expect KtgError:
       discard eval.evalString("""
-        Point: object [
+        Point: prototype [
           field/optional [x [integer!] 0]
           field/optional [y [integer!] 0]
         ]
@@ -84,7 +84,7 @@ suite "object fields":
   test "field with default is optional in make":
     let eval = makeEval()
     let result = eval.evalString("""
-      Config: object [
+      Config: prototype [
         field/required [host [string!]]
         field/optional [port [integer!] 8080]
       ]
@@ -96,7 +96,7 @@ suite "object fields":
   test "mixed required and defaulted fields":
     let eval = makeEval()
     let result = eval.evalString("""
-      Account: object [
+      Account: prototype [
         field/required [owner [string!]]
         field/optional [balance [integer!] 0]
         field/optional [active [logic!] true]
@@ -110,12 +110,12 @@ suite "object fields":
     """)
     check $result == "100"
 
-suite "object mutability":
-  test "object is immutable":
+suite "prototype mutability":
+  test "prototype is immutable":
     let eval = makeEval()
     expect KtgError:
       discard eval.evalString("""
-        Point: object [
+        Point: prototype [
           field/optional [x [integer!] 0]
           field/optional [y [integer!] 0]
         ]
@@ -125,7 +125,7 @@ suite "object mutability":
   test "instance is mutable":
     let eval = makeEval()
     let result = eval.evalString("""
-      Point: object [
+      Point: prototype [
         field/optional [x [integer!] 0]
         field/optional [y [integer!] 0]
       ]
@@ -135,11 +135,11 @@ suite "object mutability":
     """)
     check $result == "999"
 
-suite "object methods":
+suite "prototype methods":
   test "self binding":
     let eval = makeEval()
     let result = eval.evalString("""
-      Counter: object [
+      Counter: prototype [
         field/optional [count [integer!] 0]
         increment: function [] [
           self/count: self/count + 1
@@ -160,7 +160,7 @@ suite "object methods":
     let eval = makeEval()
     expect KtgError:
       discard eval.evalString("""
-        Thing: object [
+        Thing: prototype [
           field/optional [val [integer!] 0]
           rebind-self: function [] [
             self: 42
@@ -173,7 +173,7 @@ suite "object methods":
   test "methods with parameters":
     let eval = makeEval()
     let result = eval.evalString("""
-      Enemy: object [
+      Enemy: prototype [
         field/optional [hp [integer!] 100]
         damage: function [amount [integer!]] [
           self/hp: self/hp - amount
@@ -188,7 +188,7 @@ suite "object methods":
   test "methods alongside fields":
     let eval = makeEval()
     let result = eval.evalString("""
-      Greeter: object [
+      Greeter: prototype [
         field/required [name [string!]]
         greet: function [] [
           join "Hello, " self/name
@@ -199,11 +199,11 @@ suite "object methods":
     """)
     check $result == "Hello, World"
 
-suite "object instances":
+suite "prototype instances":
   test "independent instances":
     let eval = makeEval()
     let result = eval.evalString("""
-      Counter: object [
+      Counter: prototype [
         field/optional [count [integer!] 0]
         increment: function [] [
           self/count: self/count + 1
@@ -223,7 +223,7 @@ suite "object instances":
     expect KtgError:
       discard eval.evalString("""
         point!: 42
-        Point: object [
+        Point: prototype [
           field/optional [x [integer!] 0]
         ]
       """)

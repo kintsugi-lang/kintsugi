@@ -135,7 +135,7 @@ proc applyOp*(eval: Evaluator, op: string, left, right: KtgValue): KtgValue =
   case op
   of "=":  return ktgLogic(valuesEqual(left, right))
   of "==":
-    const nonScalar = {vkBlock, vkParen, vkMap, vkSet, vkContext, vkObject,
+    const nonScalar = {vkBlock, vkParen, vkMap, vkSet, vkContext, vkPrototype,
                        vkFunction, vkNative, vkOp}
     if left.kind in nonScalar or right.kind in nonScalar:
       raise KtgError(kind: "type",
@@ -228,11 +228,11 @@ proc applyInfix*(eval: Evaluator, result: var KtgValue,
       var methodFn: KtgValue
       if result.kind == vkContext:
         methodFn = result.ctx.get(methodName)
-      elif result.kind == vkObject:
-        methodFn = result.obj.get(methodName)
+      elif result.kind == vkPrototype:
+        methodFn = result.proto.get(methodName)
       else:
         raise KtgError(kind: "type",
-          msg: "-> requires context! or object!, got " & typeName(result),
+          msg: "-> requires context! or prototype!, got " & typeName(result),
           data: result)
       result = eval.callCallable(methodFn, vals, pos, ctx, result)
       continue
@@ -251,11 +251,7 @@ proc applyInfix*(eval: Evaluator, result: var KtgValue,
       let right = eval.evalNext(vals, pos, ctx)
       case next.wordName
       of "and":
-        if isTruthy(result) and isTruthy(right):
-          result = right
-        elif not isTruthy(result):
-          result = result
-        else:
+        if isTruthy(result):
           result = right
       of "or":
         if not isTruthy(result):
@@ -298,17 +294,17 @@ proc navigatePath*(eval: Evaluator, head: KtgValue, segments: seq[string],
       elif current.kind == vkContext:
         let key = $idx
         current = current.ctx.get(key)
-      elif current.kind == vkObject:
+      elif current.kind == vkPrototype:
         let key = $idx
-        current = current.obj.get(key)
+        current = current.proto.get(key)
       else:
         raise KtgError(kind: "type",
           msg: "cannot index " & typeName(current) & " with dynamic path", data: idx)
     # Static word segment: literal field lookup
     elif current.kind == vkContext:
       current = current.ctx.get(seg)
-    elif current.kind == vkObject:
-      current = current.obj.get(seg)
+    elif current.kind == vkPrototype:
+      current = current.proto.get(seg)
     elif current.kind == vkMap:
       if seg in current.mapEntries:
         current = current.mapEntries[seg]
@@ -372,7 +368,7 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
     return eval.evalBlock(val.parenVals, ctx)
 
   # --- Context/Object: return self ---
-  of vkContext, vkObject:
+  of vkContext, vkPrototype:
     return val
 
   # --- Function/Native: return self (encountered as value, not via word) ---
@@ -520,9 +516,9 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
               current = current.mapEntries[seg]
             else:
               raise KtgError(kind: "undefined", msg: seg & " not found in map", data: nil)
-          elif current.kind == vkObject:
+          elif current.kind == vkPrototype:
             raise KtgError(kind: "type",
-              msg: "cannot set path on object! (immutable)",
+              msg: "cannot set path on prototype! (immutable)",
               data: current)
           else:
             raise KtgError(kind: "type",
@@ -556,9 +552,9 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
           current.ctx.set(lastSeg, rhs)
         elif current.kind == vkMap:
           current.mapEntries[lastSeg] = rhs
-        elif current.kind == vkObject:
+        elif current.kind == vkPrototype:
           raise KtgError(kind: "type",
-            msg: "cannot set path on object! (immutable)",
+            msg: "cannot set path on prototype! (immutable)",
             data: current)
         else:
           raise KtgError(kind: "type",
@@ -566,15 +562,15 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
             data: current)
         return rhs
 
-      # Auto-generation for object! assignment
-      if rhs.kind == vkObject:
+      # Auto-generation for prototype! assignment
+      if rhs.kind == vkPrototype:
         let name = val.wordName
         let lowerName = toKebabCase(name)
         let customType = lowerName & "!"
         let constructorName = "make-" & lowerName
 
-        # Store the prototype name on the object
-        rhs.obj.name = name
+        # Store the prototype name on the prototype
+        rhs.proto.name = name
 
         # Check for name collisions
         if ctx.has(customType):
@@ -587,7 +583,7 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
             data: nil)
 
         # Register the type predicate: name? checks structural match
-        let fieldSpecs = rhs.obj.fieldSpecs
+        let fieldSpecs = rhs.proto.fieldSpecs
         ctx.set(customType, ktgType(customType))
 
         # Register type predicate function: checks if value has all fields

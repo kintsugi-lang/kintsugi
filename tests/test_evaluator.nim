@@ -170,10 +170,3 @@ suite "reduce":
     let eval = makeEval()
     check $eval.evalString("reduce [1 + 2 3 * 4]") == "[3 12]"
 
-suite "freeze":
-  test "freeze and frozen?":
-    let eval = makeEval()
-    discard eval.evalString("c: context [x: 10]")
-    check $eval.evalString("frozen? c") == "false"
-    discard eval.evalString("f: freeze c")
-    check $eval.evalString("frozen? f") == "true"

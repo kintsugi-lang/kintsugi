@@ -148,7 +148,7 @@ suite "issue 10 — money rounding":
   test "to money! from float uses round":
     let eval = makeEval()
     check $eval.evalString("to money! 19.99") == "$19.99"
-    check $eval.evalString("to money! -19.99") == "$-19.99"
+    check $eval.evalString("to money! -19.99") == "-$19.99"
 
 
 # ============================================================

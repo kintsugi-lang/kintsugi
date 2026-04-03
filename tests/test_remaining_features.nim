@@ -64,40 +64,6 @@ suite "rethrow":
     """) == "divide by zero"
 
 # ============================================================
-# Feature 3: freeze/deep
-# ============================================================
-
-suite "freeze/deep":
-  test "freeze/deep recursively freezes nested contexts":
-    let eval = makeEval()
-    let result = eval.evalString("""
-      inner: context [x: 1]
-      outer: context [child: inner]
-      frozen: freeze/deep outer
-      type frozen/child
-    """)
-    check $result == "object!"
-
-  test "regular freeze does not freeze nested contexts":
-    let eval = makeEval()
-    let result = eval.evalString("""
-      inner: context [x: 1]
-      outer: context [child: inner]
-      frozen: freeze outer
-      type frozen/child
-    """)
-    check $result == "context!"
-
-  test "freeze/deep preserves values":
-    let eval = makeEval()
-    check $eval.evalString("""
-      inner: context [val: 42]
-      outer: context [nested: inner]
-      frozen: freeze/deep outer
-      frozen/nested/val
-    """) == "42"
-
-# ============================================================
 # Feature 4: copy/deep
 # ============================================================
 

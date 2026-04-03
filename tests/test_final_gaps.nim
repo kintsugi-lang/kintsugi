@@ -9,7 +9,7 @@ proc makeEval(): Evaluator =
   eval.registerDialect(newLoopDialect())
   eval.registerMatch()
   eval.registerParse()
-  eval.registerObjectDialect()
+  eval.registerPrototypeDialect()
   eval
 
 

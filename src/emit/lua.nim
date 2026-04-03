@@ -9,7 +9,7 @@
 ##   - Type checks are ERASED — not emitted as runtime checks.
 ##   - `do`, `bind`, `compose` on dynamic blocks are COMPILE ERRORS.
 ##   - `match` specializes to if-chain.
-##   - `object` specializes to table + constructor function.
+##   - `prototype` specializes to table + constructor function.
 ##   - `loop` specializes to Lua for/ipairs loops.
 ##   - `#preprocess` runs at compile time (not in this file).
 ##   - `freeze`/`frozen?` are no-ops in compiled output.
@@ -140,7 +140,7 @@ proc initNativeBindings(): Table[string, BindingInfo] =
   # Type predicates — all arity 1
   for name in ["integer", "float", "string", "logic", "none", "money",
                "pair", "tuple", "date", "time", "file", "url", "email",
-               "block", "paren", "map", "set", "context", "object",
+               "block", "paren", "map", "set", "context", "prototype",
                "function", "native", "word", "type", "number"]:
     result[name & "?"] = nativeBinding(1)
   result["is?"] = nativeBinding(2)
@@ -207,8 +207,6 @@ proc initNativeBindings(): Table[string, BindingInfo] =
   # Context/Object
   result["context"] = nativeBinding(1)
   result["scope"] = nativeBinding(1)
-  result["freeze"] = nativeBinding(1)
-  result["frozen?"] = nativeBinding(1)
   result["words-of"] = nativeBinding(1)
   # Type conversion
   result["to"] = nativeBinding(2)
@@ -1119,7 +1117,7 @@ proc isTypePredicate(name: string): bool =
   name.endsWith("?") and name[0..^2] in [
     "none", "integer", "float", "string", "logic", "money",
     "pair", "tuple", "date", "time", "file", "url", "email",
-    "block", "paren", "map", "set", "context", "object",
+    "block", "paren", "map", "set", "context", "prototype",
     "function", "native", "word", "type", "number"
   ]
 
@@ -1144,7 +1142,7 @@ proc emitTypePredicateCall(e: var LuaEmitter, name: string, argExpr: string): st
     result = "(type(" & argExpr & ") == \"string\")"
   of "logic":
     result = "(type(" & argExpr & ") == \"boolean\")"
-  of "block", "context", "object", "map":
+  of "block", "context", "prototype", "map":
     result = "(type(" & argExpr & ") == \"table\")"
   of "function", "native":
     result = "(type(" & argExpr & ") == \"function\")"
@@ -1273,10 +1271,6 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
                    e.pad & "end)()"
         else:
           result = "nil"
-      elif name == "freeze/deep":
-        # No-op in compiled output, just pass through
-        result = e.emitExpr(vals, pos)
-
       # --- Dialect refinement paths (must come before generic path handler) ---
       elif name.startsWith("loop/") and name.split('/')[1] in ["collect", "fold", "partition"]:
         let refinement = name.split('/')[1]
@@ -1344,14 +1338,6 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
           # Unknown path — default to field access (safe: won't consume args)
           result = path
 
-      # --- Interpreter-only features: compile error ---
-      # --- No-ops: freeze/frozen? ---
-      elif name == "freeze":
-        result = e.emitExpr(vals, pos)
-
-      elif name == "frozen?":
-        discard e.emitExpr(vals, pos)
-        result = "false"
 
       # --- print ---
       elif name == "print":
@@ -1948,9 +1934,9 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
       parts.add(luaName(k) & " = " & emitLiteral(v))
     result = "{" & parts.join(", ") & "}"
 
-  of vkObject:
+  of vkPrototype:
     var parts: seq[string] = @[]
-    for k, v in val.obj.entries:
+    for k, v in val.proto.entries:
       parts.add(luaName(k) & " = " & emitLiteral(v))
     result = "{" & parts.join(", ") & "}"
 

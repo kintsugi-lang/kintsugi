@@ -79,8 +79,10 @@ my-email: user@example.com             ; email!
 ; --- Money ---
 ; money! is a precise numeric type stored as integer cents.
 ; No float drift -- $0.10 + $0.20 is exactly $0.30.
+; Negative money displays with leading minus: -$0.50, -$19.99
 
 my-money: $19.99                        ; money! (1999 cents)
+probe $0.00 - $0.50                     ; -$0.50 (sign preserved)
 
 ; --- Composite ---
 
@@ -96,7 +98,7 @@ my-paren: (1 + 2)                       ; paren! evaluates immediately: 3
 ;   op!        -- operator (infix symbol)
 ;   type!      -- type name value (integer!, string!, etc.)
 ;   context!   -- mutable key-value scope
-;   object!    -- immutable (frozen) key-value scope
+;   prototype! -- prototype with typed field specs
 ;   set!       -- unordered unique collection
 ;   map!       -- hash-based key-value store
 
@@ -708,6 +710,8 @@ probe pad [1 2] 5 0                     ; [0 0 0 1 2]
 probe pad/right [1] 4 none              ; [1 none none none]
 
 ; --- Character codes ---
+; byte: string -> integer (first byte's code)
+; char: integer -> string (0-255 range)
 print byte "A"                          ; 65
 print char 65                           ; A
 print char (byte "Z")                   ; Z
@@ -968,7 +972,6 @@ print outer/message                     ; boom
 ; 'range      -- index out of bounds
 ; 'parse      -- parse failed
 ; 'load       -- file not found, circular dependency
-; 'frozen     -- attempt to mutate object!
 ; 'make       -- required field missing in make
 ; 'self       -- attempt to rebind self
 ; 'user       -- raised explicitly by user code
@@ -1032,13 +1035,13 @@ print retry-count                       ; 3
 ; Contexts are the universal construct. Closures, objects,
 ; modules, and scopes are all contexts. Runtime type: context!
 ;
-; context! is mutable. object! is immutable (frozen).
-; freeze upgrades context! to object! (one-way).
+; context! is a mutable scope. prototype! is a context
+; with typed field specs (created by the prototype dialect).
 ;
 ; Created by:
 ;   context [...]  - explicit mutable context
 ;   function       - parameters and local words
-;   object [...]   - immutable prototype (object!)
+;   prototype [...]   - prototype with typed fields (prototype!)
 ;   make Prototype [...]  - mutable instance (context!)
 
 ; context creates a mutable environment
@@ -1052,17 +1055,6 @@ print point/x                           ; 30
 
 ; Introspection
 print words-of point                    ; [x y]
-
-; Freezing: context! -> object! (one-way, immutable)
-frozen-point: freeze point
-print frozen? frozen-point              ; true
-print frozen? point                     ; false
-; frozen-point/x: 99                    ; ERROR: cannot mutate frozen object
-
-; freeze/deep -- recursively freezes nested contexts
-; outer: context [inner: context [x: 1]]
-; frozen: freeze/deep outer
-; frozen/inner is also frozen (object!)
 
 ; copy/deep -- recursively copies nested blocks and contexts
 ; nested: [[1 2] [3 4]]
@@ -1117,6 +1109,19 @@ append c-block 5
 print size? a-block                     ; 4 (independent)
 print size? c-block                     ; 5
 
+; --- merge ---
+; merge combines two contexts. Second overwrites first.
+; Skips none values (useful with capture results).
+
+defaults: context [name: "Unknown" hp: 100 attack: 10]
+overrides: context [name: "Warrior" hp: 200]
+merge defaults overrides
+print defaults/name                     ; Warrior
+print defaults/hp                       ; 200
+print defaults/attack                   ; 10 (not in overrides, kept)
+
+; merge/deep copies blocks and contexts instead of sharing.
+
 ; --- @compose ---
 ; @compose evaluates parens inside a block. If a paren
 ; result is a block, its contents are SPLICED in (Rebol
@@ -1139,9 +1144,9 @@ probe second deep-code                  ; [nested]
 
 
 ; ============================================================
-; OBJECT DIALECT
+; PROTOTYPE DIALECT
 ; ============================================================
-; object defines a prototype with typed fields and methods.
+; prototype defines a prototype with typed fields and methods.
 ; make stamps instances from prototypes.
 ;
 ; Convention: prototypes use PascalCase -- Person, Card,
@@ -1161,7 +1166,7 @@ probe second deep-code                  ; [nested]
 
 ; --- Prototype with singular field syntax ---
 
-Counter: object [
+Counter: prototype [
   field/optional [n [integer!] 0]
 
   increment: function [] [self/n: self/n + 1]
@@ -1186,7 +1191,7 @@ print c2 -> value                       ; 3
 
 ; --- Required fields ---
 
-Person: object [
+Person: prototype [
   field/required [name [string!]]
   field/required [age [integer!]]
 
@@ -1211,7 +1216,7 @@ print p/age                             ; 31 (original unchanged)
 
 ; --- Mixed required and defaulted fields ---
 
-Account: object [
+Account: prototype [
   field/required [owner [string!]]
   field/optional [balance [money!] $0.00]
 
@@ -1233,7 +1238,7 @@ print acct2/summary                     ; Jo: $50.00
 
 ; --- Bulk field declaration with fields [...] ---
 
-Enemy: object [
+Enemy: prototype [
   fields [
     required [
       name [string!]
@@ -1258,11 +1263,11 @@ goblin/damage 25
 print goblin/hp                          ; 75
 
 ; --- Auto-generation ---
-; When assigned to a set-word, object auto-generates:
+; When assigned to a set-word, prototype auto-generates:
 ;   person!       -- custom type predicate
 ;   make-person   -- constructor function
 ;
-; Person: object [...] generates person! and make-person.
+; Person: prototype [...] generates person! and make-person.
 ; make-person takes required field values in declaration order.
 ;
 ; is? checks structural compatibility:
@@ -1273,11 +1278,11 @@ print goblin/hp                          ; 75
 ; Instances don't know where they came from.
 ; Compose via embedding:
 ;
-; Damageable: object [
+; Damageable: prototype [
 ;   field/optional [hp [integer!] 100]
 ;   damage: function [amount [integer!]] [self/hp: self/hp - amount]
 ; ]
-; Enemy: object [
+; Enemy: prototype [
 ;   field/required [stats [context!]]
 ;   field/optional [speed [float!] 40.0]
 ; ]
@@ -1530,7 +1535,6 @@ scope [
 ; save %file value        -> serialize value to file (round-trips with load/eval)
 ; load %file              -> parse file as Kintsugi data (block)
 ; load/eval %file         -> evaluate -> mutable context!
-; load/eval/freeze %file  -> evaluate + freeze -> immutable object!
 ;
 ; dir? %path              -> logic! (is it a directory?)
 ; file? %path             -> logic! (is it a file?)
@@ -1661,14 +1665,13 @@ raw "-- This is a Lua comment"
 ; Refinements determine how the file is processed:
 ;
 ;   load %file             -- parse as data, return context!
-;   load/eval %file        -- evaluate + freeze + cache = object!
-;   load/freeze %file      -- parse as data + freeze = object!
+;   load/eval %file        -- evaluate + cache = context!
 ;   load/header %file      -- return just the header block
 ;   load/fresh %file       -- skip cache for one call
 ;   import/fresh %file    -- import, bypassing cache
 ;
-; import is sugar for load/eval/freeze/cache. load is
-; the primitive. Results are immutable object! values,
+; import is sugar for load/eval/cache. load is
+; the primitive. Results are cached context! values,
 ; cached by absolute path.
 ; import/fresh forces a reload even if the module is cached.
 ;
@@ -1691,7 +1694,7 @@ raw "-- This is a Lua comment"
 ;
 ; --- Caching ---
 ; load/eval caches by fully resolved absolute path.
-; Every consumer gets the same immutable object! reference.
+; Every consumer gets the same cached context! reference.
 ;
 ; --- Circular dependencies ---
 ; Always an error:
@@ -1713,18 +1716,40 @@ raw "-- This is a Lua comment"
 ; Modules don't -- they're loaded via import.
 ;
 ; Header contents are optional metadata for tooling.
-; No required fields. No fields with language-level effects.
+; No required fields.
 ;
-; Common conventions:
+; Common fields:
 ;   name:       - module name (lit-word)
 ;   version:    - semantic version (tuple!)
 ;   date:       - last-modified date
 ;   file:       - source file path
+;   using:      - stdlib modules to unwrap as bare words
 ;
 ; Examples:
 ;   Kintsugi []                         ; entrypoint, no metadata
 ;   Kintsugi [version: 1.0.0]          ; entrypoint with metadata
+;   Kintsugi [using: [math]]           ; unwraps std/math into scope
 ;   (no header)                         ; module
+
+; --- Standard Library ---
+; The stdlib is silently namespaced under std/.
+; Always available without importing:
+;
+;   std/math/clamp 5 0 10
+;   std/math/lerp 0 100 0.5
+;   std/collections/range 1 10
+;   std/collections/unique [1 2 1 3]
+;
+; To use stdlib words without the std/ prefix, add using:
+; to the header:
+;
+;   Kintsugi [using: [math collections]]
+;   clamp 5 0 10            ; bare word, unwrapped from std/math
+;   range 1 10              ; bare word, unwrapped from std/collections
+;
+; User modules are always explicit:
+;   sprites: import %lib/sprites.ktg
+;   sprites/draw player
 
 
 ; ============================================================
@@ -1772,7 +1797,7 @@ print if [] ["empty block is truthy"]  ; empty block is truthy
 ;   byte "A"    -> 65
 ;   char 65     -> "A"
 
-; object uses field keyword with typed fields.
+; prototype uses field keyword with typed fields.
 ; See Object Dialect above for the full prototype model.
 
 ; first [hello] returns word!, not lit-word!
@@ -1792,7 +1817,7 @@ print if [] ["empty block is truthy"]  ; empty block is truthy
 ; See Error Handling above for: try returns a context.
 ; See Parse Dialect above for: parse returns a context.
 ; See Datatypes above for: money! is cents-based.
-; See Modules above for: import = load/eval/freeze/cache.
+; See Modules above for: import = load/eval/cache.
 
 
 ; ============================================================
@@ -1835,7 +1860,7 @@ probe fib 10                            ; 0 1 1 2 3 5 8 13 21 34
 
 traffic-light-color!: @type/enum ['red | 'yellow | 'green]
 
-TrafficLight: object [
+TrafficLight: prototype [
   field/optional [state [traffic-light-color!] 'red]
   field/optional [timer [integer!] 0]
 

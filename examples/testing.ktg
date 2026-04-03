@@ -9,7 +9,7 @@ Bob,78,82,88
 Charlie,95,91,87
 Diana,88,94,96}
 
-StudentRecord: object [
+StudentRecord: prototype [
   name [string!]
   scores [block!] @default []
   average: function [] [

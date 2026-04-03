@@ -391,9 +391,11 @@ proc nextToken*(lex: var Lexer): KtgValue =
     return ktgWord("|", wkWord, startLine)
 
 
-  # unrecognized — skip and warn
-  discard lex.advance
-  return lex.nextToken
+  # unrecognized character
+  let bad = lex.advance
+  raise KtgError(kind: "parse",
+    msg: "unexpected character '" & $bad & "' (code " & $ord(bad) & ") at line " & $startLine,
+    data: nil)
 
 
 proc tokenize*(src: string): seq[KtgValue] =

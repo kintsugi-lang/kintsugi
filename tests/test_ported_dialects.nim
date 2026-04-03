@@ -8,7 +8,7 @@ proc makeEval(): Evaluator =
   eval.registerNatives()
   eval.registerDialect(newLoopDialect())
   eval.registerMatch()
-  eval.registerObjectDialect()
+  eval.registerPrototypeDialect()
   eval.registerAttempt()
   eval.registerParse()
   eval
@@ -815,10 +815,10 @@ suite "is? tests":
     check $eval.evalString("""is? ['x integer!] [x 10]""") == "true"
 
 # ============================================================
-# OBJECT DIALECT TESTS (from object-dialect.test.ts)
+# PROTOTYPE DIALECT TESTS (from object-dialect.test.ts)
 # ============================================================
 
-suite "Object dialect tests":
+suite "Prototype dialect tests":
   # -- make clones context --
 
   test "clone context with overrides":
@@ -840,12 +840,12 @@ suite "Object dialect tests":
     discard eval.evalString("p2: make p []")
     check $eval.evalString("p2/x") == "10"
 
-  # -- object dialect --
+  # -- prototype dialect --
 
-  test "basic object with fields and methods":
+  test "basic prototype with fields and methods":
     let eval = makeEval()
     discard eval.evalString("""
-      Person: object [
+      Person: prototype [
         field/required [name [string!]]
         field/required [age [integer!]]
         greet: function [] [
@@ -859,7 +859,7 @@ suite "Object dialect tests":
   test "field access on prototype":
     let eval = makeEval()
     discard eval.evalString("""
-      Point: object [
+      Point: prototype [
         field/optional [x [integer!] 0]
         field/optional [y [integer!] 0]
       ]
@@ -870,7 +870,7 @@ suite "Object dialect tests":
   test "make instance with overrides":
     let eval = makeEval()
     discard eval.evalString("""
-      Point: object [
+      Point: prototype [
         field/optional [x [integer!] 0]
         field/optional [y [integer!] 0]
       ]
@@ -882,7 +882,7 @@ suite "Object dialect tests":
   test "mixed required and defaulted fields with money":
     let eval = makeEval()
     discard eval.evalString("""
-      Account: object [
+      Account: prototype [
         field/required [owner [string!]]
         field/optional [balance [money!] $0.00]
         deposit: function [amount [money!]] [
@@ -897,7 +897,7 @@ suite "Object dialect tests":
   test "methods see self":
     let eval = makeEval()
     discard eval.evalString("""
-      Person: object [
+      Person: prototype [
         field/optional [name [string!] none]
         field/optional [age [integer!] 0]
         greet: function [] [
@@ -911,7 +911,7 @@ suite "Object dialect tests":
   test "methods can mutate via self":
     let eval = makeEval()
     discard eval.evalString("""
-      Counter: object [
+      Counter: prototype [
         field/optional [n [integer!] 0]
         increment: function [] [
           self/n: self/n + 1
@@ -927,7 +927,7 @@ suite "Object dialect tests":
   test "self refers to instance, not prototype":
     let eval = makeEval()
     discard eval.evalString("""
-      Thing: object [
+      Thing: prototype [
         field/optional [x [integer!] 0]
         get-x: function [] [self/x]
       ]
@@ -940,7 +940,7 @@ suite "Object dialect tests":
   test "mutation via self/field persists":
     let eval = makeEval()
     discard eval.evalString("""
-      Counter: object [
+      Counter: prototype [
         field/optional [n [integer!] 0]
         increment: function [] [self/n: self/n + 1]
         value: function [] [self/n]
@@ -955,7 +955,7 @@ suite "Object dialect tests":
   test "mutation on one instance does not affect another":
     let eval = makeEval()
     discard eval.evalString("""
-      Counter: object [
+      Counter: prototype [
         field/optional [n [integer!] 0]
         increment: function [] [self/n: self/n + 1]
       ]
@@ -968,12 +968,12 @@ suite "Object dialect tests":
     check $eval.evalString("a/n") == "2"
     check $eval.evalString("b/n") == "1"
 
-  # -- object type checking --
+  # -- prototype type checking --
 
   test "is? checks against prototype":
     let eval = makeEval()
     discard eval.evalString("""
-      Person: object [
+      Person: prototype [
         field/optional [name [string!] none]
         field/optional [age [integer!] 0]
       ]
@@ -984,7 +984,7 @@ suite "Object dialect tests":
   test "is? rejects non-matching context":
     let eval = makeEval()
     discard eval.evalString("""
-      Person: object [
+      Person: prototype [
         field/optional [name [string!] none]
         field/optional [age [integer!] 0]
       ]
@@ -995,7 +995,7 @@ suite "Object dialect tests":
   test "is? rejects non-context value":
     let eval = makeEval()
     discard eval.evalString("""
-      Person: object [
+      Person: prototype [
         field/optional [name [string!] none]
       ]
     """)
@@ -1006,7 +1006,7 @@ suite "Object dialect tests":
   test "auto-generated person!":
     let eval = makeEval()
     discard eval.evalString("""
-      Person: object [
+      Person: prototype [
         field/required [name [string!]]
         field/required [age [integer!]]
       ]
@@ -1017,7 +1017,7 @@ suite "Object dialect tests":
   test "person! rejects non-matching context":
     let eval = makeEval()
     discard eval.evalString("""
-      Person: object [
+      Person: prototype [
         field/required [name [string!]]
         field/required [age [integer!]]
       ]
@@ -1026,7 +1026,7 @@ suite "Object dialect tests":
 
   test "PascalCase to kebab-case conversion":
     let eval = makeEval()
-    discard eval.evalString("CardReader: object [field/optional [events [block!] []]]")
+    discard eval.evalString("CardReader: prototype [field/optional [events [block!] []]]")
     discard eval.evalString("r: make CardReader []")
     check $eval.evalString("is? card-reader! r") == "true"
 
@@ -1035,7 +1035,7 @@ suite "Object dialect tests":
   test "make-person with required fields":
     let eval = makeEval()
     discard eval.evalString("""
-      Person: object [
+      Person: prototype [
         field/required [name [string!]]
         field/required [age [integer!]]
       ]
@@ -1044,10 +1044,10 @@ suite "Object dialect tests":
     check $eval.evalString("p/name") == "Ray"
     check $eval.evalString("p/age") == "30"
 
-  test "zero-arg constructor for all-defaulted object":
+  test "zero-arg constructor for all-defaulted prototype":
     let eval = makeEval()
     discard eval.evalString("""
-      Counter: object [
+      Counter: prototype [
         field/optional [n [integer!] 0]
         increment: function [] [self/n: self/n + 1]
         value: function [] [self/n]
@@ -1061,7 +1061,7 @@ suite "Object dialect tests":
   test "self works on constructed instances":
     let eval = makeEval()
     discard eval.evalString("""
-      Thing: object [
+      Thing: prototype [
         field/required [x [integer!]]
         get-x: function [] [self/x]
       ]
@@ -1074,7 +1074,7 @@ suite "Object dialect tests":
   test "PascalCase to kebab-case in constructor name":
     let eval = makeEval()
     discard eval.evalString("""
-      CardReader: object [
+      CardReader: prototype [
         field/optional [events [block!] []]
       ]
       r: make-card-reader
@@ -1085,7 +1085,7 @@ suite "Object dialect tests":
   test "constructed instance passes type check":
     let eval = makeEval()
     discard eval.evalString("""
-      Person: object [
+      Person: prototype [
         field/required [name [string!]]
         field/required [age [integer!]]
       ]
@@ -1093,14 +1093,14 @@ suite "Object dialect tests":
     """)
     check $eval.evalString("is? person! p") == "true"
 
-  # -- object immutability --
+  # -- prototype immutability --
 
-  test "object immutability":
+  test "prototype immutability":
     let eval = makeEval()
     var caught = false
     try:
       discard eval.evalString("""
-        Point: object [
+        Point: prototype [
           field/optional [x [integer!] 0]
           field/optional [y [integer!] 0]
         ]
@@ -1116,7 +1116,7 @@ suite "Object dialect tests":
   test "instance mutability":
     let eval = makeEval()
     discard eval.evalString("""
-      Point: object [
+      Point: prototype [
         field/optional [x [integer!] 0]
         field/optional [y [integer!] 0]
       ]
@@ -1132,7 +1132,7 @@ suite "Object dialect tests":
     var caught = false
     try:
       discard eval.evalString("""
-        Thing: object [
+        Thing: prototype [
           field/optional [val [integer!] 0]
           rebind-self: function [] [
             self: 42
@@ -1153,7 +1153,7 @@ suite "Object dialect tests":
     try:
       discard eval.evalString("""
         point!: 42
-        Point: object [
+        Point: prototype [
           field/optional [x [integer!] 0]
         ]
       """)
@@ -1167,7 +1167,7 @@ suite "Object dialect tests":
   test "methods with parameters":
     let eval = makeEval()
     discard eval.evalString("""
-      Enemy: object [
+      Enemy: prototype [
         field/optional [hp [integer!] 100]
         damage: function [amount [integer!]] [
           self/hp: self/hp - amount
@@ -1183,7 +1183,7 @@ suite "Object dialect tests":
   test "independent instances":
     let eval = makeEval()
     discard eval.evalString("""
-      Counter: object [
+      Counter: prototype [
         field/optional [count [integer!] 0]
         increment: function [] [
           self/count: self/count + 1
@@ -1204,7 +1204,7 @@ suite "Object dialect tests":
     var caught = false
     try:
       discard eval.evalString("""
-        Person: object [
+        Person: prototype [
           field/required [name [string!]]
           field/required [age [integer!]]
         ]
@@ -1222,7 +1222,7 @@ suite "Object dialect tests":
     var caught = false
     try:
       discard eval.evalString("""
-        Point: object [
+        Point: prototype [
           field/optional [x [integer!] 0]
           field/optional [y [integer!] 0]
         ]

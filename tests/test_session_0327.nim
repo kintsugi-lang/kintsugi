@@ -14,7 +14,7 @@ proc makeEval(): Evaluator =
   eval.registerNatives()
   eval.registerDialect(newLoopDialect())
   eval.registerMatch()
-  eval.registerObjectDialect()
+  eval.registerPrototypeDialect()
   eval.registerAttempt()
   eval.registerParse()
   eval
@@ -392,7 +392,7 @@ suite "byte and char":
 
   test "char out of range errors":
     let eval = makeEval()
-    discard eval.evalString("result: try [char 200]")
+    discard eval.evalString("result: try [char 300]")
     check $eval.evalString("result/ok") == "false"
 
 suite "print/no-newline":
@@ -608,12 +608,6 @@ suite "unified I/O":
     discard eval.evalString("""write %/tmp/ktg-load-mut.ktg "x: 1" """)
     discard eval.evalString("""c: load/eval %/tmp/ktg-load-mut.ktg""")
     check $eval.evalString("context? c") == "true"
-
-  test "load/eval/freeze returns frozen object":
-    let eval = makeEval()
-    discard eval.evalString("""write %/tmp/ktg-load-frz.ktg "x: 1" """)
-    discard eval.evalString("""o: load/eval/freeze %/tmp/ktg-load-frz.ktg""")
-    check $eval.evalString("object? o") == "true"
 
   test "read on nonexistent errors":
     let eval = makeEval()

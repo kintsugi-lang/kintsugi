@@ -24,7 +24,7 @@ proc makeEval(): Evaluator =
   eval.registerNatives()
   eval.registerDialect(newLoopDialect())
   eval.registerMatch()
-  eval.registerObjectDialect()
+  eval.registerPrototypeDialect()
   eval.registerAttempt()
   eval.registerParse()
   eval
@@ -699,14 +699,6 @@ suite "Do and reduce":
   test "reduce block":
     let eval = makeEval()
     check $eval.evalString("reduce [1 + 2 3 * 4]") == "[3 12]"
-
-suite "Freeze":
-  test "frozen?":
-    let eval = makeEval()
-    discard eval.evalString("c: context [x: 10]")
-    check $eval.evalString("frozen? c") == "false"
-    discard eval.evalString("f: freeze c")
-    check $eval.evalString("frozen? f") == "true"
 
 suite "String operations":
   test "join":

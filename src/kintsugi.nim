@@ -8,21 +8,107 @@
 ##   kintsugi -c <file> -o <out> — compile to specific output
 ##   kintsugi -c <file|dir> --dry-run — print compiled Lua to stdout
 
-import std/[os, strutils, algorithm]
+import std/[os, strutils, algorithm, tables]
 import core/types
 import parse/parser
 import eval/[dialect, evaluator, natives]
 import emit/lua
 import dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect, parse_dialect]
 
+proc hasHeader(source: string): bool =
+  source.strip.startsWith("Kintsugi")
+
+proc stripHeader(source: string): string =
+  ## Strip Kintsugi [...] header if present.
+  let trimmed = source.strip
+  if not trimmed.startsWith("Kintsugi"):
+    return source
+  var depth = 0
+  var inHeader = false
+  for i in 0 ..< source.len:
+    if source[i] == '[' and not inHeader:
+      inHeader = true
+      depth = 1
+    elif source[i] == '[' and inHeader:
+      depth += 1
+    elif source[i] == ']' and inHeader:
+      depth -= 1
+      if depth == 0:
+        return source[i+1 .. ^1]
+  source
+
+proc loadStdlib(eval: Evaluator) =
+  ## Load stdlib modules under std/math, std/collections.
+  let stdCtx = newContext()
+  let libDir = getAppDir() / "lib"
+  # Fallback: try relative to CWD
+  let searchDirs = [libDir, getCurrentDir() / "lib"]
+
+  for dir in searchDirs:
+    let mathPath = dir / "math.ktg"
+    let collectionsPath = dir / "collections.ktg"
+    if fileExists(mathPath) and fileExists(collectionsPath):
+      # Load math
+      let mathSource = stripHeader(readFile(mathPath))
+      let mathCtx = newContext(eval.global)
+      discard eval.evalBlock(parseSource(mathSource), mathCtx)
+      stdCtx.set("math", KtgValue(kind: vkContext, ctx: mathCtx, line: 0))
+
+      # Load collections
+      let colSource = stripHeader(readFile(collectionsPath))
+      let colCtx = newContext(eval.global)
+      discard eval.evalBlock(parseSource(colSource), colCtx)
+      stdCtx.set("collections", KtgValue(kind: vkContext, ctx: colCtx, line: 0))
+      break
+
+  eval.global.set("std", KtgValue(kind: vkContext, ctx: stdCtx, line: 0))
+
+proc applyUsing(eval: Evaluator, names: seq[KtgValue]) =
+  ## Unwrap std modules into global scope.
+  for name in names:
+    if name.kind == vkWord and name.wordKind == wkWord:
+      let moduleName = name.wordName
+      if eval.global.has("std"):
+        let std = eval.global.get("std")
+        if std.kind == vkContext and std.ctx.has(moduleName):
+          let module = std.ctx.get(moduleName)
+          if module.kind == vkContext:
+            for key, val in module.ctx.entries.pairs:
+              eval.global.set(key, val)
+
+proc parseHeader(source: string): (string, seq[KtgValue]) =
+  ## Extract using block from Kintsugi [...] header.
+  ## Returns (body-after-header, using-names).
+  let trimmed = source.strip
+  if not trimmed.startsWith("Kintsugi"):
+    return (source, @[])
+
+  # Parse the header block
+  let ast = parseSource(source)
+  var usingNames: seq[KtgValue] = @[]
+  if ast.len >= 2 and ast[0].kind == vkWord and ast[0].wordName == "Kintsugi" and
+     ast[1].kind == vkBlock:
+    let header = ast[1].blockVals
+    var i = 0
+    while i < header.len:
+      if header[i].kind == vkWord and header[i].wordKind == wkSetWord and
+         header[i].wordName == "using":
+        i += 1
+        if i < header.len and header[i].kind == vkBlock:
+          usingNames = header[i].blockVals
+      i += 1
+
+  (stripHeader(source), usingNames)
+
 proc setupEval(): Evaluator =
   let eval = newEvaluator()
   eval.registerNatives()
   eval.registerDialect(newLoopDialect())
   eval.registerMatch()
-  eval.registerObjectDialect()
+  eval.registerPrototypeDialect()
   eval.registerAttempt()
   eval.registerParse()
+  eval.loadStdlib()
   eval
 
 proc repl() =
@@ -58,27 +144,6 @@ proc repl() =
     except CatchableError as e:
       echo "Error: " & e.msg
 
-proc hasHeader(source: string): bool =
-  source.strip.startsWith("Kintsugi")
-
-proc stripHeader(source: string): string =
-  ## Strip Kintsugi [...] header if present.
-  let trimmed = source.strip
-  if not trimmed.startsWith("Kintsugi"):
-    return source
-  var depth = 0
-  var inHeader = false
-  for i in 0 ..< source.len:
-    if source[i] == '[' and not inHeader:
-      inHeader = true
-      depth = 1
-    elif source[i] == '[' and inHeader:
-      depth += 1
-    elif source[i] == ']' and inHeader:
-      depth -= 1
-      if depth == 0:
-        return source[i+1 .. ^1]
-  source
 
 proc collectKtgFiles(dir: string): seq[string] =
   for f in walkDir(dir):
@@ -93,8 +158,11 @@ proc runSingleFile(path: string, eval: Evaluator = nil) =
     echo "Error: file not found: " & path
     quit(1)
 
-  let source = stripHeader(readFile(path))
+  let rawSource = readFile(path)
+  let (source, usingNames) = parseHeader(rawSource)
   let e = if eval != nil: eval else: setupEval()
+  if usingNames.len > 0:
+    applyUsing(e, usingNames)
 
   try:
     discard e.evalString(source)

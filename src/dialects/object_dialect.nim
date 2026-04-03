@@ -2,7 +2,7 @@ import std/[tables, sets]
 import ../core/types
 import ../eval/[dialect, evaluator]
 
-## Object dialect — prototype-based object system.
+## Prototype dialect — prototype-based object system.
 ##
 ## Field declarations:
 ##   field/required [name [type!]]              — one required field
@@ -13,17 +13,17 @@ import ../eval/[dialect, evaluator]
 ##   ]
 ##
 ## `make Prototype [overrides]` — stamps a mutable context! (instance)
-## Auto-generation: Person: object [...] → person!, person?, make-person
+## Auto-generation: Person: prototype [...] → person!, person?, make-person
 
 
 proc parseRequiredField(blk: seq[KtgValue], pos: var int): FieldSpec =
   ## Parse one required field: name [type!]
   if pos >= blk.len or blk[pos].kind != vkWord or blk[pos].wordKind != wkWord:
-    raise KtgError(kind: "object", msg: "expected field name", data: nil)
+    raise KtgError(kind: "prototype", msg: "expected field name", data: nil)
   let name = blk[pos].wordName
   pos += 1
   if pos >= blk.len or blk[pos].kind != vkBlock or blk[pos].blockVals.len == 0:
-    raise KtgError(kind: "object", msg: "expected type block [type!] for field '" & name & "'", data: nil)
+    raise KtgError(kind: "prototype", msg: "expected type block [type!] for field '" & name & "'", data: nil)
   let typeName = $blk[pos].blockVals[0]
   pos += 1
   FieldSpec(name: name, typeName: typeName, hasDefault: false, defaultVal: nil)
@@ -33,15 +33,15 @@ proc parseOptionalField(blk: seq[KtgValue], pos: var int, eval: Evaluator, ctx: 
   ## Parse one optional field: name [type!] default
   ## Default value is evaluated.
   if pos >= blk.len or blk[pos].kind != vkWord or blk[pos].wordKind != wkWord:
-    raise KtgError(kind: "object", msg: "expected field name", data: nil)
+    raise KtgError(kind: "prototype", msg: "expected field name", data: nil)
   let name = blk[pos].wordName
   pos += 1
   if pos >= blk.len or blk[pos].kind != vkBlock or blk[pos].blockVals.len == 0:
-    raise KtgError(kind: "object", msg: "expected type block [type!] for field '" & name & "'", data: nil)
+    raise KtgError(kind: "prototype", msg: "expected type block [type!] for field '" & name & "'", data: nil)
   let typeName = $blk[pos].blockVals[0]
   pos += 1
   if pos >= blk.len:
-    raise KtgError(kind: "object", msg: "expected default value for field '" & name & "'", data: nil)
+    raise KtgError(kind: "prototype", msg: "expected default value for field '" & name & "'", data: nil)
   # Evaluate the default value
   let defaultVal = eval.evalNext(blk, pos, ctx)
   FieldSpec(name: name, typeName: typeName, hasDefault: true, defaultVal: defaultVal)
@@ -58,7 +58,7 @@ proc parseFieldsBlock(blk: seq[KtgValue], eval: Evaluator, ctx: KtgContext): seq
       of "required":
         pos += 1
         if pos >= blk.len or blk[pos].kind != vkBlock:
-          raise KtgError(kind: "object", msg: "required expects a block", data: nil)
+          raise KtgError(kind: "prototype", msg: "required expects a block", data: nil)
         let reqBlock = blk[pos].blockVals
         pos += 1
         var rpos = 0
@@ -67,7 +67,7 @@ proc parseFieldsBlock(blk: seq[KtgValue], eval: Evaluator, ctx: KtgContext): seq
       of "optional":
         pos += 1
         if pos >= blk.len or blk[pos].kind != vkBlock:
-          raise KtgError(kind: "object", msg: "optional expects a block", data: nil)
+          raise KtgError(kind: "prototype", msg: "optional expects a block", data: nil)
         let optBlock = blk[pos].blockVals
         pos += 1
         var opos = 0
@@ -80,9 +80,9 @@ proc parseFieldsBlock(blk: seq[KtgValue], eval: Evaluator, ctx: KtgContext): seq
   specs
 
 
-proc parseObjectBlock(blk: seq[KtgValue], bodyStart: var int,
+proc parsePrototypeBlock(blk: seq[KtgValue], bodyStart: var int,
                        eval: Evaluator, ctx: KtgContext): seq[FieldSpec] =
-  ## Walk the object spec block. Extract field declarations.
+  ## Walk the prototype spec block. Extract field declarations.
   ## Supports:
   ##   field/required [name [type!]]
   ##   field/optional [name [type!] default]
@@ -136,25 +136,25 @@ proc cloneFuncWithSelf(fn: KtgFunc, selfCtx: KtgContext): KtgFunc =
   )
 
 
-proc registerObjectDialect*(eval: Evaluator) =
+proc registerPrototypeDialect*(eval: Evaluator) =
   let ctx = eval.global
 
-  # --- object native: arity 1 (takes a spec block) ---
+  # --- prototype native: arity 1 (takes a spec block) ---
 
-  ctx.set("object", KtgValue(kind: vkNative,
-    nativeFn: KtgNative(name: "object", arity: 1, fn: proc(
+  ctx.set("prototype", KtgValue(kind: vkNative,
+    nativeFn: KtgNative(name: "prototype", arity: 1, fn: proc(
         args: seq[KtgValue], ep: pointer): KtgValue =
       let eval = cast[Evaluator](ep)
       let spec = args[0]
 
       if spec.kind != vkBlock:
-        raise KtgError(kind: "type", msg: "object expects a spec block", data: spec)
+        raise KtgError(kind: "type", msg: "prototype expects a spec block", data: spec)
 
       let blk = spec.blockVals
 
       # Parse field declarations
       var bodyStart = 0
-      var fieldSpecs = parseObjectBlock(blk, bodyStart, eval, eval.currentCtx)
+      var fieldSpecs = parsePrototypeBlock(blk, bodyStart, eval, eval.currentCtx)
 
       # Build entries — start with field defaults or none
       var entries = initOrderedTable[string, KtgValue]()
@@ -177,8 +177,8 @@ proc registerObjectDialect*(eval: Evaluator) =
         for key, val in bodyCtx.entries:
           entries[key] = val
 
-      let obj = newObject(entries, fieldSpecs)
-      KtgValue(kind: vkObject, obj: obj, line: 0)
+      let proto = newPrototype(entries, fieldSpecs)
+      KtgValue(kind: vkPrototype, proto: proto, line: 0)
     ),
     line: 0))
 
@@ -222,14 +222,14 @@ proc registerObjectDialect*(eval: Evaluator) =
       var fieldSpecs: seq[FieldSpec] = @[]
 
       case source.kind
-      of vkObject:
-        sourceEntries = source.obj.entries
-        fieldSpecs = source.obj.fieldSpecs
+      of vkPrototype:
+        sourceEntries = source.proto.entries
+        fieldSpecs = source.proto.fieldSpecs
       of vkContext:
         sourceEntries = source.ctx.entries
       else:
         raise KtgError(kind: "type",
-          msg: "make expects an object! or context! as first argument, got " & typeName(source),
+          msg: "make expects a prototype! or context! as first argument, got " & typeName(source),
           data: source)
 
       let instance = newContext(eval.global)
