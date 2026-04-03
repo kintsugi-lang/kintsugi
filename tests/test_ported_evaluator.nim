@@ -12,7 +12,7 @@
 ##   7. Only `false` and `none` are falsy
 ##   8. `size?` is canonical, `length?` is alias
 ##   9. Lifecycle hooks — marked FAILS if not implemented
-##  10. `do`, `compose`, `bind` — kept, marked FAILS if not implemented
+##  10. `do`, `bind` removed; `compose` → `@compose` stdlib native
 
 import std/unittest
 import ../src/core/types
@@ -404,43 +404,8 @@ suite "To word types":
     check result.blockVals[0].strVal == "hello"
 
 # =============================================================================
-# homoiconic.test.ts — bind
+# homoiconic.test.ts — bind (REMOVED — bind is no longer a native word)
 # =============================================================================
-
-suite "Bind":
-  test "bind words to context":
-    let eval = makeEval()
-    discard eval.evalString("point: context [x: 10 y: 20]")
-    discard eval.evalString("code: [x + y]")
-    discard eval.evalString("bind code point")
-    check $eval.evalString("do code") == "30"
-
-  test "bind mutates block":
-    let eval = makeEval()
-    discard eval.evalString("env: context [a: 99]")
-    discard eval.evalString("blk: [a]")
-    discard eval.evalString("bind blk env")
-    check $eval.evalString("do blk") == "99"
-
-  test "bind does not affect unbound":
-    let eval = makeEval()
-    discard eval.evalString("env: context [x: 5]")
-    discard eval.evalString("y: 10")
-    discard eval.evalString("code: [x + y]")
-    discard eval.evalString("bind code env")
-    check $eval.evalString("do code") == "15"
-
-  test "bind nested blocks":
-    let eval = makeEval()
-    discard eval.evalString("env: context [n: 42]")
-    discard eval.evalString("code: [if true [n]]")
-    discard eval.evalString("bind code env")
-    check $eval.evalString("do code") == "42"
-
-  test "bind returns block":
-    let eval = makeEval()
-    discard eval.evalString("env: context [x: 7]")
-    check $eval.evalString("do bind [x] env") == "7"
 
 # =============================================================================
 # homoiconic.test.ts — words-of
@@ -462,23 +427,18 @@ suite "Compose and code generation":
   test "compose set-word builds code":
     let eval = makeEval()
     discard eval.evalString("field: \"greeting\"")
-    discard eval.evalString("code: compose [(to set-word! field) \"hello world\"]")
-    discard eval.evalString("do code")
+    discard eval.evalString("code: @compose [(to set-word! field) \"hello world\"]")
+    discard eval.evalString("reduce code")
     check $eval.evalString("greeting") == "hello world"
 
   test "compose generate function":
     let eval = makeEval()
     discard eval.evalString("name: \"double\"")
-    discard eval.evalString("code: compose [(to set-word! name) function [x] [x * 2]]")
-    discard eval.evalString("do code")
+    discard eval.evalString("code: @compose [(to set-word! name) function [x] [x * 2]]")
+    discard eval.evalString("reduce code")
     check $eval.evalString("double 21") == "42"
 
-  test "bind do scoped execution":
-    let eval = makeEval()
-    discard eval.evalString("math: context [pi: 3.14 tau: 6.28]")
-    discard eval.evalString("code: [pi + tau]")
-    discard eval.evalString("bind code math")
-    check $eval.evalString("do code") == "9.42"
+  # NOTE: "bind do scoped execution" test removed — bind is no longer a native word
 
 # =============================================================================
 # lifecycle.test.ts — @enter / @exit hooks
@@ -732,9 +692,9 @@ suite "To conversion":
     check $eval.evalString("to string! 42") == "42"
 
 suite "Do and reduce":
-  test "do block":
+  test "eval expression":
     let eval = makeEval()
-    check $eval.evalString("do [1 + 2]") == "3"
+    check $eval.evalString("1 + 2") == "3"
 
   test "reduce block":
     let eval = makeEval()

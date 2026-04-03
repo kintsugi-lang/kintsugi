@@ -149,7 +149,6 @@ my-variable!: 42
 ;   <>   - not-equal
 ;
 ; Other sigils:
-;   #    - preprocessor / compile-time (#preprocess, #[expr])
 ;   %    - file path  (%path/to/file.txt)
 ;   $    - money      ($19.99)
 ;   /    - path separator or refinement (obj/field, func/refine)
@@ -775,7 +774,7 @@ consonants: charset "bcdfghjklmnpqrstvwxyz"
 alphanumeric: union (charset "abcdefghijklmnopqrstuvwxyz") (charset "0123456789")
 
 ; Sets work with parse rules as character classes.
-; result: parse "hello" [some vowels | some consonants]
+; result: @parse "hello" [some vowels | some consonants]
 
 ; union and intersect combine sets
 combined: union vowels consonants
@@ -1118,22 +1117,25 @@ append c-block 5
 print size? a-block                     ; 4 (independent)
 print size? c-block                     ; 5
 
-; --- Compose ---
-; compose evaluates parens inside a block, leaving other
-; values untouched. compose/deep descends into nested blocks.
+; --- @compose ---
+; @compose evaluates parens inside a block. If a paren
+; result is a block, its contents are SPLICED in (Rebol
+; convention). Use /only to insert as a single element.
+; /deep recurses into nested blocks.
 
-; Basic compose
 val: 42
-code: compose [print (val)]             ; => [print 42]
+code: @compose [print (val)]             ; => [print 42]
 print second code                       ; 42
 
-; compose/deep -- evaluates parens inside nested blocks too
+; Splice vs /only
+items: [1 2 3]
+probe @compose [before (items) after]         ; [before 1 2 3 after]
+probe @compose/only [before (items) after]    ; [before [1 2 3] after]
+
+; /deep -- evaluates parens inside nested blocks too
 inner-val: "nested"
-deep-code: compose/deep [outer [(inner-val)] done]
+deep-code: @compose/deep [outer [(inner-val)] done]
 probe second deep-code                  ; [nested]
-; Without /deep, the inner paren would NOT be evaluated:
-; shallow: compose [outer [(inner-val)] done]
-; second shallow => [(inner-val)] (paren untouched)
 
 
 ; ============================================================
@@ -1299,7 +1301,7 @@ print goblin/hp                          ; 75
 ;
 ; @exit is the primary resource cleanup mechanism.
 
-do [
+scope [
   @enter [print "entering scope"]
   @exit  [print "exiting scope"]
   print "inside scope"
@@ -1333,7 +1335,7 @@ do [
 ; scope. This is intentional -- dialects don't silently
 ; modify the caller.
 ;
-; Use parse/ok? to get a bare logic! result.
+; Use @parse/ok? to get a bare logic! result.
 ;
 ; Combinators:
 ;   |         - ordered alternative (lowest precedence)
@@ -1370,15 +1372,15 @@ do [
 
 ; --- String parsing ---
 
-result: parse "hello" [some alpha]
+result: @parse "hello" [some alpha]
 print result/ok                         ; true
 
-result: parse "abc123" [some alpha]
+result: @parse "abc123" [some alpha]
 print result/ok                         ; false (digits unconsumed)
 
 ; --- Captures go into returned context ---
 
-result: parse "user@example.com" [
+result: @parse "user@example.com" [
   name: some [alpha | digit | "."]
   "@"
   domain: some [alpha | digit | "." | "-"]
@@ -1388,12 +1390,12 @@ print result/name                       ; user
 print result/domain                     ; example.com
 
 ; set-word inside some -- last match wins
-result: parse "1,2,3" [some [num: some digit opt ","]]
+result: @parse "1,2,3" [some [num: some digit opt ","]]
 print result/num                        ; 3
 
 ; --- Block parsing ---
 
-result: parse [name "Alice" age 25] [
+result: @parse [name "Alice" age 25] [
   'name who: string!
   'age years: integer!
 ]
@@ -1405,7 +1407,7 @@ print result/years                      ; 25
 ; collect/keep for explicit accumulation. Must be named
 ; with a set-word -- unnamed collect discards values.
 
-result: parse [1 "a" 2 "b" 3] [
+result: @parse [1 "a" 2 "b" 3] [
   nums: collect [some [keep integer! | skip]]
 ]
 print result/nums                       ; [1 2 3]
@@ -1413,16 +1415,16 @@ print result/nums                       ; [1 2 3]
 ; --- Composable rules ---
 ; Store rules in words and reference them by name.
 digit-run: [some digit]
-result: parse "12345" digit-run
+result: @parse "12345" digit-run
 print result/ok                         ; true
 
-; --- parse/ok? refinement ---
+; --- @parse/ok? refinement ---
 ; Returns bare logic! when you only care about success.
-; if parse/ok? input [some digit] [print "all numbers"]
+; if @parse/ok? input [some digit] [print "all numbers"]
 
 ; --- Backtracking ---
 ; some and any are greedy but backtrack on failure, like REBOL.
-; parse "aab" [some "a" "ab"] succeeds: some matches "a",
+; @parse "aab" [some "a" "ab"] succeeds: some matches "a",
 ; then backtracks to let "ab" match the rest.
 ; Caution: deeply nested some/any can cause exponential
 ; backtracking on pathological inputs.
@@ -1432,11 +1434,11 @@ print result/ok                         ; true
 ; BLOCKS & HOMOICONICITY
 ; ============================================================
 ; Code is data. Data is code. Blocks hold code or data
-; without evaluating. do bridges data and execution.
+; without evaluating.
 ;
-; In compiled targets, homoiconicity lives at preprocess
-; time -- the preprocessor is the full language, and it
-; generates the static code that gets compiled.
+; Metaprogramming happens at compile time via @compose,
+; @parse, and @preprocess. The preprocessor is the full
+; language — it generates the static code that gets compiled.
 
 data: [print "Hello"]
 
@@ -1445,12 +1447,9 @@ print size? data                        ; 2
 print first data                        ; print (a word!)
 print second data                       ; Hello (a string)
 
-; do -- execute data as code [INTERPRETER-ONLY]
-do [print "I was data, now I am running"]
-
-; compose -- evaluate parens in blocks [INTERPRETER-ONLY on dynamic blocks]
+; @compose -- evaluate parens in a block template
 target: "Alice"
-code: compose [greet (target) 42]       ; => [greet "Alice" 42]
+code: @compose [greet (target) 42]       ; => [greet "Alice" 42]
 print second code                       ; Alice
 
 ; reduce -- evaluate every expression, return results block
@@ -1458,13 +1457,61 @@ result: reduce [1 + 2 3 * 4 "hello"]
 print first result                      ; 3
 print second result                     ; 12
 
-; --- Interpreter-only features ---
-; do, compose on dynamic blocks, and bind require runtime
-; evaluation and cannot be compiled. Using them means your
-; code runs only in the interpreter.
-;
-; In compiled output, use #preprocess to
-; generate code at compile time instead.
+
+; ============================================================
+; MACROS
+; ============================================================
+; @macro tags a function as a macro. When called, the return
+; value (if it's a block) is automatically evaluated in the
+; calling context. This is code generation without ceremony.
+
+@macro unless: function [cond body [block!]] [
+  @compose [if not (cond) (body)]
+]
+
+unless (3 > 5) [print "3 is not greater than 5"]
+
+; Macros can wrap code with before/after logic.
+; Use @compose/deep to interpolate inside nested blocks,
+; and splicing (default) to inline block contents.
+
+@macro with-timing: function [label [string!] body [block!]] [
+  result: @compose/deep [print rejoin ["[" (label) "] start"]]
+  append result body
+  append result @compose/deep [print rejoin ["[" (label) "] end"]]
+  result
+]
+
+with-timing "test" [
+  print 1 + 2
+]
+; [test] start
+; 3
+; [test] end
+
+
+; ============================================================
+; SCOPE
+; ============================================================
+; scope creates a lexical child scope. Variables defined inside
+; don't leak out. Works with @enter/@exit lifecycle hooks.
+
+x-outer: "visible"
+scope [
+  y-inner: "scoped"
+  print x-outer                         ; visible (parent accessible)
+]
+; y-inner does not exist here
+
+; Lifecycle hooks with scope:
+scope [
+  @enter [print "entering scope"]
+  @exit  [print "exiting scope"]
+  print "inside scope"
+]
+; entering scope
+; inside scope
+; exiting scope
 
 
 ; ============================================================
@@ -1510,14 +1557,14 @@ print "world"                           ; hello world (on one line)
 ; the full Kintsugi language -- not a limited macro system.
 ;
 ; Two forms:
-;   #preprocess [block]  -- evaluate block; emit injects code
-;   #[expr]              -- inline; evaluate expr, inject result
+;   @preprocess [block]  -- evaluate block; emit injects code
+;   @inline [expr]              -- inline; evaluate expr, inject result
 ;
 ; Available in the preprocess context:
 ;   system/platform  - current target ('script or 'lua)
 ;   emit             - inject a block into the output program
 
-#preprocess [
+@preprocess [
   either system/platform = 'script [
     emit [print "Running in Script mode"]
   ] [
@@ -1526,10 +1573,10 @@ print "world"                           ; hello world (on one line)
 ]
 
 ; Code generation -- generates get-name, get-age, get-email
-#preprocess [
+@preprocess [
   loop [
     for [field] in [name age email] do [
-      emit compose [
+      emit @compose [
         (to set-word! join "get-" field) function [obj] [
           select obj (to lit-word! field)
         ]
@@ -1539,15 +1586,15 @@ print "world"                           ; hello world (on one line)
 ]
 
 ; Inline preprocess -- inject values at preprocess time
-; #[expr] evaluates expr during preprocessing and splices
+; @inline [expr] evaluates expr during preprocessing and splices
 ; the result into the code stream. If the result is a block,
 ; its contents are spliced (multiple nodes). Otherwise the
 ; single value is spliced.
-pp-val: #[1 + 2]                        ; pp-val = 3 (computed at preprocess time)
+pp-val: @inline [1 + 2]                        ; pp-val = 3 (computed at preprocess time)
 print pp-val                            ; 3
 
-; Block splicing -- compose a whole function definition inline
-#[compose [(to set-word! "pp-double") function [x] [x * 2]]]
+; Block splicing -- @compose a whole function definition inline
+@inline [@compose [(to set-word! "pp-double") function [x] [x * 2]]]
 print pp-double 5                       ; 10
 
 ; Platform values:

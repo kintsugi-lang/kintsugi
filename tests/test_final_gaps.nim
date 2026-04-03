@@ -88,7 +88,7 @@ suite "parse: break exits some/any":
   test "break exits some loop":
     let eval = makeEval()
     let result = eval.evalString("""
-      r: parse "aaab" [some ["a" | "b" break]]
+      r: @parse "aaab" [some ["a" | "b" break]]
       r/ok
     """)
     check $result == "true"
@@ -96,7 +96,7 @@ suite "parse: break exits some/any":
   test "break exits any loop":
     let eval = makeEval()
     let result = eval.evalString("""
-      r: parse "xxxyz" [any ["x" | "y" break] "z"]
+      r: @parse "xxxyz" [any ["x" | "y" break] "z"]
       r/ok
     """)
     check $result == "true"
@@ -104,27 +104,27 @@ suite "parse: break exits some/any":
   test "some without break still works":
     let eval = makeEval()
     let result = eval.evalString("""
-      r: parse "aaa" [some "a"]
+      r: @parse "aaa" [some "a"]
       r/ok
     """)
     check $result == "true"
 
 
-# --- 4. Inline preprocess #[expr] ---
+# --- 4. Inline preprocess @inline [expr] ---
 
-suite "inline preprocess #[expr]":
-  test "#[1 + 2] evaluates to 3":
+suite "inline preprocess @inline [expr]":
+  test "@inline [1 + 2] evaluates to 3":
     let eval = makeEval()
     let result = eval.evalString("""
-      x: #[1 + 2]
+      x: @inline [1 + 2]
       x
     """)
     check $result == "3"
 
-  test "#[expression] with string":
+  test "@inline [expression] with string":
     let eval = makeEval()
     let result = eval.evalString("""
-      x: #[join "hello" " world"]
+      x: @inline [join "hello" " world"]
       x
     """)
     check $result == "hello world"

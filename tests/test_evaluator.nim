@@ -165,10 +165,9 @@ suite "conversions":
     check $eval.evalString("to float! 7") == "7.0"
     check $eval.evalString("""to string! 42""") == "42"
 
-suite "do and reduce":
-  test "do and reduce":
+suite "reduce":
+  test "reduce":
     let eval = makeEval()
-    check $eval.evalString("""do [1 + 2]""") == "3"
     check $eval.evalString("reduce [1 + 2 3 * 4]") == "[3 12]"
 
 suite "freeze":

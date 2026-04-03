@@ -1063,24 +1063,14 @@ proc registerNatives*(eval: Evaluator) =
     )
     ctx.set("random", KtgValue(kind: vkNative, nativeFn: randomNative, line: 0))
 
-  # --- Homoiconic ---
+  # --- Block evaluation ---
 
-  ctx.native("do", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+  ctx.native("scope", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     let eval = cast[Evaluator](ep)
-    if args[0].kind == vkBlock:
-      let useCtx = if args[0].boundCtx != nil: args[0].boundCtx
-                   else: eval.currentCtx
-      return eval.evalBlock(args[0].blockVals, useCtx)
-    args[0]
-  )
-
-  ctx.native("bind", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     if args[0].kind != vkBlock:
-      raise KtgError(kind: "type", msg: "bind expects block! and context!", data: nil)
-    if args[1].kind != vkContext:
-      raise KtgError(kind: "type", msg: "bind expects block! and context!, got " & typeName(args[1]), data: nil)
-    args[0].boundCtx = args[1].ctx
-    args[0]
+      raise KtgError(kind: "type", msg: "scope expects block!", data: nil)
+    let childCtx = eval.currentCtx.child
+    eval.evalBlock(args[0].blockVals, childCtx)
   )
 
   ctx.native("reduce", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
@@ -1095,31 +1085,6 @@ proc registerNatives*(eval: Evaluator) =
       return ktgBlock(results)
     args[0]
   )
-
-  block: # compose with /deep refinement
-    proc composeBlock(eval: Evaluator, blk: seq[KtgValue], deep: bool): seq[KtgValue] =
-      var results: seq[KtgValue] = @[]
-      for v in blk:
-        if v.kind == vkParen:
-          results.add(eval.evalBlock(v.parenVals, eval.currentCtx))
-        elif deep and v.kind == vkBlock:
-          results.add(ktgBlock(composeBlock(eval, v.blockVals, deep)))
-        else:
-          results.add(v)
-      results
-
-    let composeNative = KtgNative(
-      name: "compose",
-      arity: 1,
-      refinements: @[RefinementSpec(name: "deep", params: @[])],
-      fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-        let eval = cast[Evaluator](ep)
-        if args[0].kind == vkBlock:
-          let deep = "deep" in eval.currentRefinements
-          return ktgBlock(composeBlock(eval, args[0].blockVals, deep))
-        args[0]
-    )
-    ctx.set("compose", KtgValue(kind: vkNative, nativeFn: composeNative, line: 0))
 
   ctx.native("all", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     let eval = cast[Evaluator](ep)

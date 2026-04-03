@@ -162,10 +162,6 @@ suite "attempt compilation":
       then [it * 2]
     ]""").intVal == 20
 
-suite "parse compilation":
-  test "parse is compile error":
-    check compileFails("""result: parse "hello" ["hello"]""")
-
 suite "system compilation":
   test "system/platform compiles to lua string":
     let lua = compileStr("x: system/platform")

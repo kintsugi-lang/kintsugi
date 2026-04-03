@@ -1,5 +1,5 @@
 ## Tests for features built 2026-03-27/28:
-## dynamic paths, @const prefix, #[] block splicing, strict equality,
+## dynamic paths, @const prefix, @inline [] block splicing, strict equality,
 ## raw, import (rename from require), refinement syntax
 
 import std/[unittest, strutils]
@@ -91,13 +91,13 @@ suite "@const prefix":
     # @const without set-word returns the meta-word itself
     check $r == "meta-word!"
 
-# --- #[] block splicing ---
+# --- @inline [] block splicing ---
 
 suite "inline preprocess block splicing":
   test "single value splice":
     let eval = makeEval()
     let r = eval.evalString("""
-      x: #[1 + 2]
+      x: @inline [1 + 2]
       x
     """)
     check $r == "3"
@@ -105,7 +105,7 @@ suite "inline preprocess block splicing":
   test "block result splices contents":
     let eval = makeEval()
     let r = eval.evalString("""
-      #[compose [(to set-word! "my-var") 42]]
+      @inline [@compose [(to set-word! "my-var") 42]]
       my-var
     """)
     check $r == "42"
@@ -113,12 +113,12 @@ suite "inline preprocess block splicing":
   test "block splice generates function":
     let eval = makeEval()
     let r = eval.evalString("""
-      #[compose [(to set-word! "dbl") function [x] [x * 2]]]
+      @inline [@compose [(to set-word! "dbl") function [x] [x * 2]]]
       dbl 5
     """)
     check $r == "10"
 
-  test "#preprocess only (not @preprocess)":
+  test "@preprocess only (not @preprocess)":
     let eval = makeEval()
     # @preprocess should NOT trigger preprocessing
     let r = eval.evalString("""

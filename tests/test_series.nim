@@ -86,7 +86,7 @@ suite "Parse dialect for lexer-like tokenization":
   test "tokenize simple arithmetic":
     let eval = makeEval()
     discard eval.evalString("""
-      r: parse "123 + 456" [
+      r: @parse "123 + 456" [
         a: some digit
         some space
         op: "+"
@@ -102,7 +102,7 @@ suite "Parse dialect for lexer-like tokenization":
     let eval = makeEval()
     let ident = makeEval()
     discard ident.evalString("""
-      r: parse "hello-world" [
+      r: @parse "hello-world" [
         name: some [alpha | "-"]
       ]
     """)
@@ -112,7 +112,7 @@ suite "Parse dialect for lexer-like tokenization":
   test "collect multiple tokens":
     let eval = makeEval()
     discard eval.evalString("""
-      r: parse "abc,def,ghi" [
+      r: @parse "abc,def,ghi" [
         words: collect [
           keep some alpha
           some ["," keep some alpha]
@@ -125,7 +125,7 @@ suite "Parse dialect for lexer-like tokenization":
   test "scan to delimiter":
     let eval = makeEval()
     discard eval.evalString("""
-      r: parse "key=value" [
+      r: @parse "key=value" [
         k: to "="
         "="
         v: some [alpha | digit]
@@ -138,7 +138,7 @@ suite "Parse dialect for lexer-like tokenization":
   test "alternatives for different token types":
     let eval = makeEval()
     discard eval.evalString("""
-      r: parse "42" [
+      r: @parse "42" [
         tokens: collect [
           some [
             keep some digit
@@ -154,7 +154,7 @@ suite "Parse dialect for lexer-like tokenization":
   test "nested block parsing for AST":
     let eval = makeEval()
     discard eval.evalString("""
-      r: parse [add 1 2] [
+      r: @parse [add 1 2] [
         op: word!
         a: integer!
         b: integer!

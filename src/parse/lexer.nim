@@ -321,15 +321,6 @@ proc nextToken*(lex: var Lexer): KtgValue =
     let name = lex.readWord
     return ktgWord(name, wkMetaWord, startLine)
 
-  # preprocessor directive
-  if ch == '#':
-    discard lex.advance
-    if lex.peek == '[':
-      # inline preprocess #[expr] — don't consume [, let parser handle it as block
-      return ktgWord("#inline", wkMetaWord, startLine)
-    let directive = lex.readWord
-    return ktgWord("#" & directive, wkMetaWord, startLine)
-
   # word or set-word
   if isAlpha(ch) or ch == '_':
     let name = lex.readWord

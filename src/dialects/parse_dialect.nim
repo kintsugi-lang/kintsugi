@@ -639,60 +639,50 @@ proc parseSequence(s: ParseState, rules: seq[KtgValue]): bool =
 
 # --- Public API ---
 
+proc executeParse*(eval: Evaluator, input: KtgValue, rules: KtgValue,
+                   okOnly: bool = false): KtgValue =
+  ## Execute the parse dialect on input with rules. Called by @parse.
+  if rules.kind != vkBlock:
+    raise KtgError(kind: "type",
+      msg: "@parse expects a block of rules as second argument",
+      data: rules)
+
+  let state = ParseState(
+    captures: initOrderedTable[string, KtgValue](),
+    collectStack: @[],
+    eval: eval
+  )
+
+  case input.kind
+  of vkString:
+    state.mode = pmString
+    state.str = input.strVal
+    state.pos = 0
+  of vkBlock:
+    state.mode = pmBlock
+    state.blk = input.blockVals
+    state.pos = 0
+  else:
+    raise KtgError(kind: "type",
+      msg: "@parse expects string! or block! as input, got " & typeName(input),
+      data: input)
+
+  let matched = state.parseSequence(rules.blockVals)
+  let ok = matched and state.atEnd
+
+  if okOnly:
+    return ktgLogic(ok)
+
+  # Build result context
+  let resultCtx = newContext()
+  resultCtx.set("ok", ktgLogic(ok))
+
+  for name, val in state.captures:
+    if name != "__last_collect__":
+      resultCtx.set(name, val)
+
+  KtgValue(kind: vkContext, ctx: resultCtx, line: 0)
+
 proc registerParse*(eval: Evaluator) =
-  ## Register `parse` as a 2-arity native: parse <input> <rules-block>
-  let ctx = eval.global
-
-  ctx.set("parse", KtgValue(kind: vkNative,
-    nativeFn: KtgNative(name: "parse", arity: 2,
-      refinements: @[RefinementSpec(name: "ok?", params: @[])],
-      fn: proc(
-        args: seq[KtgValue], ep: pointer): KtgValue =
-      let eval = cast[Evaluator](ep)
-      let input = args[0]
-      let rules = args[1]
-
-      if rules.kind != vkBlock:
-        raise KtgError(kind: "type",
-          msg: "parse expects a block of rules as second argument",
-          data: rules)
-
-      let state = ParseState(
-        captures: initOrderedTable[string, KtgValue](),
-        collectStack: @[],
-        eval: eval
-      )
-
-      case input.kind
-      of vkString:
-        state.mode = pmString
-        state.str = input.strVal
-        state.pos = 0
-      of vkBlock:
-        state.mode = pmBlock
-        state.blk = input.blockVals
-        state.pos = 0
-      else:
-        raise KtgError(kind: "type",
-          msg: "parse expects string! or block! as input, got " & typeName(input),
-          data: input)
-
-      let matched = state.parseSequence(rules.blockVals)
-      let ok = matched and state.atEnd
-
-      # Build result context
-      let resultCtx = newContext()
-      resultCtx.set("ok", ktgLogic(ok))
-
-      # Add captures
-      for name, val in state.captures:
-        if name != "__last_collect__":
-          resultCtx.set(name, val)
-
-      # If /ok refinement, return just the logic value
-      if "ok?" in eval.currentRefinements:
-        return ktgLogic(ok)
-
-      KtgValue(kind: vkContext, ctx: resultCtx, line: 0)
-    ),
-    line: 0))
+  ## Register the @parse implementation on the evaluator.
+  eval.parseFn = executeParse

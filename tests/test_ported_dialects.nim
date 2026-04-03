@@ -274,63 +274,63 @@ suite "Parse block tests":
   test "empty rule matches empty block":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [] []
+      r: @parse[] []
       r/ok
     """) == "true"
 
   test "block type match":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [42] [integer!]
+      r: @parse[42] [integer!]
       r/ok
     """) == "true"
 
   test "block type mismatch fails":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [42] [string!]
+      r: @parse[42] [string!]
       r/ok
     """) == "false"
 
   test "sequence of types":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [1 "a"] [integer! string!]
+      r: @parse[1 "a"] [integer! string!]
       r/ok
     """) == "true"
 
   test "incomplete match fails":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [1 2] [integer!]
+      r: @parse[1 2] [integer!]
       r/ok
     """) == "false"
 
   test "lit-word matches word in block":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [name] ['name]
+      r: @parse[name] ['name]
       r/ok
     """) == "true"
 
   test "skip matches any value in block":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [42] [skip]
+      r: @parse[42] [skip]
       r/ok
     """) == "true"
 
   test "end matches at end":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [] [end]
+      r: @parse[] [end]
       r/ok
     """) == "true"
 
   test "end fails if not at end":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [1] [end]
+      r: @parse[1] [end]
       r/ok
     """) == "false"
 
@@ -339,56 +339,56 @@ suite "Parse block tests":
   test "some matches 1+":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [1 2 3] [some integer!]
+      r: @parse[1 2 3] [some integer!]
       r/ok
     """) == "true"
 
   test "some fails on zero":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse ["a"] [some integer!]
+      r: @parse["a"] [some integer!]
       r/ok
     """) == "false"
 
   test "any matches 0+":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [] [any integer!]
+      r: @parse[] [any integer!]
       r/ok
     """) == "true"
 
   test "any matches 1+":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [1 2 3] [any integer!]
+      r: @parse[1 2 3] [any integer!]
       r/ok
     """) == "true"
 
   test "opt matches 0 or 1 (present)":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [1] [opt integer! end]
+      r: @parse[1] [opt integer! end]
       r/ok
     """) == "true"
 
   test "opt matches 0 or 1 (absent)":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [] [opt integer! end]
+      r: @parse[] [opt integer! end]
       r/ok
     """) == "true"
 
   test "exact count matches":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [1 2 3] [3 integer!]
+      r: @parse[1 2 3] [3 integer!]
       r/ok
     """) == "true"
 
   test "exact count fails":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [1 2] [3 integer!]
+      r: @parse[1 2] [3 integer!]
       r/ok
     """) == "false"
 
@@ -397,21 +397,21 @@ suite "Parse block tests":
   test "pipe tries alternatives (first)":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [1] [integer! | string!]
+      r: @parse[1] [integer! | string!]
       r/ok
     """) == "true"
 
   test "pipe tries alternatives (second)":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse ["a"] [integer! | string!]
+      r: @parse["a"] [integer! | string!]
       r/ok
     """) == "true"
 
   test "pipe fails if no match":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [true] [integer! | string!]
+      r: @parse[true] [integer! | string!]
       r/ok
     """) == "false"
 
@@ -420,7 +420,7 @@ suite "Parse block tests":
   test "set-word captures value in block":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [42] [x: integer!]
+      r: @parse[42] [x: integer!]
       r/x
     """) == "42"
 
@@ -428,11 +428,11 @@ suite "Parse block tests":
     let eval = makeEval()
     let eval2 = makeEval()
     check $eval.evalString("""
-      r: parse [name "Alice" age 25] ['name who: string! 'age years: integer!]
+      r: @parse[name "Alice" age 25] ['name who: string! 'age years: integer!]
       r/who
     """) == "Alice"
     check $eval2.evalString("""
-      r: parse [name "Alice" age 25] ['name who: string! 'age years: integer!]
+      r: @parse[name "Alice" age 25] ['name who: string! 'age years: integer!]
       r/years
     """) == "25"
 
@@ -441,14 +441,14 @@ suite "Parse block tests":
   test "not succeeds when sub-rule fails":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [1] [not string! integer!]
+      r: @parse[1] [not string! integer!]
       r/ok
     """) == "true"
 
   test "ahead matches without consuming":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [1] [ahead integer! integer!]
+      r: @parse[1] [ahead integer! integer!]
       r/ok
     """) == "true"
 
@@ -457,14 +457,14 @@ suite "Parse block tests":
   test "thru scans past type match":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [1 "a" 2] [thru string! integer!]
+      r: @parse[1 "a" 2] [thru string! integer!]
       r/ok
     """) == "true"
 
   test "to scans to but not past match":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [1 2 "a" 3] [to string! string! integer!]
+      r: @parse[1 2 "a" 3] [to string! string! integer!]
       r/ok
     """) == "true"
 
@@ -473,7 +473,7 @@ suite "Parse block tests":
   test "collect/keep block":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [1 "a" 2 "b" 3] [nums: collect [some [keep integer! | skip]]]
+      r: @parse[1 "a" 2 "b" 3] [nums: collect [some [keep integer! | skip]]]
       r/nums
     """) == "[1 2 3]"
 
@@ -482,7 +482,7 @@ suite "Parse block tests":
   test "into descends into nested block":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse [[1 2]] [into [integer! integer!]]
+      r: @parse[[1 2]] [into [integer! integer!]]
       r/ok
     """) == "true"
 
@@ -492,7 +492,7 @@ suite "Parse block tests":
     let eval = makeEval()
     check $eval.evalString("""
       int-pair: [integer! integer!]
-      r: parse [1 2] int-pair
+      r: @parse[1 2] int-pair
       r/ok
     """) == "true"
 
@@ -504,56 +504,56 @@ suite "Parse string tests":
   test "empty rule matches empty string":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "" []
+      r: @parse"" []
       r/ok
     """) == "true"
 
   test "string literal matches exactly":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "hello" ["hello"]
+      r: @parse"hello" ["hello"]
       r/ok
     """) == "true"
 
   test "string literal mismatch":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "hello" ["world"]
+      r: @parse"hello" ["world"]
       r/ok
     """) == "false"
 
   test "partial match fails":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "hello" ["hell"]
+      r: @parse"hello" ["hell"]
       r/ok
     """) == "false"
 
   test "sequence of literals":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "hello world" ["hello" " " "world"]
+      r: @parse"hello world" ["hello" " " "world"]
       r/ok
     """) == "true"
 
   test "skip matches one character":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "a" [skip]
+      r: @parse"a" [skip]
       r/ok
     """) == "true"
 
   test "skip on multi-char fails":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "ab" [skip]
+      r: @parse"ab" [skip]
       r/ok
     """) == "false"
 
   test "end matches at end":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "" [end]
+      r: @parse"" [end]
       r/ok
     """) == "true"
 
@@ -562,77 +562,77 @@ suite "Parse string tests":
   test "alpha matches letter":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "a" [alpha]
+      r: @parse"a" [alpha]
       r/ok
     """) == "true"
 
   test "alpha fails on digit":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "1" [alpha]
+      r: @parse"1" [alpha]
       r/ok
     """) == "false"
 
   test "digit matches digit":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "5" [digit]
+      r: @parse"5" [digit]
       r/ok
     """) == "true"
 
   test "some alpha matches word":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "hello" [some alpha]
+      r: @parse"hello" [some alpha]
       r/ok
     """) == "true"
 
   test "some digit matches number":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "12345" [some digit]
+      r: @parse"12345" [some digit]
       r/ok
     """) == "true"
 
   test "alnum matches mixed":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "abc123" [some alnum]
+      r: @parse"abc123" [some alnum]
       r/ok
     """) == "true"
 
   test "space matches whitespace":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse " " [space]
+      r: @parse" " [space]
       r/ok
     """) == "true"
 
   test "upper matches uppercase":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "A" [upper]
+      r: @parse"A" [upper]
       r/ok
     """) == "true"
 
   test "upper fails on lowercase":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "a" [upper]
+      r: @parse"a" [upper]
       r/ok
     """) == "false"
 
   test "lower matches lowercase":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "a" [lower]
+      r: @parse"a" [lower]
       r/ok
     """) == "true"
 
   test "lower fails on uppercase":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "A" [lower]
+      r: @parse"A" [lower]
       r/ok
     """) == "false"
 
@@ -641,63 +641,63 @@ suite "Parse string tests":
   test "some and sequence":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "abc123" [some alpha some digit]
+      r: @parse"abc123" [some alpha some digit]
       r/ok
     """) == "true"
 
   test "any matches zero":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "123" [any alpha some digit]
+      r: @parse"123" [any alpha some digit]
       r/ok
     """) == "true"
 
   test "opt":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "123" [opt alpha some digit]
+      r: @parse"123" [opt alpha some digit]
       r/ok
     """) == "true"
 
   test "alternatives (first)":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "abc" [some alpha | some digit]
+      r: @parse"abc" [some alpha | some digit]
       r/ok
     """) == "true"
 
   test "alternatives (second)":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "123" [some alpha | some digit]
+      r: @parse"123" [some alpha | some digit]
       r/ok
     """) == "true"
 
   test "exact count":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "aaa" [3 alpha]
+      r: @parse"aaa" [3 alpha]
       r/ok
     """) == "true"
 
   test "exact count fail":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "aa" [3 alpha]
+      r: @parse"aa" [3 alpha]
       r/ok
     """) == "false"
 
   test "not":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "1" [not alpha digit]
+      r: @parse"1" [not alpha digit]
       r/ok
     """) == "true"
 
   test "ahead":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "a" [ahead alpha alpha]
+      r: @parse"a" [ahead alpha alpha]
       r/ok
     """) == "true"
 
@@ -706,21 +706,21 @@ suite "Parse string tests":
   test "capture string greeting":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "hello world" [greeting: some alpha " " name: some alpha]
+      r: @parse"hello world" [greeting: some alpha " " name: some alpha]
       r/greeting
     """) == "hello"
 
   test "capture string name":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "hello world" [greeting: some alpha " " name: some alpha]
+      r: @parse"hello world" [greeting: some alpha " " name: some alpha]
       r/name
     """) == "world"
 
   test "capture digits":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "age:25" ["age:" num: some digit]
+      r: @parse"age:25" ["age:" num: some digit]
       r/num
     """) == "25"
 
@@ -729,14 +729,14 @@ suite "Parse string tests":
   test "thru scans past match":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "hello world" [thru " " some alpha]
+      r: @parse"hello world" [thru " " some alpha]
       r/ok
     """) == "true"
 
   test "to scans to match":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "hello world" [to " " " " some alpha]
+      r: @parse"hello world" [to " " " " some alpha]
       r/ok
     """) == "true"
 
@@ -746,7 +746,7 @@ suite "Parse string tests":
     let eval = makeEval()
     check $eval.evalString("""
       word-chars: [some alpha]
-      r: parse "hello" word-chars
+      r: @parse"hello" word-chars
       r/ok
     """) == "true"
 
@@ -755,7 +755,7 @@ suite "Parse string tests":
   test "email parse ok":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "user@example.com" [
+      r: @parse"user@example.com" [
         name: some [alpha | digit | "."]
         "@"
         domain: some [alpha | digit | "." | "-"]
@@ -766,7 +766,7 @@ suite "Parse string tests":
   test "email capture name":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "user@example.com" [
+      r: @parse"user@example.com" [
         name: some [alpha | digit | "."]
         "@"
         domain: some [alpha | digit | "." | "-"]
@@ -777,7 +777,7 @@ suite "Parse string tests":
   test "email capture domain":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "user@example.com" [
+      r: @parse"user@example.com" [
         name: some [alpha | digit | "."]
         "@"
         domain: some [alpha | digit | "." | "-"]
@@ -790,7 +790,7 @@ suite "Parse string tests":
   test "collect/keep string":
     let eval = makeEval()
     check $eval.evalString("""
-      r: parse "a1b2c3" [chars: collect [some [keep alpha | skip]]]
+      r: @parse"a1b2c3" [chars: collect [some [keep alpha | skip]]]
       r/chars
     """) == "[a b c]"
 
@@ -1586,13 +1586,13 @@ suite "Natives tests":
 
   # -- code-as-data --
 
-  test "do evaluates block":
+  test "block evaluates inline":
     let eval = makeEval()
-    check $eval.evalString("do [1 + 2]") == "3"
+    check $eval.evalString("1 + 2") == "3"
 
   test "compose evaluates parens in block":
     let eval = makeEval()
-    check $eval.evalString("compose [1 (2 + 3) 4]") == "[1 5 4]"
+    check $eval.evalString("@compose [1 (2 + 3) 4]") == "[1 5 4]"
 
 # ============================================================
 # STDLIB TESTS (from stdlib.test.ts)

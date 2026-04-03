@@ -298,12 +298,11 @@ suite "Lexer: Operators":
 
 suite "Lexer: Directives":
   test "lex preprocess directive":
-    # Nim lexer emits directives as meta-words with "#" prefix
-    let tokens = tokenize("#preprocess")
+    let tokens = tokenize("@preprocess")
     check tokens.len == 1
     check tokens[0].kind == vkWord
     check tokens[0].wordKind == wkMetaWord
-    check tokens[0].wordName == "#preprocess"
+    check tokens[0].wordName == "preprocess"
 
 suite "Lexer: Meta-Words":
   test "lex enter hook":

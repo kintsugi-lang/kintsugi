@@ -12,6 +12,8 @@ type
     moduleCache*: Table[string, KtgValue]
     moduleLoading*: HashSet[string]
     globals*: HashSet[string]  ## words declared with @global
+    macros*: HashSet[string]   ## words declared with @macro
+    parseFn*: proc(eval: Evaluator, input, rules: KtgValue, okOnly: bool): KtgValue  ## @parse implementation
 
   Dialect* = ref object of RootObj
     name*: string

@@ -4,7 +4,7 @@
 ##   stdlib-collections.test.ts, validation.test.ts,
 ##   types-advanced.test.ts
 ##
-## Note: #preprocess uses meta-word syntax, platform = "nim"
+## Note: @preprocess uses meta-word syntax, platform = "nim"
 ## Note: import returns object! (frozen), not context!
 ## Note: stdlib functions are defined inline (old .ktg files use TS syntax)
 ## Note: @type custom types are NOT implemented — marked FAILS
@@ -31,13 +31,13 @@ proc makeEval(): Evaluator =
 suite "Preprocess — emit injects code":
   test "emit injects code":
     let eval = makeEval()
-    discard eval.evalString("#preprocess [emit [x: 42]]")
+    discard eval.evalString("@preprocess [emit [x: 42]]")
     check $eval.evalString("x") == "42"
 
   test "conditional emit (platform = script)":
     let eval = makeEval()
     discard eval.evalString("""
-      #preprocess [
+      @preprocess [
         either system/platform = 'script [
           emit [target: "script"]
         ] [
@@ -50,7 +50,7 @@ suite "Preprocess — emit injects code":
   test "multiple emits":
     let eval = makeEval()
     discard eval.evalString("""
-      #preprocess [
+      @preprocess [
         emit [a: 1]
         emit [b: 2]
       ]
@@ -61,10 +61,10 @@ suite "Preprocess — emit injects code":
   test "emit with compose/deep for code generation":
     let eval = makeEval()
     discard eval.evalString("""
-      #preprocess [
+      @preprocess [
         loop [
           for [field] in [name age email] do [
-            emit compose/deep [
+            emit @compose/deep [
               (to set-word! join "get-" field) function [obj] [
                 select obj (to lit-word! field)
               ]
@@ -80,7 +80,7 @@ suite "Preprocess — emit injects code":
   test "compile-time constants":
     let eval = makeEval()
     discard eval.evalString("""
-      #preprocess [
+      @preprocess [
         emit [
           max-connections: 100
         ]
@@ -92,7 +92,7 @@ suite "Preprocess — emit injects code":
   test "compile-time date constant":
     let eval = makeEval()
     discard eval.evalString("""
-      #preprocess [
+      @preprocess [
         emit [
           build-date: 2026-03-15
         ]

@@ -197,8 +197,7 @@ proc initNativeBindings(): Table[string, BindingInfo] =
   result["floor"] = nativeBinding(1)
   result["ceil"] = nativeBinding(1)
   result["random"] = nativeBinding(1)
-  # Homoiconic — do/compose/bind are compile errors in Lua mode
-  result["do"] = nativeBinding(1)
+  # Block evaluation
   result["reduce"] = nativeBinding(1)
   result["all"] = nativeBinding(1)
   result["any"] = nativeBinding(1)
@@ -207,6 +206,7 @@ proc initNativeBindings(): Table[string, BindingInfo] =
   result["does"] = nativeBinding(1)
   # Context/Object
   result["context"] = nativeBinding(1)
+  result["scope"] = nativeBinding(1)
   result["freeze"] = nativeBinding(1)
   result["frozen?"] = nativeBinding(1)
   result["words-of"] = nativeBinding(1)
@@ -1295,9 +1295,6 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
         else:
           result = "nil"
 
-      elif name == "parse" or name.startsWith("parse/"):
-        compileError("parse", "parse is interpreter-only — use #preprocess to run parse at compile time", val.line)
-
       # --- system/platform → compile-time constant ---
       elif name == "system/platform":
         result = "\"lua\""
@@ -1348,15 +1345,6 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
           result = path
 
       # --- Interpreter-only features: compile error ---
-      elif name == "do":
-        compileError("do", "use #preprocess to evaluate dynamic blocks at compile time", val.line)
-
-      elif name == "bind":
-        compileError("bind", "bind is not available in compiled Lua output", val.line)
-
-      elif name == "compose":
-        compileError("compose", "use #preprocess for compile-time block composition", val.line)
-
       # --- No-ops: freeze/frozen? ---
       elif name == "freeze":
         result = e.emitExpr(vals, pos)
@@ -1454,6 +1442,22 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
           result = e.emitContextBlock(blk)
         else:
           result = "{}"
+
+      # --- scope: lexical scope block ---
+      elif name == "scope":
+        if pos < vals.len and vals[pos].kind == vkBlock:
+          let blk = vals[pos].blockVals
+          pos += 1
+          let saved = e.output
+          e.output = ""
+          e.indent += 1
+          e.emitBlock(blk, asReturn = true)
+          let bodyStr = e.output
+          e.output = saved
+          e.indent -= 1
+          result = "(function()\n" & bodyStr & e.pad & "end)()"
+        else:
+          result = "nil"
 
       # --- loop dialect ---
       elif name == "loop":
@@ -2062,7 +2066,7 @@ proc findLastStmtStart(e: var LuaEmitter, vals: seq[KtgValue]): int =
         if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
         if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
         continue
-      of "loop":
+      of "loop", "scope":
         pos += 1
         if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
         continue
@@ -2541,6 +2545,19 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
       pos += 1
       e.ln("break")
       continue
+
+    # --- scope as statement ---
+    if val.kind == vkWord and val.wordKind == wkWord and val.wordName == "scope":
+      pos += 1
+      if pos < vals.len and vals[pos].kind == vkBlock:
+        let blk = vals[pos].blockVals
+        pos += 1
+        e.ln("do")
+        e.indent += 1
+        e.emitBlock(blk)
+        e.indent -= 1
+        e.ln("end")
+        continue
 
     # --- loop as statement ---
     if val.kind == vkWord and val.wordKind == wkWord and val.wordName == "loop":

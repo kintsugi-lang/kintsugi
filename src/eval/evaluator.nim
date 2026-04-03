@@ -449,7 +449,11 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
 
       # callable: call it
       if isCallable(bound):
-        return eval.callCallable(bound, vals, pos, ctx)
+        var callResult = eval.callCallable(bound, vals, pos, ctx)
+        # Macro auto-eval: if this is a macro and returned a block, evaluate it
+        if val.wordName in eval.macros and callResult.kind == vkBlock:
+          callResult = eval.evalBlock(callResult.blockVals, ctx)
+        return callResult
 
       return bound
 
@@ -732,6 +736,53 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
             eval.globals.incl(next.wordName)
             return ktgNone()
         return val
+
+      # @macro — tag the next function definition as a macro
+      if val.wordName == "macro":
+        if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkSetWord:
+          let setWord = vals[pos]
+          pos += 1
+          var rhs = eval.evalNext(vals, pos, ctx)
+          eval.applyInfix(rhs, vals, pos, ctx)
+          eval.macros.incl(setWord.wordName)
+          ctx.set(setWord.wordName, rhs)
+          return rhs
+        return val
+
+      # #compose — block composition with paren interpolation
+      # Default: splice block results. /only: insert as single element.
+      # /deep: recurse into nested blocks.
+      if val.wordName == "compose" or val.wordName.startsWith("compose/"):
+        let parts = val.wordName.split('/')
+        let deep = "deep" in parts
+        let only = "only" in parts
+        let arg = eval.evalNext(vals, pos, ctx)
+        if arg.kind != vkBlock:
+          raise KtgError(kind: "type", msg: "@compose expects a block", data: nil)
+        proc composeBlock(eval: Evaluator, blk: seq[KtgValue], ctx: KtgContext,
+                          deep: bool, only: bool): seq[KtgValue] =
+          var results: seq[KtgValue] = @[]
+          for v in blk:
+            if v.kind == vkParen:
+              let val = eval.evalBlock(v.parenVals, ctx)
+              if val.kind == vkBlock and not only:
+                # Splice block contents
+                for item in val.blockVals:
+                  results.add(item)
+              else:
+                results.add(val)
+            elif deep and v.kind == vkBlock:
+              results.add(ktgBlock(composeBlock(eval, v.blockVals, ctx, deep, only)))
+            else:
+              results.add(v)
+          results
+        return ktgBlock(composeBlock(eval, arg.blockVals, ctx, deep, only))
+
+      # @parse — parsing
+      if val.wordName == "parse" or val.wordName.startsWith("parse/"):
+        let input = eval.evalNext(vals, pos, ctx)
+        let rules = eval.evalNext(vals, pos, ctx)
+        return eval.parseFn(eval, input, rules, val.wordName == "parse/ok?")
 
       # lifecycle hooks — for now return self
       return val
@@ -1076,7 +1127,7 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue]): seq[KtgValue] =
   var hasPreprocess = false
   for v in ast:
     if v.kind == vkWord and v.wordKind == wkMetaWord and
-       v.wordName in ["#preprocess", "#inline"]:
+       v.wordName in ["preprocess", "inline"]:
       hasPreprocess = true
       break
   if not hasPreprocess:
@@ -1086,7 +1137,7 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue]): seq[KtgValue] =
   var i = 0
   while i < ast.len:
     if ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
-       ast[i].wordName == "#inline" and i + 1 < ast.len and
+       ast[i].wordName == "inline" and i + 1 < ast.len and
        ast[i + 1].kind == vkBlock:
       # Inline preprocess: #[expr] — evaluate and splice result.
       # If result is a block, splice its contents (multi-node). Otherwise splice the value.
@@ -1099,7 +1150,7 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue]): seq[KtgValue] =
           result.add(value)
       i += 2
     elif ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
-       ast[i].wordName == "#preprocess" and i + 1 < ast.len and
+       ast[i].wordName == "preprocess" and i + 1 < ast.len and
        ast[i + 1].kind == vkBlock:
       # Set up a preprocess context with `emit`
       let ppCtx = eval.global.child
