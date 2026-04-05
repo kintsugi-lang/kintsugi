@@ -218,6 +218,8 @@ proc registerAttempt*(eval: Evaluator) =
       for step in steps:
         if step.kind == skRetries:
           retryCount = step.retryCount
+      if retryCount < 0:
+        raise KtgError(kind: "attempt", msg: "retries must be non-negative", data: nil)
 
       # Check if there is a source step
       var hasSource = false

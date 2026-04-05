@@ -7,6 +7,8 @@ type
     values: seq[KtgValue]
     line: int
 
+const MaxNestingDepth = 256
+
 proc parse*(tokens: seq[KtgValue]): seq[KtgValue] =
   ## Stack-based parser. Nests tokens into blocks and parens.
   var stack: seq[Container] = @[]
@@ -15,11 +17,15 @@ proc parse*(tokens: seq[KtgValue]): seq[KtgValue] =
   for tok in tokens:
     # open block
     if tok.kind == vkBlock and tok.blockVals.len == 0:
+      if stack.len >= MaxNestingDepth:
+        raise KtgError(kind: "parse", msg: "Maximum nesting depth (" & $MaxNestingDepth & ") exceeded at line " & $tok.line, data: nil)
       stack.add(Container(kind: vkBlock, values: @[], line: tok.line))
       continue
 
     # open paren
     if tok.kind == vkParen and tok.parenVals.len == 0:
+      if stack.len >= MaxNestingDepth:
+        raise KtgError(kind: "parse", msg: "Maximum nesting depth (" & $MaxNestingDepth & ") exceeded at line " & $tok.line, data: nil)
       stack.add(Container(kind: vkParen, values: @[], line: tok.line))
       continue
 

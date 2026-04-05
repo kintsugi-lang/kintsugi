@@ -55,6 +55,11 @@ proc findDialect*(eval: Evaluator, name: string): Dialect =
 
 # --- Infix handling ---
 
+proc safeMulMoney(a, b: int64): int64 =
+  result = a * b
+  if a != 0 and result div a != b:
+    raise KtgError(kind: "math", msg: "money overflow", data: nil)
+
 proc applyOp*(eval: Evaluator, op: string, left, right: KtgValue): KtgValue =
   # numeric ops
   if left.kind in {vkInteger, vkFloat} and right.kind in {vkInteger, vkFloat}:
@@ -82,6 +87,8 @@ proc applyOp*(eval: Evaluator, op: string, left, right: KtgValue): KtgValue =
         return ktgInt(left.intVal div right.intVal)
       return ktgFloat(lf / rf)
     of "%":
+      if rf == 0.0:
+        raise KtgError(kind: "math", msg: "modulo by zero", data: nil)
       if left.kind == vkInteger and right.kind == vkInteger:
         return ktgInt(left.intVal mod right.intVal)
       return ktgFloat(lf - floor(lf / rf) * rf)
@@ -96,7 +103,7 @@ proc applyOp*(eval: Evaluator, op: string, left, right: KtgValue): KtgValue =
 
   if left.kind == vkMoney and right.kind == vkInteger:
     case op
-    of "*": return ktgMoney(left.cents * right.intVal)
+    of "*": return ktgMoney(safeMulMoney(left.cents, right.intVal))
     of "/":
       if right.intVal == 0: raise KtgError(kind: "math", msg: "division by zero", data: nil)
       return ktgMoney(left.cents div right.intVal)
@@ -104,7 +111,7 @@ proc applyOp*(eval: Evaluator, op: string, left, right: KtgValue): KtgValue =
 
   if left.kind == vkInteger and right.kind == vkMoney:
     case op
-    of "*": return ktgMoney(left.intVal * right.cents)
+    of "*": return ktgMoney(safeMulMoney(left.intVal, right.cents))
     else: discard
 
   if left.kind == vkMoney and right.kind == vkFloat:
@@ -361,7 +368,9 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
     return ktgString(val.strVal, val.line)
 
   of vkBlock:
-    return ktgBlock(val.blockVals[0..^1], val.line)
+    var copy: seq[KtgValue] = @[]
+    for v in val.blockVals: copy.add(v)
+    return ktgBlock(copy, val.line)
 
   # --- Paren: evaluate contents, return last ---
   of vkParen:
@@ -415,6 +424,7 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
 
         # Navigate segments one at a time, stopping at callable values
         # to treat remaining segments as refinements (e.g., module/func/refinement)
+        var parent = headVal
         var current = headVal
         var segIdx = 0
         while segIdx < segments.len:
@@ -427,11 +437,12 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
               return eval.callCallable(next, vals, pos, ctx, current)
             finally:
               eval.currentRefinements = @[]
+          parent = current
           current = next
           segIdx += 1
-        # Final value: if callable, call it
+        # Final value: if callable, call it (self = parent object, not root)
         if isCallable(current):
-          return eval.callCallable(current, vals, pos, ctx, headVal)
+          return eval.callCallable(current, vals, pos, ctx, parent)
         return current
 
       # check if it's a dialect first (before word lookup)
@@ -458,8 +469,8 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
       var rhs = eval.evalNext(vals, pos, ctx)
       eval.applyInfix(rhs, vals, pos, ctx)
 
-      # Protect self from rebinding (only when already bound)
-      if val.wordName == "self" and ctx.has("self"):
+      # Protect self from rebinding (only in the scope where self is defined)
+      if val.wordName == "self" and "self" in ctx.entries:
         raise KtgError(kind: "self",
           msg: "cannot rebind self",
           data: nil)
@@ -860,6 +871,10 @@ proc matchesCustomType*(eval: Evaluator, value: KtgValue, ct: CustomType, ctx: K
       target = value.ctx
     elif value.kind == vkBlock:
       # Treat block as flat key-value pairs: [name "Alice" age 25]
+      if value.blockVals.len mod 2 != 0:
+        raise KtgError(kind: "type",
+          msg: "block used as key-value pairs must have even length",
+          data: value)
       # Build a temporary context from it
       let tmpCtx = newContext()
       var i = 0

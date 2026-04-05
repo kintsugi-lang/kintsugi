@@ -366,6 +366,8 @@ proc registerNatives*(eval: Evaluator) =
   ctx.native("insert", 3, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     if args[0].kind == vkBlock and args[2].kind == vkInteger:
       let idx = int(args[2].intVal) - 1  # 1-based
+      if idx < 0 or idx > args[0].blockVals.len:
+        raise KtgError(kind: "range", msg: "insert index out of range", data: args[2])
       args[0].blockVals.insert(args[1], idx)
       return args[0]
     raise KtgError(kind: "type", msg: "insert expects block!, value, integer!", data: nil)
@@ -617,7 +619,7 @@ proc registerNatives*(eval: Evaluator) =
     let start = int(args[1].intVal) - 1  # 1-based
     let length = int(args[2].intVal)
     let s = args[0].strVal
-    if start < 0 or start > s.len:
+    if start < 0 or start >= s.len:
       raise KtgError(kind: "range", msg: "substring start out of range", data: args[1])
     let endIdx = min(start + length, s.len)
     ktgString(s[start ..< endIdx])

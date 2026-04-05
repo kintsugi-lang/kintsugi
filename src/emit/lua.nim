@@ -1135,9 +1135,9 @@ proc emitTypePredicateCall(e: var LuaEmitter, name: string, argExpr: string): st
     e.useHelper("_is_none")
     result = "_is_none(" & safeArg & ")"
   of "integer":
-    result = "(type(" & argExpr & ") == \"number\" and math.floor(" & argExpr & ") == " & argExpr & ")"
+    result = "(type(" & safeArg & ") == \"number\" and math.floor(" & safeArg & ") == " & safeArg & ")"
   of "float":
-    result = "(type(" & argExpr & ") == \"number\")"
+    result = "(type(" & safeArg & ") == \"number\" and math.floor(" & safeArg & ") ~= " & safeArg & ")"
   of "string":
     result = "(type(" & argExpr & ") == \"string\")"
   of "logic":
@@ -1588,10 +1588,8 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
       elif name == "split":
         let str = e.emitExpr(vals, pos)
         let delim = e.emitExpr(vals, pos)
-        result = "(function()" &
-                 " local r,s,d={}, " & str & ", " & delim &
-                 "; for m in (s..d):gmatch(\"(.-)\"..d) do r[#r+1]=m end" &
-                 "; return r end)()"
+        e.useHelper("_split")
+        result = "_split(" & str & ", " & delim & ")"
 
       elif name == "replace":
         let str = e.emitExpr(vals, pos)
@@ -1618,7 +1616,7 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
 
       elif name == "last":
         let arg = e.emitExpr(vals, pos)
-        result = arg & "[#" & arg & "]"
+        result = "(function() local _t = " & arg & "; return _t[#_t] end)()"
 
       elif name == "pick":
         let blk = e.emitExpr(vals, pos)
@@ -2747,6 +2745,23 @@ const PreludeAppend = """local function _append(t, v)
 end
 """
 
+const PreludeSplit = """local function _split(s, d)
+  local r = {}
+  if d == "" then
+    for i = 1, #s do r[#r+1] = s:sub(i, i) end
+    return r
+  end
+  local p = 1
+  while true do
+    local i, j = s:find(d, p, true)
+    if not i then r[#r+1] = s:sub(p); break end
+    r[#r+1] = s:sub(p, i - 1)
+    p = j + 1
+  end
+  return r
+end
+"""
+
 proc buildPrelude(e: LuaEmitter): string =
   if e.usedHelpers.len == 0: return ""
   result = "-- Kintsugi runtime support\n"
@@ -2759,6 +2774,8 @@ proc buildPrelude(e: LuaEmitter): string =
     result &= PreludeCapture
   if "_append" in e.usedHelpers:
     result &= PreludeAppend
+  if "_split" in e.usedHelpers:
+    result &= PreludeSplit
 
 proc prescanBindings(e: var LuaEmitter, blk: seq[KtgValue]) =
   ## Parse a bindings block and populate nameMap, arities, and bindingKinds.

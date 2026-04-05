@@ -1,6 +1,6 @@
 # Kintsugi Handoff Document
 
-Last updated: 2026-03-29
+Last updated: 2026-04-04
 
 ---
 
@@ -8,8 +8,8 @@ Last updated: 2026-03-29
 
 **Version:** 0.4.0
 **Language:** Nim (compiles to C)
-**Source:** ~8,200 lines of Nim across 14 files in `src/`
-**Tests:** 977 passing across 22 test files
+**Source:** ~9,200 lines of Nim across 14 files in `src/`
+**Tests:** 1112 passing across 29 test files
 **Executable spec:** `examples/full-spec.ktg` (~1,800 lines, runs clean)
 **Love2D:** Tic-tac-toe compiles and runs in Love2D
 
@@ -227,6 +227,37 @@ Then add to emitter's `initNativeBindings()` and add emission special-case if ne
 
 ---
 
+## Recent: Codebase Audit (2026-04-04)
+
+A full audit identified and fixed 17 bugs + 1 stdlib bug, added 39 new tests:
+
+**Crash fixes:**
+- Modulo by zero in evaluator
+- Lexer crashes on malformed pair, tuple, time, date, money literals (now validated)
+- `insert` with out-of-bounds index
+- `substring` off-by-one at string boundary
+- `copy []` on empty blocks
+- `step 0` infinite loop in loop dialect
+- Negative retries crash in attempt dialect
+- Parser depth limit added (256 max nesting)
+
+**Logic fixes:**
+- Nested path `self` binding (was binding to root, now binds to parent)
+- `self` rebinding check scope (was walking parent chain, now checks current scope only)
+- Odd-length block-to-context silent data drop (now errors)
+- Money multiplication overflow detection
+- `float?` / `integer?` type predicates in emitter (were wrong for Lua)
+- `split` emission (was generating broken Lua gmatch, now uses proper helper)
+- `last` double-evaluation in emitter (now uses IIFE with local)
+- `tally` stdlib bug (`has?` was receiving lit-word instead of variable)
+
+**New test files:**
+- `test_stdlib_gaps.nim` -- 24 tests (smoothstep, fraction, magnitude, normalize, wrap, remap, deadzone, tally, etc.)
+- `test_emitter_fixes.nim` -- 7 tests (type predicates, split, last, @const)
+- `test_cli.nim` -- 8 tests (-e, -c, --dry-run, file execution)
+
+---
+
 ## Known Limitations
 
 - **Emitter dispatch is split** -- three paths (emitExpr/emitBlock/emitBlockReturn) duplicate logic. Unified dispatch is Changeset 1.
@@ -240,7 +271,7 @@ Then add to emitter's `initNativeBindings()` and add emission special-case if ne
 
 ```bash
 nimble build                              # release binary in bin/
-nimble test                               # run all tests (977 passing)
+nimble test                               # run all tests (1112 passing)
 bin/kintsugi                              # REPL
 bin/kintsugi file.ktg                     # run a file
 bin/kintsugi dir/                         # run all .ktg in directory

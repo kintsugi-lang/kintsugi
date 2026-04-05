@@ -183,6 +183,9 @@ method interpret*(d: LoopDialect, blk: seq[KtgValue],
                else:
                  if toI >= fromI: 1'i64 else: -1'i64
 
+    if step == 0:
+      raise KtgError(kind: "loop", msg: "loop step cannot be zero", data: nil)
+
     var i = fromI
     while (step > 0 and i <= toI) or (step < 0 and i >= toI):
       let loopCtx = ctx.child

@@ -482,6 +482,20 @@ These are text-resource types. They convert to string (extract the text content)
 - **`to integer!` on time returns total seconds.** `14:30:00` → `52200`. Reversible: `to time! 52200` → `14:30:00`.
 - **Date-to-integer is UNDECIDED.** Epoch representations are ambiguous (epoch days? Unix timestamp? Julian?). Prefer explicit functions (`date/epoch`, `date/julian`) over `to`.
 
+### 4.4 Literal validation rules
+
+**DECIDED:** The lexer validates literal values at parse time. Malformed literals are `'syntax` errors, not silently wrong values.
+
+| Literal type | Validation |
+|--------------|------------|
+| `pair!` (`NxN`) | Both components must be valid integers within int32 range |
+| `tuple!` (`N.N.N`) | Each component must be 0-255 |
+| `date!` (`YYYY-MM-DD`) | Month 1-12, day 1-31, no empty components |
+| `time!` (`HH:MM:SS`) | Empty components default to 0 (e.g., `14:30` = `14:30:00`) |
+| `money!` (`$N.NN`) | Must have at least one digit (not `$.` or `$`) |
+
+**Parser limits:** Maximum nesting depth of 256 for blocks and parens. Exceeding this is a `'parse` error.
+
 ---
 
 ## 5. Equality Semantics
@@ -567,9 +581,12 @@ Error kinds are lit-words. Users can define their own kinds via `error`. The sta
 | `'type`      | Wrong type passed to function, set-path on `object!`, type constraint violation | `"expected integer!, got string!"` or `"param 'x' expects integer!, got string!"`           | The offending value           |
 | `'arity`     | Too few values left in block for function to consume                            | `"add expects 2 arguments, got 1"`                                                          | none                          |
 | `'undefined` | Word lookup fails — name has no binding in scope chain                          | `"hello has no value"`                                                                      | The word as a lit-word        |
-| `'math`      | Division by zero, overflow, invalid arithmetic                                  | `"division by zero"`                                                                        | none                          |
+| `'math`      | Division by zero, modulo by zero, money overflow, invalid arithmetic            | `"division by zero"`, `"modulo by zero"`, `"money overflow"`                                | none                          |
 | `'range`     | Index out of bounds on `pick`, `insert`, `remove`                               | `"index 6 out of range for block of length 5"`                                              | The index as integer          |
-| `'parse`     | Parse dialect fails to match, malformed rules                                   | `"parse failed at position 12"`                                                             | The remaining unmatched input |
+| `'syntax`    | Malformed literal in lexer (bad pair, tuple overflow, invalid date/time/money)   | `"invalid pair literal: 100xx200"`, `"month out of range (1-12): 13"`                       | none                          |
+| `'parse`     | Parse dialect fails to match, malformed rules, nesting depth exceeded            | `"parse failed at position 12"`, `"Maximum nesting depth (256) exceeded"`                   | The remaining unmatched input |
+| `'loop`      | Invalid loop parameters (zero step)                                             | `"loop step cannot be zero"`                                                                | none                          |
+| `'attempt`   | Invalid attempt configuration (negative retries)                                | `"retries must be non-negative"`                                                            | none                          |
 | `'load`      | File not found, circular dependency, malformed header                           | `"file not found: %lib/missing.ktg"` or `"circular dependency: %a.ktg -> %b.ktg -> %a.ktg"` | The file path                 |
 | `'frozen`    | Attempt to mutate an `object!` (frozen context)                                 | `"cannot mutate frozen object"`                                                             | The object                    |
 | `'make`      | Required field missing in `make`, invalid override type                         | `"required field 'name' not provided"`                                                      | The prototype                 |

@@ -181,7 +181,7 @@ tally: function [data [block!]] [
   counts: make map! []
   loop [for [item] in data do [
     key: to string! item
-    either has? counts 'key [
+    either has? counts key [
       counts/:key: counts/:key + 1
     ] [
       counts/:key: 1

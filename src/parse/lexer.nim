@@ -117,14 +117,27 @@ proc readNumber(lex: var Lexer): KtgValue =
   if hasX:
     let parts = numStr.split('x')
     if parts.len == 2:
-      return ktgPair(int32(parseInt(parts[0])), int32(parseInt(parts[1])), startLine)
+      try:
+        let px = parseInt(parts[0])
+        let py = parseInt(parts[1])
+        if px < int32.low or px > int32.high or py < int32.low or py > int32.high:
+          raise KtgError(kind: "syntax", msg: "pair component out of int32 range: " & numStr, data: nil)
+        return ktgPair(int32(px), int32(py), startLine)
+      except ValueError:
+        raise KtgError(kind: "syntax", msg: "invalid pair literal: " & numStr, data: nil)
 
   if dotCount >= 2:
     # tuple: 1.2.3
     var vals: seq[uint8] = @[]
     for part in numStr.split('.'):
       if part.len > 0:
-        vals.add(uint8(parseInt(part)))
+        try:
+          let v = parseInt(part)
+          if v < 0 or v > 255:
+            raise KtgError(kind: "syntax", msg: "tuple component out of range (0-255): " & part, data: nil)
+          vals.add(uint8(v))
+        except ValueError:
+          raise KtgError(kind: "syntax", msg: "invalid tuple component: " & part, data: nil)
     return KtgValue(kind: vkTuple, tupleVals: vals, line: startLine)
 
   if hasDot:
@@ -147,9 +160,9 @@ proc readTime(lex: var Lexer, prefix: string, startLine: int): KtgValue =
     else:
       break
   parts.add(current)
-  let h = if parts.len > 0: uint8(parseInt(parts[0])) else: 0'u8
-  let m = if parts.len > 1: uint8(parseInt(parts[1])) else: 0'u8
-  let s = if parts.len > 2: uint8(parseInt(parts[2])) else: 0'u8
+  let h = if parts.len > 0 and parts[0].len > 0: uint8(parseInt(parts[0])) else: 0'u8
+  let m = if parts.len > 1 and parts[1].len > 0: uint8(parseInt(parts[1])) else: 0'u8
+  let s = if parts.len > 2 and parts[2].len > 0: uint8(parseInt(parts[2])) else: 0'u8
   KtgValue(kind: vkTime, hour: h, minute: m, second: s, line: startLine)
 
 proc readDate(lex: var Lexer, yearStr: string, startLine: int): KtgValue =
@@ -162,10 +175,18 @@ proc readDate(lex: var Lexer, yearStr: string, startLine: int): KtgValue =
   var dayStr = ""
   while not lex.atEnd and isDigit(lex.peek):
     dayStr &= lex.advance
+  if monthStr.len == 0 or dayStr.len == 0:
+    raise KtgError(kind: "syntax", msg: "invalid date literal: " & yearStr & "-" & monthStr & "-" & dayStr, data: nil)
+  let month = parseInt(monthStr)
+  let day = parseInt(dayStr)
+  if month < 1 or month > 12:
+    raise KtgError(kind: "syntax", msg: "month out of range (1-12): " & monthStr, data: nil)
+  if day < 1 or day > 31:
+    raise KtgError(kind: "syntax", msg: "day out of range (1-31): " & dayStr, data: nil)
   KtgValue(kind: vkDate,
     year: int16(parseInt(yearStr)),
-    month: uint8(parseInt(monthStr)),
-    day: uint8(parseInt(dayStr)),
+    month: uint8(month),
+    day: uint8(day),
     line: startLine)
 
 proc readWord(lex: var Lexer): string =
@@ -213,6 +234,8 @@ proc readMoney(lex: var Lexer, startLine: int): KtgValue =
   var numStr = ""
   while not lex.atEnd and (isDigit(lex.peek) or lex.peek == '.'):
     numStr &= lex.advance
+  if numStr.len == 0 or numStr == ".":
+    raise KtgError(kind: "syntax", msg: "invalid money literal: $" & numStr, data: nil)
   let f = parseFloat(numStr)
   ktgMoney(int64(round(f * 100.0)), startLine)
 
