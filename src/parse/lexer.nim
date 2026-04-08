@@ -160,9 +160,18 @@ proc readTime(lex: var Lexer, prefix: string, startLine: int): KtgValue =
     else:
       break
   parts.add(current)
-  let h = if parts.len > 0 and parts[0].len > 0: uint8(parseInt(parts[0])) else: 0'u8
-  let m = if parts.len > 1 and parts[1].len > 0: uint8(parseInt(parts[1])) else: 0'u8
-  let s = if parts.len > 2 and parts[2].len > 0: uint8(parseInt(parts[2])) else: 0'u8
+  let hVal = if parts.len > 0 and parts[0].len > 0: parseInt(parts[0]) else: 0
+  let mVal = if parts.len > 1 and parts[1].len > 0: parseInt(parts[1]) else: 0
+  let sVal = if parts.len > 2 and parts[2].len > 0: parseInt(parts[2]) else: 0
+  if hVal < 0 or hVal > 23:
+    raise KtgError(kind: "syntax", msg: "hour out of range (0-23): " & $hVal, data: nil)
+  if mVal < 0 or mVal > 59:
+    raise KtgError(kind: "syntax", msg: "minute out of range (0-59): " & $mVal, data: nil)
+  if sVal < 0 or sVal > 59:
+    raise KtgError(kind: "syntax", msg: "second out of range (0-59): " & $sVal, data: nil)
+  let h = uint8(hVal)
+  let m = uint8(mVal)
+  let s = uint8(sVal)
   KtgValue(kind: vkTime, hour: h, minute: m, second: s, line: startLine)
 
 proc readDate(lex: var Lexer, yearStr: string, startLine: int): KtgValue =

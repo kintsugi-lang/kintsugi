@@ -60,6 +60,31 @@ proc safeMulMoney(a, b: int64): int64 =
   if a != 0 and result div a != b:
     raise KtgError(kind: "math", msg: "money overflow", data: nil)
 
+proc compareValues*(left, right: KtgValue): int =
+  ## Compare two values. Returns negative, 0, or positive.
+  ## Raises KtgError if types are not comparable.
+  if left.kind in {vkInteger, vkFloat} and right.kind in {vkInteger, vkFloat}:
+    let lf = if left.kind == vkInteger: float64(left.intVal) else: left.floatVal
+    let rf = if right.kind == vkInteger: float64(right.intVal) else: right.floatVal
+    return cmp(lf, rf)
+  if left.kind == vkString and right.kind == vkString:
+    return cmp(left.strVal, right.strVal)
+  if left.kind == vkMoney and right.kind == vkMoney:
+    return cmp(left.cents, right.cents)
+  if left.kind == vkDate and right.kind == vkDate:
+    return cmp(
+      (left.year, left.month, left.day),
+      (right.year, right.month, right.day))
+  if left.kind == vkTime and right.kind == vkTime:
+    return cmp(
+      (left.hour, left.minute, left.second),
+      (right.hour, right.minute, right.second))
+  raise KtgError(
+    kind: "type",
+    msg: "cannot compare " & typeName(left) & " and " & typeName(right),
+    data: nil)
+
+
 proc applyOp*(eval: Evaluator, op: string, left, right: KtgValue): KtgValue =
   # numeric ops
   if left.kind in {vkInteger, vkFloat} and right.kind in {vkInteger, vkFloat}:
@@ -150,67 +175,11 @@ proc applyOp*(eval: Evaluator, op: string, left, right: KtgValue): KtgValue =
         data: nil)
     return ktgLogic(left.kind == right.kind and valuesEqual(left, right))
   of "<>": return ktgLogic(not valuesEqual(left, right))
-  of "<":
-    if left.kind in {vkInteger, vkFloat} and right.kind in {vkInteger, vkFloat}:
-      let lf = if left.kind == vkInteger: float64(left.intVal) else: left.floatVal
-      let rf = if right.kind == vkInteger: float64(right.intVal) else: right.floatVal
-      return ktgLogic(lf < rf)
-    if left.kind == vkString and right.kind == vkString:
-      return ktgLogic(left.strVal < right.strVal)
-    if left.kind == vkMoney and right.kind == vkMoney:
-      return ktgLogic(left.cents < right.cents)
-    if left.kind == vkDate and right.kind == vkDate:
-      return ktgLogic(
-        (left.year, left.month, left.day) < (right.year, right.month, right.day))
-    if left.kind == vkTime and right.kind == vkTime:
-      return ktgLogic(
-        (left.hour, left.minute, left.second) < (right.hour, right.minute, right.second))
-  of ">":
-    if left.kind in {vkInteger, vkFloat} and right.kind in {vkInteger, vkFloat}:
-      let lf = if left.kind == vkInteger: float64(left.intVal) else: left.floatVal
-      let rf = if right.kind == vkInteger: float64(right.intVal) else: right.floatVal
-      return ktgLogic(lf > rf)
-    if left.kind == vkString and right.kind == vkString:
-      return ktgLogic(left.strVal > right.strVal)
-    if left.kind == vkMoney and right.kind == vkMoney:
-      return ktgLogic(left.cents > right.cents)
-    if left.kind == vkDate and right.kind == vkDate:
-      return ktgLogic(
-        (left.year, left.month, left.day) > (right.year, right.month, right.day))
-    if left.kind == vkTime and right.kind == vkTime:
-      return ktgLogic(
-        (left.hour, left.minute, left.second) > (right.hour, right.minute, right.second))
-  of "<=":
-    if left.kind in {vkInteger, vkFloat} and right.kind in {vkInteger, vkFloat}:
-      let lf = if left.kind == vkInteger: float64(left.intVal) else: left.floatVal
-      let rf = if right.kind == vkInteger: float64(right.intVal) else: right.floatVal
-      return ktgLogic(lf <= rf)
-    if left.kind == vkString and right.kind == vkString:
-      return ktgLogic(left.strVal <= right.strVal)
-    if left.kind == vkMoney and right.kind == vkMoney:
-      return ktgLogic(left.cents <= right.cents)
-    if left.kind == vkDate and right.kind == vkDate:
-      return ktgLogic(
-        (left.year, left.month, left.day) <= (right.year, right.month, right.day))
-    if left.kind == vkTime and right.kind == vkTime:
-      return ktgLogic(
-        (left.hour, left.minute, left.second) <= (right.hour, right.minute, right.second))
-  of ">=":
-    if left.kind in {vkInteger, vkFloat} and right.kind in {vkInteger, vkFloat}:
-      let lf = if left.kind == vkInteger: float64(left.intVal) else: left.floatVal
-      let rf = if right.kind == vkInteger: float64(right.intVal) else: right.floatVal
-      return ktgLogic(lf >= rf)
-    if left.kind == vkString and right.kind == vkString:
-      return ktgLogic(left.strVal >= right.strVal)
-    if left.kind == vkMoney and right.kind == vkMoney:
-      return ktgLogic(left.cents >= right.cents)
-    if left.kind == vkDate and right.kind == vkDate:
-      return ktgLogic(
-        (left.year, left.month, left.day) >= (right.year, right.month, right.day))
-    if left.kind == vkTime and right.kind == vkTime:
-      return ktgLogic(
-        (left.hour, left.minute, left.second) >= (right.hour, right.minute, right.second))
-  else: discard
+  of "<":  return ktgLogic(compareValues(left, right) < 0)
+  of ">":  return ktgLogic(compareValues(left, right) > 0)
+  of "<=": return ktgLogic(compareValues(left, right) <= 0)
+  of ">=": return ktgLogic(compareValues(left, right) >= 0)
+  else: discard  # arithmetic ops not handled above
 
   raise KtgError(
     kind: "type",
@@ -1033,6 +1002,8 @@ proc callCallable*(eval: Evaluator, fn: KtgValue, vals: seq[KtgValue],
           eval.applyInfix(rarg, vals, pos, ctx)
           args.add(rarg)
 
+    if eval.callStack.len > 512:
+      raise KtgError(kind: "stack", msg: "stack overflow: recursion depth exceeded 512", data: nil)
     eval.callStack.add(StackFrame(name: native.name, file: "", line: 0))
     let savedCtx = eval.currentCtx
     eval.currentCtx = ctx
@@ -1105,6 +1076,8 @@ proc callCallable*(eval: Evaluator, fn: KtgValue, vals: seq[KtgValue],
         for rp in refSpec.params:
           funcCtx.set(rp.name, ktgNone())
 
+    if eval.callStack.len > 512:
+      raise KtgError(kind: "stack", msg: "stack overflow: recursion depth exceeded 512", data: nil)
     eval.callStack.add(StackFrame(name: "function", file: "", line: 0))
     try:
       result = eval.evalBlock(f.body, funcCtx)

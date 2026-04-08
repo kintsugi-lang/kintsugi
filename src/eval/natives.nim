@@ -22,9 +22,44 @@ proc deepCopyValue*(val: KtgValue): KtgValue =
     KtgValue(kind: vkContext, ctx: newCtx, line: val.line)
   of vkString:
     ktgString(val.strVal)
+  of vkMap:
+    var newEntries = initOrderedTable[string, KtgValue]()
+    for key, v in val.mapEntries:
+      newEntries[key] = deepCopyValue(v)
+    KtgValue(kind: vkMap, mapEntries: newEntries, line: val.line)
+  of vkSet:
+    KtgValue(kind: vkSet, setMembers: val.setMembers, line: val.line)
+  of vkPrototype:
+    var newEntries = initOrderedTable[string, KtgValue]()
+    for key, v in val.proto.entries:
+      newEntries[key] = deepCopyValue(v)
+    KtgValue(kind: vkPrototype,
+      proto: newPrototype(newEntries, val.proto.fieldSpecs, val.proto.name),
+      line: val.line)
   else:
     val
 
+
+proc seriesAt(val: KtgValue, idx: int, funcName: string): KtgValue =
+  ## Access element at 0-based index from a block or string.
+  ## Raises KtgError on type mismatch or out-of-range.
+  case val.kind
+  of vkBlock:
+    if idx < 0 or idx >= val.blockVals.len:
+      raise KtgError(kind: "range",
+        msg: funcName & ": index out of range for block of length " & $val.blockVals.len,
+        data: nil)
+    return val.blockVals[idx]
+  of vkString:
+    if idx < 0 or idx >= val.strVal.len:
+      raise KtgError(kind: "range",
+        msg: funcName & ": index out of range for string of length " & $val.strVal.len,
+        data: nil)
+    return ktgString($val.strVal[idx])
+  else:
+    raise KtgError(kind: "type",
+      msg: funcName & " expects series (block! or string!), got " & typeName(val),
+      data: nil)
 
 proc registerNatives*(eval: Evaluator) =
   let ctx = eval.global
@@ -211,7 +246,7 @@ proc registerNatives*(eval: Evaluator) =
 
   # --- Series operations ---
 
-  ctx.native("size?", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+  let sizeImpl = proc(args: seq[KtgValue], ep: pointer): KtgValue =
     case args[0].kind
     of vkBlock: ktgInt(int64(args[0].blockVals.len))
     of vkString: ktgInt(int64(args[0].strVal.len))
@@ -222,21 +257,8 @@ proc registerNatives*(eval: Evaluator) =
     of vkParen: ktgInt(int64(args[0].parenVals.len))
     else:
       raise KtgError(kind: "type", msg: "size? not supported on " & typeName(args[0]), data: nil)
-  )
-
-  # length? as alias
-  ctx.native("length?", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    case args[0].kind
-    of vkBlock: ktgInt(int64(args[0].blockVals.len))
-    of vkString: ktgInt(int64(args[0].strVal.len))
-    of vkMap: ktgInt(int64(args[0].mapEntries.len))
-    of vkSet: ktgInt(int64(args[0].setMembers.len))
-    of vkContext: ktgInt(int64(args[0].ctx.entries.len))
-    of vkPrototype: ktgInt(int64(args[0].proto.entries.len))
-    of vkParen: ktgInt(int64(args[0].parenVals.len))
-    else:
-      raise KtgError(kind: "type", msg: "length? not supported on " & typeName(args[0]), data: nil)
-  )
+  ctx.native("size?", 1, sizeImpl)
+  ctx.native("length?", 1, sizeImpl)
 
   ctx.native("empty?", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     case args[0].kind
@@ -250,66 +272,26 @@ proc registerNatives*(eval: Evaluator) =
   )
 
   ctx.native("first", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    case args[0].kind
-    of vkBlock:
-      if args[0].blockVals.len == 0:
-        raise KtgError(kind: "range", msg: "first on empty block", data: nil)
-      return args[0].blockVals[0]
-    of vkString:
-      if args[0].strVal.len == 0:
-        raise KtgError(kind: "range", msg: "first on empty string", data: nil)
-      return ktgString($args[0].strVal[0])
-    else:
-      raise KtgError(kind: "type", msg: "first expects series (block! or string!), got " & typeName(args[0]), data: nil)
+    seriesAt(args[0], 0, "first")
   )
 
   ctx.native("second", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    case args[0].kind
-    of vkBlock:
-      if args[0].blockVals.len < 2:
-        raise KtgError(kind: "range", msg: "second on block with fewer than 2 elements", data: nil)
-      return args[0].blockVals[1]
-    of vkString:
-      if args[0].strVal.len < 2:
-        raise KtgError(kind: "range", msg: "second on string with fewer than 2 characters", data: nil)
-      return ktgString($args[0].strVal[1])
-    else:
-      raise KtgError(kind: "type", msg: "second expects series (block! or string!), got " & typeName(args[0]), data: nil)
+    seriesAt(args[0], 1, "second")
   )
 
   ctx.native("last", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    case args[0].kind
-    of vkBlock:
-      if args[0].blockVals.len == 0:
-        raise KtgError(kind: "range", msg: "last on empty block", data: nil)
-      return args[0].blockVals[^1]
-    of vkString:
-      if args[0].strVal.len == 0:
-        raise KtgError(kind: "range", msg: "last on empty string", data: nil)
-      return ktgString($args[0].strVal[^1])
-    else:
-      raise KtgError(kind: "type", msg: "last expects series (block! or string!), got " & typeName(args[0]), data: nil)
+    let idx = case args[0].kind
+      of vkBlock: args[0].blockVals.len - 1
+      of vkString: args[0].strVal.len - 1
+      else: -1  # seriesAt will raise on type mismatch
+    seriesAt(args[0], idx, "last")
   )
 
   ctx.native("pick", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     if args[1].kind != vkInteger:
       raise KtgError(kind: "type", msg: "pick expects integer! as index", data: args[1])
-    let idx = int(args[1].intVal) - 1  # 1-based
-    case args[0].kind
-    of vkBlock:
-      if idx < 0 or idx >= args[0].blockVals.len:
-        raise KtgError(kind: "range",
-          msg: "index " & $args[1].intVal & " out of range for block of length " & $args[0].blockVals.len,
-          data: args[1])
-      return args[0].blockVals[idx]
-    of vkString:
-      if idx < 0 or idx >= args[0].strVal.len:
-        raise KtgError(kind: "range",
-          msg: "index " & $args[1].intVal & " out of range for string of length " & $args[0].strVal.len,
-          data: args[1])
-      return ktgString($args[0].strVal[idx])
-    else:
-      raise KtgError(kind: "type", msg: "pick expects block! or string!, got " & typeName(args[0]), data: nil)
+    let idx = int(args[1].intVal) - 1  # 1-based to 0-based
+    seriesAt(args[0], idx, "pick")
   )
 
   block:
@@ -619,6 +601,8 @@ proc registerNatives*(eval: Evaluator) =
     let start = int(args[1].intVal) - 1  # 1-based
     let length = int(args[2].intVal)
     let s = args[0].strVal
+    if length < 0:
+      raise KtgError(kind: "range", msg: "substring length must be non-negative", data: args[2])
     if start < 0 or start >= s.len:
       raise KtgError(kind: "range", msg: "substring start out of range", data: args[1])
     let endIdx = min(start + length, s.len)
@@ -738,55 +722,11 @@ proc registerNatives*(eval: Evaluator) =
     if args[0].kind != vkBlock or args[1].kind != vkBlock:
       raise KtgError(kind: "type", msg: "function expects [spec] [body]", data: nil)
 
-    var params: seq[ParamSpec] = @[]
-    var refinements: seq[RefinementSpec] = @[]
-    var returnType = ""
-    let spec = args[0].blockVals
-    var i = 0
-    var inRefinement = false  # true when we've seen a /word
-    while i < spec.len:
-      let s = spec[i]
-      # Refinement declaration: /name (single word token starting with /)
-      if s.kind == vkWord and s.wordKind == wkWord and s.wordName.startsWith("/"):
-        let refName = s.wordName[1..^1]
-        refinements.add(RefinementSpec(name: refName, params: @[]))
-        inRefinement = true
-        i += 1
-        continue
-      if s.kind == vkWord and s.wordKind == wkWord:
-        var pname = s.wordName
-        var ptype = ""
-        var elemType = ""
-        # check for type block
-        if i + 1 < spec.len and spec[i + 1].kind == vkBlock:
-          i += 1
-          let typeBlock = spec[i].blockVals
-          if typeBlock.len > 0:
-            # Handle typed blocks: [block! integer!] — container + element type
-            if typeBlock.len == 2 and typeBlock[0].kind == vkType and
-                 typeBlock[0].typeName == "block!" and typeBlock[1].kind == vkType:
-              ptype = "block!"
-              elemType = typeBlock[1].typeName
-            else:
-              ptype = $typeBlock[0]
-        if inRefinement:
-          # This is a refinement parameter
-          if refinements.len > 0:
-            refinements[^1].params.add(ParamSpec(name: pname, typeName: ptype, elementType: elemType))
-        else:
-          params.add(ParamSpec(name: pname, typeName: ptype, elementType: elemType))
-      elif s.kind == vkWord and s.wordKind == wkSetWord and s.wordName == "return":
-        if i + 1 < spec.len and spec[i + 1].kind == vkBlock:
-          i += 1
-          let typeBlock = spec[i].blockVals
-          if typeBlock.len > 0:
-            returnType = $typeBlock[0]
-      i += 1
-
+    let spec = parseFuncSpec(args[0].blockVals)
     let fn = KtgFunc(
-      params: params,
-      refinements: refinements,
-      returnType: returnType,
+      params: spec.params,
+      refinements: spec.refinements,
+      returnType: spec.returnType,
       body: args[1].blockVals,
       closure: eval.currentCtx
     )

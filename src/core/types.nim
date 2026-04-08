@@ -1,4 +1,4 @@
-import std/[tables, sets, hashes]
+import std/[tables, sets, hashes, strutils]
 
 type
   WordKind* = enum
@@ -101,6 +101,11 @@ type
   RefinementSpec* = object
     name*: string
     params*: seq[ParamSpec]
+
+  ParsedFuncSpec* = object
+    params*: seq[ParamSpec]
+    refinements*: seq[RefinementSpec]
+    returnType*: string
 
   KtgFunc* = ref object
     params*: seq[ParamSpec]
@@ -346,3 +351,51 @@ proc `$`*(val: KtgValue): string =
     of wkGetWord:  ":" & val.wordName
     of wkLitWord:  "'" & val.wordName
     of wkMetaWord: "@" & val.wordName
+
+proc parseFuncSpec*(specBlock: seq[KtgValue]): ParsedFuncSpec =
+  ## Parse a function spec block [a [type!] b /refine param] into params,
+  ## refinements, and return type. Shared by interpreter, emitter, and prescan.
+  var params: seq[ParamSpec] = @[]
+  var refinements: seq[RefinementSpec] = @[]
+  var returnType = ""
+  var i = 0
+  var inRefinement = false
+  while i < specBlock.len:
+    let s = specBlock[i]
+    # Refinement declaration: /name
+    if s.kind == vkWord and s.wordKind == wkWord and s.wordName.startsWith("/"):
+      let refName = s.wordName[1..^1]
+      refinements.add(RefinementSpec(name: refName, params: @[]))
+      inRefinement = true
+      i += 1
+      continue
+    if s.kind == vkWord and s.wordKind == wkWord:
+      var pname = s.wordName
+      var ptype = ""
+      var elemType = ""
+      # Check for type annotation block
+      if i + 1 < specBlock.len and specBlock[i + 1].kind == vkBlock:
+        i += 1
+        let typeBlock = specBlock[i].blockVals
+        if typeBlock.len > 0:
+          if typeBlock.len == 2 and typeBlock[0].kind == vkType and
+               typeBlock[0].typeName == "block!" and typeBlock[1].kind == vkType:
+            ptype = "block!"
+            elemType = typeBlock[1].typeName
+          else:
+            ptype = $typeBlock[0]
+      if inRefinement:
+        if refinements.len > 0:
+          refinements[^1].params.add(ParamSpec(name: pname, typeName: ptype, elementType: elemType))
+      else:
+        params.add(ParamSpec(name: pname, typeName: ptype, elementType: elemType))
+    elif s.kind == vkBlock:
+      discard  # standalone type annotation (already consumed above)
+    elif s.kind == vkWord and s.wordKind == wkSetWord and s.wordName == "return":
+      i += 1
+      if i < specBlock.len and specBlock[i].kind == vkBlock:
+        let typeBlock = specBlock[i].blockVals
+        if typeBlock.len > 0:
+          returnType = $typeBlock[0]
+    i += 1
+  ParsedFuncSpec(params: params, refinements: refinements, returnType: returnType)

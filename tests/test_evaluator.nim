@@ -170,3 +170,187 @@ suite "reduce":
     let eval = makeEval()
     check $eval.evalString("reduce [1 + 2 3 * 4]") == "[3 12]"
 
+suite "comparison operators":
+  test "integer comparisons":
+    let eval = makeEval()
+    check $eval.evalString("1 < 2") == "true"
+    check $eval.evalString("2 > 1") == "true"
+    check $eval.evalString("1 <= 1") == "true"
+    check $eval.evalString("2 >= 1") == "true"
+    check $eval.evalString("2 < 1") == "false"
+
+  test "float comparisons":
+    let eval = makeEval()
+    check $eval.evalString("1.5 < 2.5") == "true"
+    check $eval.evalString("2.5 > 1.5") == "true"
+
+  test "mixed int/float comparisons":
+    let eval = makeEval()
+    check $eval.evalString("1 < 2.5") == "true"
+    check $eval.evalString("2.5 > 1") == "true"
+
+  test "string comparisons":
+    let eval = makeEval()
+    check $eval.evalString(""""abc" < "def" """) == "true"
+    check $eval.evalString(""""def" > "abc" """) == "true"
+    check $eval.evalString(""""abc" <= "abc" """) == "true"
+
+  test "money comparisons":
+    let eval = makeEval()
+    check $eval.evalString("$1.00 < $2.00") == "true"
+    check $eval.evalString("$2.00 > $1.00") == "true"
+    check $eval.evalString("$1.00 <= $1.00") == "true"
+
+  test "date comparisons":
+    let eval = makeEval()
+    check $eval.evalString("2026-01-01 < 2026-12-31") == "true"
+    check $eval.evalString("2026-12-31 > 2026-01-01") == "true"
+
+  test "time comparisons":
+    let eval = makeEval()
+    check $eval.evalString("10:00:00 < 14:30:00") == "true"
+    check $eval.evalString("14:30:00 > 10:00:00") == "true"
+
+  test "type mismatch raises error":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("""1 < "hello" """)
+
+suite "series access safety":
+  test "first/second/last on blocks":
+    let eval = makeEval()
+    check $eval.evalString("first [10 20 30]") == "10"
+    check $eval.evalString("second [10 20 30]") == "20"
+    check $eval.evalString("last [10 20 30]") == "30"
+
+  test "first/second/last on strings":
+    let eval = makeEval()
+    check $eval.evalString("""first "abc" """) == "a"
+    check $eval.evalString("""second "abc" """) == "b"
+    check $eval.evalString("""last "abc" """) == "c"
+
+  test "pick with valid index":
+    let eval = makeEval()
+    check $eval.evalString("pick [10 20 30] 2") == "20"
+    check $eval.evalString("""pick "abc" 2""") == "b"
+
+  test "first on empty block raises":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("first []")
+
+  test "pick out of range raises":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("pick [1 2 3] 5")
+
+  test "second on short block raises":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("second [1]")
+
+suite "@macro":
+  test "macro that returns a block auto-evaluates it":
+    let eval = makeEval()
+    check $eval.evalString("""
+      @macro add-one-two: function [] [ [1 + 2] ]
+      add-one-two
+    """) == "3"
+
+  test "macro that returns non-block passes through":
+    let eval = makeEval()
+    check $eval.evalString("""
+      @macro always-42: function [] [42]
+      always-42
+    """) == "42"
+
+  test "macro result evaluated in caller context":
+    let eval = makeEval()
+    check $eval.evalString("""
+      x: 10
+      @macro get-x: function [] [ [x] ]
+      get-x
+    """) == "10"
+
+suite "recursion depth limit":
+  test "infinite recursion raises stack overflow":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("""
+        inf: function [] [inf]
+        inf
+      """)
+
+suite "arithmetic errors":
+  test "division by zero":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("1 / 0")
+
+  test "modulo by zero":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("10 % 0")
+
+  test "type mismatch in addition":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("""1 + "hello" """)
+
+  test "type mismatch in subtraction":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("""1 - "hello" """)
+
+suite "type errors":
+  test "undefined variable":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("print undefined-var")
+
+  test "wrong arity":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("""
+        f: function [a b] [a + b]
+        f 1
+      """)
+
+suite "@exit error guarantee":
+  test "@exit runs even when body throws":
+    let eval = makeEval()
+    discard eval.evalString("""
+      cleanup-ran: false
+      try [
+        @exit [cleanup-ran: true]
+        error "test" "deliberate error" none
+      ]
+    """)
+    check $eval.evalString("cleanup-ran") == "true"
+
+suite "lexer errors":
+  test "invalid date month":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("x: 2026-13-01")
+
+  test "invalid date day":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("x: 2026-01-32")
+
+  test "invalid time hour":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("x: 24:00:00")
+
+  test "invalid time minute":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("x: 12:60:00")
+
+  test "invalid time second":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("x: 12:30:60")
+

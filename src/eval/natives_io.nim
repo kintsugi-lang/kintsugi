@@ -143,34 +143,19 @@ proc registerIoNatives*(eval: Evaluator) =
         KtgValue(kind: vkTime, hour: uint8(dt.hour), minute: uint8(dt.minute),
                  second: uint8(dt.second), line: 0)
       ), line: 0))
-    timeCtx.set("hours", KtgValue(kind: vkNative,
-      nativeFn: KtgNative(name: "time/hours", arity: 1, fn: proc(
-          args: seq[KtgValue], ep: pointer): KtgValue =
-        if args[0].kind != vkTime:
-          raise KtgError(kind: "type", msg: "time/hours expects time!", data: nil)
-        ktgInt(int64(args[0].hour))
-      ), line: 0))
-    timeCtx.set("minutes", KtgValue(kind: vkNative,
-      nativeFn: KtgNative(name: "time/minutes", arity: 1, fn: proc(
-          args: seq[KtgValue], ep: pointer): KtgValue =
-        if args[0].kind != vkTime:
-          raise KtgError(kind: "type", msg: "time/minutes expects time!", data: nil)
-        ktgInt(int64(args[0].minute))
-      ), line: 0))
-    timeCtx.set("seconds", KtgValue(kind: vkNative,
-      nativeFn: KtgNative(name: "time/seconds", arity: 1, fn: proc(
-          args: seq[KtgValue], ep: pointer): KtgValue =
-        if args[0].kind != vkTime:
-          raise KtgError(kind: "type", msg: "time/seconds expects time!", data: nil)
-        ktgInt(int64(args[0].second))
-      ), line: 0))
-    timeCtx.set("to-seconds", KtgValue(kind: vkNative,
-      nativeFn: KtgNative(name: "time/to-seconds", arity: 1, fn: proc(
-          args: seq[KtgValue], ep: pointer): KtgValue =
-        if args[0].kind != vkTime:
-          raise KtgError(kind: "type", msg: "time/to-seconds expects time!", data: nil)
-        ktgInt(int64(args[0].hour) * 3600 + int64(args[0].minute) * 60 + int64(args[0].second))
-      ), line: 0))
+    proc timeAccessor(ctxName, field: string, extract: proc(v: KtgValue): int64): KtgValue =
+      KtgValue(kind: vkNative,
+        nativeFn: KtgNative(name: ctxName & "/" & field, arity: 1, fn: proc(
+            args: seq[KtgValue], ep: pointer): KtgValue =
+          if args[0].kind != vkTime:
+            raise KtgError(kind: "type", msg: ctxName & "/" & field & " expects time!", data: nil)
+          ktgInt(extract(args[0]))
+        ), line: 0)
+    timeCtx.set("hours", timeAccessor("time", "hours", proc(v: KtgValue): int64 = int64(v.hour)))
+    timeCtx.set("minutes", timeAccessor("time", "minutes", proc(v: KtgValue): int64 = int64(v.minute)))
+    timeCtx.set("seconds", timeAccessor("time", "seconds", proc(v: KtgValue): int64 = int64(v.second)))
+    timeCtx.set("to-seconds", timeAccessor("time", "to-seconds", proc(v: KtgValue): int64 =
+      int64(v.hour) * 3600 + int64(v.minute) * 60 + int64(v.second)))
     ctx.set("time", KtgValue(kind: vkContext, ctx: timeCtx, line: 0))
 
   block:
@@ -191,27 +176,17 @@ proc registerIoNatives*(eval: Evaluator) =
         KtgValue(kind: vkDate, year: int16(dt.year), month: uint8(ord(dt.month)),
                  day: uint8(dt.monthday), line: 0)
       ), line: 0))
-    dateCtx.set("year", KtgValue(kind: vkNative,
-      nativeFn: KtgNative(name: "date/year", arity: 1, fn: proc(
-          args: seq[KtgValue], ep: pointer): KtgValue =
-        if args[0].kind != vkDate:
-          raise KtgError(kind: "type", msg: "date/year expects date!", data: nil)
-        ktgInt(int64(args[0].year))
-      ), line: 0))
-    dateCtx.set("month", KtgValue(kind: vkNative,
-      nativeFn: KtgNative(name: "date/month", arity: 1, fn: proc(
-          args: seq[KtgValue], ep: pointer): KtgValue =
-        if args[0].kind != vkDate:
-          raise KtgError(kind: "type", msg: "date/month expects date!", data: nil)
-        ktgInt(int64(args[0].month))
-      ), line: 0))
-    dateCtx.set("day", KtgValue(kind: vkNative,
-      nativeFn: KtgNative(name: "date/day", arity: 1, fn: proc(
-          args: seq[KtgValue], ep: pointer): KtgValue =
-        if args[0].kind != vkDate:
-          raise KtgError(kind: "type", msg: "date/day expects date!", data: nil)
-        ktgInt(int64(args[0].day))
-      ), line: 0))
+    proc dateAccessor(ctxName, field: string, extract: proc(v: KtgValue): int64): KtgValue =
+      KtgValue(kind: vkNative,
+        nativeFn: KtgNative(name: ctxName & "/" & field, arity: 1, fn: proc(
+            args: seq[KtgValue], ep: pointer): KtgValue =
+          if args[0].kind != vkDate:
+            raise KtgError(kind: "type", msg: ctxName & "/" & field & " expects date!", data: nil)
+          ktgInt(extract(args[0]))
+        ), line: 0)
+    dateCtx.set("year", dateAccessor("date", "year", proc(v: KtgValue): int64 = int64(v.year)))
+    dateCtx.set("month", dateAccessor("date", "month", proc(v: KtgValue): int64 = int64(v.month)))
+    dateCtx.set("day", dateAccessor("date", "day", proc(v: KtgValue): int64 = int64(v.day)))
     dateCtx.set("weekday", KtgValue(kind: vkNative,
       nativeFn: KtgNative(name: "date/weekday", arity: 1, fn: proc(
           args: seq[KtgValue], ep: pointer): KtgValue =

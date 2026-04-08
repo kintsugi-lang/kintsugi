@@ -1057,9 +1057,11 @@ print point/x                           ; 30
 print words-of point                    ; [x y]
 
 ; copy/deep -- recursively copies nested blocks and contexts
-; nested: [[1 2] [3 4]]
-; deep-clone: copy/deep nested
-; Mutating deep-clone's inner blocks does NOT affect nested.
+deep-src: [[1 2] [3 4]]
+deep-clone: copy/deep deep-src
+append (first deep-clone) 99
+print first deep-src                    ; [1 2] (unaffected)
+print first deep-clone                  ; [1 2 99] (independent copy)
 
 ; --- Set-word always shadows ---
 ; Inside any block that creates a new scope (function, loop,
@@ -1425,7 +1427,7 @@ print result/ok                         ; true
 
 ; --- @parse/ok? refinement ---
 ; Returns bare logic! when you only care about success.
-; if @parse/ok? input [some digit] [print "all numbers"]
+if @parse/ok? "12345" [some digit] [print "all digits"]
 
 ; --- Backtracking ---
 ; some and any are greedy but backtrack on failure, like REBOL.

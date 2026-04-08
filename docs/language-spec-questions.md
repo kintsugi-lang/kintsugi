@@ -33,7 +33,7 @@ What happens when the evaluator encounters each value type?
 | `set-word!`  | Evaluates RHS (with infix), binds result in current scope. Returns the value.                         |
 | `get-word!`  | Returns bound value without calling, even if callable.                                                |
 | `lit-word!`  | Returns the word as a symbol value.                                                                   |
-| `meta-word!` | Depends on context but usually does something magical/behind-the-scenes                               |
+| `meta-word!` | Annotation/directive. Behavior depends on the specific meta-word. See section 13.4 for the full list. |
 | `path!`      | Evaluates head, navigates segments. If final value is callable, calls it.                             |
 | `set-path!`  | Evaluates RHS, assigns through path.                                                                  |
 | `get-path!`  | Returns value at path without calling.                                                                |
@@ -1339,6 +1339,78 @@ data: [#[platform] #[1 + 2]]    ; data = ['script 3] or ['lua 3]
   - `Kintsugi/Lua []` → `'lua`
 - Future targets add new values: `Kintsugi/Luau` → `'luau`, etc. The word is set by the toolchain, not by user code.
 
+### 13.4 Meta-Word Annotations
+
+**DECIDED:** Meta-words (`@word`) are the annotation/directive system. They are not user-extensible — each one is a built-in with specific semantics. Unrecognized meta-words return themselves as values (future-proofing).
+
+| Meta-word | Arity | Purpose |
+|-----------|-------|---------|
+| `@type` | 1 (block) | Defines a custom type rule. Returns a `type!` value with the rule attached. See section 11. |
+| `@type/where` | 2 (rule block, guard block) | Custom type with a guard predicate. The guard receives the value as `it`. |
+| `@type/enum` | 1 (block) | Enum type with case-sensitive matching. |
+| `@const` | set-word + expr | Compile-time constant annotation. In the interpreter, behaves identically to normal assignment. In compiled output, emits `local name <const> = value` (Lua 5.4 const annotation). |
+| `@global` | set-word + expr | Declares and sets a word in global scope. In compiled output, omits the `local` prefix. |
+| `@global` | word or block | Marks existing word(s) as global — subsequent set-word assignments write to global scope instead of creating locals. |
+| `@macro` | set-word + function | Tags a function as a macro. When a macro is called and returns a `block!`, the block is automatically evaluated in the caller's scope. See below. |
+| `@compose` | 1 (block) | Block composition with paren interpolation. Parens inside the block are evaluated and their results spliced in. |
+| `@compose/only` | 1 (block) | Like `@compose`, but block results are inserted as a single element instead of spliced. |
+| `@compose/deep` | 1 (block) | Like `@compose`, but recurses into nested blocks. |
+| `@parse` | 2 (input, rules) | Invokes the parse dialect. See section 10. |
+| `@parse/ok?` | 2 (input, rules) | Like `@parse`, but returns only a `logic!` (matched and consumed all input). |
+| `@preprocess` | 1 (block) | Compile-time code generation. See section 13.1. |
+| `@inline` | 1 (block) | Inline preprocess — evaluates block, splices result into AST. See section 13.2. |
+| `@enter` | 1 (block) | Lifecycle hook — block is evaluated when the enclosing scope is entered. |
+| `@exit` | 1 (block) | Lifecycle hook — block is evaluated when the enclosing scope exits, even on error (finally semantics). |
+
+#### `@macro` — Code-generating functions
+
+`@macro` tags a function definition so that its return value is automatically evaluated. This enables code generation at the call site without requiring `do` or explicit evaluation.
+
+**Syntax:**
+```
+@macro name: function [params...] [body]
+```
+
+**Semantics:**
+1. The function is defined and bound to `name` normally.
+2. The name is registered in the evaluator's macro set.
+3. When `name` is called as a word and the result is a `block!`, that block is immediately evaluated in the caller's scope.
+4. If the result is not a `block!`, it is returned as-is (no auto-eval).
+
+**Example:**
+```
+; Define a macro that generates a greeter function
+@macro make-greeter: function [name [string!]] [
+  compose [
+    greet: function [who [string!]] [
+      print rejoin [(name) " says hello to " who]
+    ]
+  ]
+]
+
+; Call it — the returned block is auto-evaluated, defining 'greet' in this scope
+make-greeter "Alice"
+greet "Bob"   ; prints: Alice says hello to Bob
+```
+
+**Without `@macro`**, the same code would require explicit `do`:
+```
+make-greeter: function [name [string!]] [
+  compose [
+    greet: function [who [string!]] [
+      print rejoin [(name) " says hello to " who]
+    ]
+  ]
+]
+
+do make-greeter "Alice"   ; must explicitly evaluate the returned block
+greet "Bob"
+```
+
+**Key difference from `@preprocess`:** Macros run at call time (runtime in the interpreter), not at compile time. They are sugar for "call this function, then evaluate the result." `@preprocess` runs before the program starts and injects code into the AST.
+
+**Compilation:** `@macro` is currently interpreter-only. In compiled output, macros must be resolved at compile time (the compiler evaluates the macro call during compilation and inlines the result). If a macro depends on runtime values, it is a compile error.
+
 ---
 
 ## 14. Compilation Boundary
@@ -1382,6 +1454,7 @@ data: [#[platform] #[1 + 2]]    ; data = ['script 3] or ['lua 3]
 | `load` (data) | Yes | Emits Lua code that reads and parses the file at runtime. Or: the data file is inlined at compile time if path is a literal. |
 | Type checking at runtime | Erased by default | Compiler uses types for optimization. No runtime checks in output. Debug flag can emit asserts. |
 | Custom `@type` validation | Erased by default | Same as above — compile-time knowledge, not runtime checks. |
+| `@macro` | Compile-time only | Macro calls are resolved during compilation — the compiler evaluates the macro and inlines the result. Macros that depend on runtime values are compile errors. |
 | `@enter` / `@exit` hooks | Yes | Emit as inline code at scope entry/exit. `@exit` wraps body in pcall-based finally pattern. |
 | `freeze` / `frozen?` | No-op | Interpreter concern only. In compiled Lua, all values are tables — mutability is the Lua runtime's domain. `freeze` erased, `frozen?` always returns `false`. |
 
@@ -1643,6 +1716,8 @@ These emerged from design conversations on 2026-03-24 and are now load-bearing:
 32. **Interpreter-only features are compile-time errors.** `do`, `bind`, `compose` on dynamic blocks — using these in `Kintsugi/Lua` code fails at compile time with a helpful message and alternative suggestion. No silent omission.
 33. **Type checks erased in compiled output.** Compiler uses types for optimization and specialization. No runtime checks in Lua output by default. Debug flag can emit asserts.
 34. **Parse is compile-time only in compiled targets.** Rules resolve during compilation. Parse extracts data that feeds into the program. Cannot run at runtime in Lua output.
+35. **`@macro` is auto-eval sugar.** Tags a function so that when called, if the result is a `block!`, it is automatically evaluated in the caller's scope. Useful for code generation without explicit `do`. Compile-time only in compiled targets — the compiler evaluates macro calls during compilation and inlines the result.
+36. **Meta-words are a closed set.** `@type`, `@const`, `@global`, `@macro`, `@compose`, `@parse`, `@preprocess`, `@inline`, `@enter`, `@exit`. Users cannot define new meta-words. Unrecognized meta-words return themselves as values (future-proofing, not user extension).
 
 ---
 

@@ -17,7 +17,7 @@ suite "lua emitter":
 
   test "emit arithmetic":
     let code = emitLua(parseSource("x: 1 + 2"))
-    check "local x = 1 + 2" in code
+    check "_add(1, 2)" in code
 
   test "emit function":
     let code = emitLua(parseSource("add: function [a b] [a + b]"))
@@ -229,3 +229,159 @@ suite "tic-tac-toe compilation":
     let code = emitLua(parseSource(source))
     check "board.cells()" notin code
     check "board.cells" in code
+
+suite "series operation emission":
+  test "first emits [1] index":
+    let code = emitLua(parseSource("x: first [1 2 3]"))
+    check ")[1]" in code
+
+  test "last emits IIFE with length-based access":
+    let code = emitLua(parseSource("x: last [1 2 3]"))
+    check "#" in code
+    check "[#" in code
+
+  test "pick emits indexed access":
+    let code = emitLua(parseSource("x: pick [10 20 30] 2"))
+    check ")[2]" in code
+
+  test "length? emits # operator":
+    let code = emitLua(parseSource("x: length? [1 2 3]"))
+    check "#" in code
+
+  test "empty? emits length comparison":
+    let code = emitLua(parseSource("x: empty? [1 2 3]"))
+    check "#" in code
+    check "== 0" in code
+
+  test "append emits _append helper":
+    let code = emitLua(parseSource("""
+      items: [1 2]
+      items: append items 3
+    """))
+    check "_append(" in code
+
+  test "reverse emits IIFE":
+    let code = emitLua(parseSource("x: reverse [1 2 3]"))
+    # reverse emits an IIFE that handles both strings and tables
+    check "string.reverse(" in code
+    check "end)()" in code
+
+  test "select on context emits _select helper":
+    let code = emitLua(parseSource("""
+      m: context [name: "alice" age: 30]
+      x: select m "name"
+    """))
+    check "_select(" in code
+
+suite "string operation emission":
+  test "uppercase emits string.upper":
+    let code = emitLua(parseSource("""x: uppercase "hello" """))
+    check "string.upper(" in code
+
+  test "lowercase emits string.lower":
+    let code = emitLua(parseSource("""x: lowercase "HELLO" """))
+    check "string.lower(" in code
+
+  test "trim emits match pattern":
+    let code = emitLua(parseSource("""x: trim "  hello  " """))
+    # trim uses :match("^%s*(.-)%s*$") not gsub
+    check ":match(" in code
+
+  test "split emits _split helper":
+    let code = emitLua(parseSource("""x: split "a-b-c" "-" """))
+    check "_split(" in code
+
+  test "replace emits _replace helper":
+    let code = emitLua(parseSource("""x: replace "hello" "l" "r" """))
+    check "_replace(" in code
+
+  test "starts-with? emits string.sub comparison":
+    let code = emitLua(parseSource("""x: starts-with? "hello" "he" """))
+    check "string.sub(" in code
+    check "== \"he\"" in code
+
+  test "substring emits string.sub":
+    let code = emitLua(parseSource("""x: substring "hello" 2 3"""))
+    check "string.sub(" in code
+
+  test "rejoin emits table.concat":
+    let code = emitLua(parseSource("""x: rejoin ["a" "b" "c"]"""))
+    check "table.concat(" in code
+
+  test "join emits .. concatenation":
+    # join takes two args and concatenates them with ..
+    let code = emitLua(parseSource("""x: join "hello" " world" """))
+    check ".." in code
+
+suite "math operation emission":
+  test "abs emits math.abs":
+    let code = emitLua(parseSource("x: abs -5"))
+    check "math.abs(" in code
+
+  test "floor emits math.floor":
+    let code = emitLua(parseSource("x: floor 3.7"))
+    check "math.floor(" in code
+
+  test "ceil emits math.ceil":
+    let code = emitLua(parseSource("x: ceil 3.2"))
+    check "math.ceil(" in code
+
+  test "sqrt emits math.sqrt":
+    let code = emitLua(parseSource("x: sqrt 9"))
+    check "math.sqrt(" in code
+
+  test "sin emits math.sin":
+    let code = emitLua(parseSource("x: sin 1.0"))
+    check "math.sin(" in code
+
+  test "min emits math.min":
+    let code = emitLua(parseSource("x: min 3 5"))
+    check "math.min(" in code
+
+  test "max emits math.max":
+    let code = emitLua(parseSource("x: max 3 5"))
+    check "math.max(" in code
+
+  test "random emits math.random":
+    let code = emitLua(parseSource("x: random 10"))
+    check "math.random" in code
+
+suite "control flow emission":
+  test "unless emits if not":
+    let code = emitLua(parseSource("unless false [print 1]"))
+    check "if not (" in code
+
+  test "not emits Lua not":
+    let code = emitLua(parseSource("x: not true"))
+    check "not (true)" in code
+
+  test "return inside function emits return":
+    let code = emitLua(parseSource("""
+      f: function [] [return 42]
+    """))
+    check "return 42" in code
+
+  test "break in loop emits break":
+    let code = emitLua(parseSource("""
+      loop [for [i] from 1 to 10 do [break]]
+    """))
+    check "break" in code
+
+  test "either as statement emits if/else":
+    let code = emitLua(parseSource("""
+      either true [print 1] [print 2]
+    """))
+    check "if true then" in code
+    check "else" in code
+
+  test "attempt emits pcall":
+    let code = emitLua(parseSource("""
+      x: attempt [source [42] fallback [0]]
+    """))
+    check "pcall" in code
+
+  test "try emits pcall":
+    let code = emitLua(parseSource("""
+      x: try [print 1]
+    """))
+    check "pcall" in code
