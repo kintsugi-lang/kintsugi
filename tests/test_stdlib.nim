@@ -247,6 +247,6 @@ suite "literal copy in functions":
 
   test "string literals fresh each call":
     let eval = makeEval()
-    discard eval.evalString("f: function [] [s: \"\" append s \"x\" s]")
+    discard eval.evalString("""f: function [] [s: join "" "x" s]""")
     check eval.evalString("f").strVal == "x"
     check eval.evalString("f").strVal == "x"

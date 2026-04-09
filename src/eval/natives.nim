@@ -312,9 +312,8 @@ proc registerNatives*(eval: Evaluator) =
             args[0].blockVals.add(args[1])
           return args[0]
         if args[0].kind == vkString:
-          args[0].strVal.add($args[1])
-          return args[0]
-        raise KtgError(kind: "type", msg: "append expects block! or string!, got " & typeName(args[0]), data: nil)
+          raise KtgError(kind: "type", msg: "strings are immutable; use rejoin or join to build new strings", data: nil)
+        raise KtgError(kind: "type", msg: "append expects block!, got " & typeName(args[0]), data: nil)
     )
     ctx.set("append", KtgValue(kind: vkNative, nativeFn: appendNative, line: 0))
 
@@ -472,26 +471,34 @@ proc registerNatives*(eval: Evaluator) =
     ktgString($args[0] & $args[1])
   )
 
-  ctx.native("rejoin", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    if args[0].kind == vkBlock:
-      let eval = cast[Evaluator](ep)
-      var s = ""
-      for v in args[0].blockVals:
-        # evaluate parens inside rejoin
-        if v.kind == vkParen:
-          s &= $eval.evalBlock(v.parenVals, eval.currentCtx)
-        elif v.kind == vkWord and v.wordKind == wkWord:
-          if v.wordName.contains('/'):
-            let (head, segments) = parsePath(v.wordName)
-            let headVal = eval.currentCtx.get(head)
-            s &= $eval.navigatePath(headVal, segments, eval.currentCtx)
-          else:
-            s &= $eval.currentCtx.get(v.wordName)
-        else:
-          s &= $v
-      return ktgString(s)
-    ktgString($args[0])
-  )
+  block:
+    let rejoinNative = KtgNative(
+      name: "rejoin",
+      arity: 1,
+      refinements: @[RefinementSpec(name: "with", params: @[ParamSpec(name: "delim")])],
+      fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
+        let eval = cast[Evaluator](ep)
+        let delim = if "with" in eval.currentRefinements and args.len > 1:
+                      $args[1]
+                    else: ""
+        if args[0].kind == vkBlock:
+          var parts: seq[string] = @[]
+          for v in args[0].blockVals:
+            if v.kind == vkParen:
+              parts.add($eval.evalBlock(v.parenVals, eval.currentCtx))
+            elif v.kind == vkWord and v.wordKind == wkWord:
+              if v.wordName.contains('/'):
+                let (head, segments) = parsePath(v.wordName)
+                let headVal = eval.currentCtx.get(head)
+                parts.add($eval.navigatePath(headVal, segments, eval.currentCtx))
+              else:
+                parts.add($eval.currentCtx.get(v.wordName))
+            else:
+              parts.add($v)
+          return ktgString(parts.join(delim))
+        ktgString($args[0])
+    )
+    ctx.set("rejoin", KtgValue(kind: vkNative, nativeFn: rejoinNative, line: 0))
 
   ctx.native("trim", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     if args[0].kind == vkString:

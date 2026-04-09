@@ -39,7 +39,7 @@ The `@` sigil means "the language is doing something structural here."
 @type [string! | none!]           ; define a type
 @type/enum ['north | 'south]      ; define an enum
 @const x: 42                      ; constant
-@global score: 0                  ; global scope
+@shared score: 0                  ; write-through from inner scopes
 @macro unless: function [c b [block!]] [  ; code generation
   @compose [if not (c) (b)]
 ]

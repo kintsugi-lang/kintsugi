@@ -34,18 +34,6 @@ suite "prototype creation":
     """)
     check $result == "10"
 
-  test "auto-generated constructor":
-    let eval = makeEval()
-    let result = eval.evalString("""
-      Point: prototype [
-        field/required [x [integer!]]
-        field/required [y [integer!]]
-      ]
-      p: make-point 10 20
-      p/y
-    """)
-    check $result == "20"
-
   test "auto-generated type predicate":
     let eval = makeEval()
     let result = eval.evalString("""
@@ -53,7 +41,7 @@ suite "prototype creation":
         field/required [x [integer!]]
         field/required [y [integer!]]
       ]
-      p: make-point 10 20
+      p: make Point [x: 10 y: 20]
       point? p
     """)
     check $result == "true"
@@ -111,16 +99,17 @@ suite "prototype fields":
     check $result == "100"
 
 suite "prototype mutability":
-  test "prototype is immutable":
+  test "prototype is mutable":
     let eval = makeEval()
-    expect KtgError:
-      discard eval.evalString("""
-        Point: prototype [
-          field/optional [x [integer!] 0]
-          field/optional [y [integer!] 0]
-        ]
-        Point/x: 999
-      """)
+    let result = eval.evalString("""
+      Point: prototype [
+        field/optional [x [integer!] 0]
+        field/optional [y [integer!] 0]
+      ]
+      Point/x: 999
+      Point/x
+    """)
+    check $result == "999"
 
   test "instance is mutable":
     let eval = makeEval()
@@ -218,12 +207,11 @@ suite "prototype instances":
     """)
     check $result == "3"
 
-  test "name collision detection":
+  test "type name registered on prototype":
     let eval = makeEval()
-    expect KtgError:
-      discard eval.evalString("""
-        point!: 42
-        Point: prototype [
-          field/optional [x [integer!] 0]
-        ]
-      """)
+    discard eval.evalString("""
+      Point: prototype [
+        field/optional [x [integer!] 0]
+      ]
+    """)
+    check $eval.evalString("type point!") == "type!"

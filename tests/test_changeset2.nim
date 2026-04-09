@@ -131,17 +131,15 @@ suite "substring compilation":
   test "substring compiles":
     check "string.sub" in compileStr("""s: substring "hello" 2 3""")
 
-suite "@global compilation":
-  test "@global emits without local":
-    let lua = compileStr("@global score: 0")
-    check "score = 0" in lua
-    check "local score" notin lua
+suite "@shared compilation":
+  test "@shared emits as local":
+    let lua = compileStr("@shared score: 0")
+    check "local score = 0" in lua
 
-  test "@global with regular local":
-    let lua = compileStr("x: 1\n@global y: 2")
+  test "@shared with regular local":
+    let lua = compileStr("x: 1\n@shared y: 2")
     check "local x = 1" in lua
-    check "y = 2" in lua
-    check "local y" notin lua
+    check "local y = 2" in lua
 
 suite "attempt compilation":
   test "basic attempt with source and then":

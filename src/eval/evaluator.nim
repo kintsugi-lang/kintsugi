@@ -41,7 +41,8 @@ proc newEvaluator*(): Evaluator =
     callStack: @[],
     dialects: @[],
     moduleCache: initTable[string, KtgValue](),
-    moduleLoading: initHashSet[string]()
+    moduleLoading: initHashSet[string](),
+    shared: initTable[string, KtgContext]()
   )
 
 proc registerDialect*(eval: Evaluator, d: Dialect) =
@@ -444,9 +445,9 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
           msg: "cannot rebind self",
           data: nil)
 
-      # @global words write to global scope
-      if val.wordName in eval.globals:
-        eval.global.set(val.wordName, rhs)
+      # @shared words write to the declaring scope
+      if val.wordName in eval.shared:
+        eval.shared[val.wordName].set(val.wordName, rhs)
         return rhs
 
       # set-path: word/field/field: value
@@ -497,9 +498,7 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
             else:
               raise KtgError(kind: "undefined", msg: seg & " not found in map", data: nil)
           elif current.kind == vkPrototype:
-            raise KtgError(kind: "type",
-              msg: "cannot set path on prototype! (immutable)",
-              data: current)
+            current = current.proto.get(seg)
           else:
             raise KtgError(kind: "type",
               msg: "cannot navigate path on " & typeName(current),
@@ -525,6 +524,8 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
             current.ctx.set($idx, rhs)
           elif current.kind == vkMap:
             current.mapEntries[$idx] = rhs
+          elif current.kind == vkPrototype:
+            current.proto.entries[$idx] = rhs
           else:
             raise KtgError(kind: "type",
               msg: "cannot set on " & typeName(current), data: current)
@@ -533,9 +534,7 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
         elif current.kind == vkMap:
           current.mapEntries[lastSeg] = rhs
         elif current.kind == vkPrototype:
-          raise KtgError(kind: "type",
-            msg: "cannot set path on prototype! (immutable)",
-            data: current)
+          current.proto.entries[lastSeg] = rhs
         else:
           raise KtgError(kind: "type",
             msg: "cannot set field on " & typeName(current),
@@ -547,30 +546,18 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
         let name = val.wordName
         let lowerName = toKebabCase(name)
         let customType = lowerName & "!"
-        let constructorName = "make-" & lowerName
 
         # Store the prototype name on the prototype
         rhs.proto.name = name
 
-        # Check for name collisions
-        if ctx.has(customType):
-          raise KtgError(kind: "name-collision",
-            msg: "'" & customType & "' already exists in scope",
-            data: nil)
-        if ctx.has(constructorName):
-          raise KtgError(kind: "name-collision",
-            msg: "'" & constructorName & "' already exists in scope",
-            data: nil)
-
-        # Register the type predicate: name? checks structural match
-        let fieldSpecs = rhs.proto.fieldSpecs
-        ctx.set(customType, ktgType(customType))
+        # Register the type name
+        if not ctx.has(customType):
+          ctx.set(customType, ktgType(customType))
 
         # Register type predicate function: checks if value has all fields
         let predicateName = lowerName & "?"
         if not ctx.has(predicateName):
-          # Capture fieldSpecs for the closure
-          let specs = fieldSpecs
+          let specs = rhs.proto.fieldSpecs
           ctx.set(predicateName, KtgValue(kind: vkNative,
             nativeFn: KtgNative(name: predicateName, arity: 1, fn: proc(
                 args: seq[KtgValue], ep: pointer): KtgValue =
@@ -583,33 +570,6 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
               ktgLogic(true)
             ),
             line: 0))
-
-        # Register constructor: make-name arg1 arg2 ...
-        # Args match required fields in declaration order
-        let protoVal = rhs
-        let requiredFields = block:
-          var rf: seq[FieldSpec] = @[]
-          for fs in fieldSpecs:
-            if not fs.hasDefault:
-              rf.add(fs)
-          rf
-        let arity = requiredFields.len
-        ctx.set(constructorName, KtgValue(kind: vkNative,
-          nativeFn: KtgNative(name: constructorName, arity: arity, fn: proc(
-              args: seq[KtgValue], ep: pointer): KtgValue =
-            let eval = cast[Evaluator](ep)
-            # Build an overrides block with set-words
-            var overrideVals: seq[KtgValue] = @[]
-            for i, fs in requiredFields:
-              overrideVals.add(ktgWord(fs.name, wkSetWord))
-              overrideVals.add(args[i])
-            let overrideBlock = ktgBlock(overrideVals)
-            # Call make directly
-            let makeVal = eval.currentCtx.get("make")
-            let makeArgs = @[protoVal, overrideBlock]
-            makeVal.nativeFn.fn(makeArgs, ep)
-          ),
-          line: 0))
 
       # set in current scope (always shadows)
       ctx.set(val.wordName, rhs)
@@ -685,31 +645,31 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
           return rhs
         return val
 
-      # @global word: value — declare and set in global scope
-      # @global word — mark existing word as global
-      # @global [words] — mark multiple words as global
-      if val.wordName == "global":
+      # @shared word: value — declare in current scope, writable from inner scopes
+      # @shared word — mark existing word as shared
+      # @shared [words] — mark multiple words as shared
+      if val.wordName == "shared":
         if pos < vals.len:
           let next = vals[pos]
-          # @global word: value
+          # @shared word: value
           if next.kind == vkWord and next.wordKind == wkSetWord:
             pos += 1
             var rhs = eval.evalNext(vals, pos, ctx)
             eval.applyInfix(rhs, vals, pos, ctx)
-            eval.global.set(next.wordName, rhs)
-            eval.globals.incl(next.wordName)
+            ctx.set(next.wordName, rhs)
+            eval.shared[next.wordName] = ctx
             return rhs
-          # @global [words]
+          # @shared [words]
           if next.kind == vkBlock:
             pos += 1
             for v in next.blockVals:
               if v.kind == vkWord and v.wordKind == wkWord:
-                eval.globals.incl(v.wordName)
+                eval.shared[v.wordName] = ctx
             return ktgNone()
-          # @global word
+          # @shared word
           if next.kind == vkWord and next.wordKind == wkWord:
             pos += 1
-            eval.globals.incl(next.wordName)
+            eval.shared[next.wordName] = ctx
             return ktgNone()
         return val
 

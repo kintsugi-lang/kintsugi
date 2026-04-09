@@ -643,6 +643,10 @@ print rejoin ["Hello, " name "!"]                ; Hello, Ray!
 print rejoin [name " is " age " years old"]      ; Ray is 30 years old
 print rejoin ["2 + 2 = " (2 + 2)]               ; 2 + 2 = 4
 
+; rejoin/with — join with a delimiter
+print rejoin/with [1 2 3 4 5] ", "              ; 1, 2, 3, 4, 5
+print rejoin/with ["a" "b" "c"] " - "           ; a - b - c
+
 ; --- String functions ---
 
 print size? "hello"                     ; 5
@@ -677,10 +681,10 @@ print find/where [1 2 3 4 5] function [x] [x > 3]  ; 4
 print reverse "hello"                   ; olleh
 print reverse [1 2 3]                   ; [3 2 1]
 
-; append -- mutates in place. Splices blocks by default.
-spec-str: "hello"
-append spec-str " world"
-print spec-str                          ; hello world
+; append -- mutates blocks in place. Splices by default.
+; Strings are immutable — use rejoin or join to build new strings:
+;   rejoin ["hello" " " "world"]   → "hello world"
+;   join "hello" " world"          → "hello world"
 
 spec-blk: [1 2]
 append spec-blk [3 4]                   ; splice: [1 2 3 4]
@@ -1016,7 +1020,7 @@ result: attempt [
 print result                            ; caught
 
 ; Retries — retry source N times before giving up
-@global retry-count: 0
+@shared retry-count: 0
 result: attempt [
   source [
     retry-count: retry-count + 1
@@ -1039,10 +1043,10 @@ print retry-count                       ; 3
 ; with typed field specs (created by the prototype dialect).
 ;
 ; Created by:
-;   context [...]  - explicit mutable context
+;   context [...]  - mutable context
 ;   function       - parameters and local words
-;   prototype [...]   - prototype with typed fields (prototype!)
-;   make Prototype [...]  - mutable instance (context!)
+;   prototype [...]   - mutable prototype with typed fields (prototype!)
+;   make Prototype [...]  - mutable instance stamped from prototype (context!)
 
 ; context creates a mutable environment
 point: context [x: 10 y: 20]
@@ -1075,28 +1079,28 @@ loop [from 1 to 10 do [
 ]]
 print state/counter                     ; 10
 
-; --- @global: opt-in write-through ---
-; @global marks a word so set-word writes to the global scope
-; from any depth. Without @global, set-word always shadows.
+; --- @shared: opt-in write-through ---
+; @shared marks a word so set-word writes to the declaring scope
+; from any depth. Without @shared, set-word always shadows.
 ;
-;   @global word: value   -- declare + set in global
-;   @global word          -- mark existing word
-;   @global [words]       -- mark multiple words
+;   @shared word: value   -- declare + mark as shared
+;   @shared word          -- mark existing word
+;   @shared [words]       -- mark multiple words
 
-@global g-counter: 0
+@shared g-counter: 0
 g-tick: does [g-counter: g-counter + 1]
 g-tick
 g-tick
 g-tick
 print g-counter                         ; 3
 
-; Note: @global is only needed for reassigning a word (name:).
+; Note: @shared is only needed for reassigning a word (name:).
 ; Mutating through a reference (ctx/field:) works from any
-; scope without @global -- like JavaScript, where obj.field = x
+; scope without @shared -- like JavaScript, where obj.field = x
 ; works in closures but obj = newObj creates a local.
 ;   state: context [n: 0]
-;   inc: does [state/n: state/n + 1]    ; works without @global
-;   state: context [n: 99]              ; THIS needs @global
+;   inc: does [state/n: state/n + 1]    ; works without @shared
+;   state: context [n: 99]              ; THIS needs @shared
 
 ; --- Assignment is by reference ---
 ; Compound values (blocks, contexts, maps) are shared.
@@ -1790,7 +1794,7 @@ print if [] ["empty block is truthy"]  ; empty block is truthy
 
 ; See Evaluation Model above for: no operator precedence,
 ; division return type, and/or non-short-circuit behavior.
-; See Series Operations above for: append on blocks + strings.
+; See Series Operations above for: append on blocks (strings are immutable).
 
 ; --- For Rebol/Red developers ---
 

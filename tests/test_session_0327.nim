@@ -427,11 +427,11 @@ suite "does":
     """)
     check $r == "10"
 
-suite "@global":
-  test "@global word: value declares and sets":
+suite "@shared":
+  test "@shared word: value declares and sets":
     let eval = makeEval()
     let r = eval.evalString("""
-      @global counter: 0
+      @shared counter: 0
       adder: does [counter: counter + 1]
       adder
       adder
@@ -440,11 +440,10 @@ suite "@global":
     """)
     check $r == "3"
 
-  test "@global word marks existing binding":
+  test "@shared word marks existing binding":
     let eval = makeEval()
     let r = eval.evalString("""
-      total: 0
-      @global total
+      @shared total: 0
       accumulate: function [n] [total: total + n]
       accumulate 5
       accumulate 3
@@ -452,10 +451,10 @@ suite "@global":
     """)
     check $r == "8"
 
-  test "@global [words] marks multiple":
+  test "@shared [words] marks multiple":
     let eval = makeEval()
     discard eval.evalString("""
-      @global [a b]
+      @shared [a b]
       a: 0
       b: 0
       inc: does [a: a + 1  b: b + 10]
@@ -465,7 +464,7 @@ suite "@global":
     check $eval.evalString("a") == "2"
     check $eval.evalString("b") == "20"
 
-  test "non-global words still shadow":
+  test "non-shared words still shadow":
     let eval = makeEval()
     discard eval.evalString("""
       x: 99
@@ -474,10 +473,10 @@ suite "@global":
     check $eval.evalString("f 5") == "10"
     check $eval.evalString("x") == "99"
 
-  test "@global from nested function writes to global":
+  test "@shared from nested function writes to declaring scope":
     let eval = makeEval()
     let r = eval.evalString("""
-      @global score: 0
+      @shared score: 0
       outer: function [] [
         inner: does [score: score + 100]
         inner
@@ -507,20 +506,15 @@ suite "unified series operations":
     let eval = makeEval()
     check $eval.evalString("""reverse "hello" """) == "olleh"
 
-  test "append string":
+  test "append string is error":
     let eval = makeEval()
     discard eval.evalString("""s: "hello" """)
-    discard eval.evalString("""append s " world" """)
-    check $eval.evalString("s") == "hello world"
+    expect KtgError:
+      discard eval.evalString("""append s " world" """)
 
-  test "append string mutates in place":
+  test "join builds new string":
     let eval = makeEval()
-    discard eval.evalString("""
-      s: "abc"
-      append s "d"
-      append s "e"
-    """)
-    check $eval.evalString("s") == "abcde"
+    check $eval.evalString("""join "abc" "de" """) == "abcde"
 
 suite "filesystem":
   test "dir? on existing directory":
@@ -640,7 +634,7 @@ suite "attempt retries":
   test "retries source until success":
     let eval = makeEval()
     let r = eval.evalString("""
-      @global attempts: 0
+      @shared attempts: 0
       attempt [
         source [
           attempts: attempts + 1

@@ -153,9 +153,7 @@ choice: function [items [block!] /weighted] [
 repeat: function [val n [integer!]] [
   if n <= 0 [either string? val [return ""] [return []]]
   either string? val [
-    result: ""
-    loop [for [i] from 1 to n do [append result val]]
-    result
+    rejoin loop/collect [for [i] from 1 to n do [val]]
   ] [
     loop/collect [for [i] from 1 to n do [val]]
   ]

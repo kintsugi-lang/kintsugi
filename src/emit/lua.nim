@@ -54,6 +54,10 @@ type
     compiling: HashSet[string]
     ## Track which prelude helpers are actually used.
     usedHelpers: HashSet[string]
+    ## Track custom type names (from prototype definitions) for type tag emission.
+    customTypes: HashSet[string]
+    ## Track @shared names — these skip 'local' in inner scopes.
+    sharedNames: HashSet[string]
 
   EmitError* = ref object of CatchableError
 
@@ -191,6 +195,7 @@ proc emitEitherExpr(e: var LuaEmitter, cond: string, trueBlock, falseBlock: seq[
 proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
                     compiling: HashSet[string] = initHashSet[string]()): string
 proc findExports(ast: seq[KtgValue]): seq[string]
+proc emitContextBlock(e: var LuaEmitter, vals: seq[KtgValue]): string
 
 # ---------------------------------------------------------------------------
 # Compile-error guards for interpreter-only features
@@ -396,6 +401,32 @@ exprHandlers["sort/with"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: va
 exprHandlers["system/platform"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   "\"lua\""
 
+# --- is? — unified type checking ---
+exprHandlers["is?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  # First arg is a type name (vkType), second is the value
+  let typeExpr = e.emitExpr(vals, pos, primary = true)
+  let valExpr = e.emitExpr(vals, pos, primary = true)
+  # typeExpr is emitted as a string literal like "integer!"
+  # Strip quotes and ! to get the base name
+  var typeName = typeExpr.strip(chars = {'"'})
+  if typeName.endsWith("!"):
+    typeName = typeName[0..^2]
+  # Built-in type checks that Lua can verify
+  case typeName
+  of "integer": "(type(" & valExpr & ") == \"number\" and math.floor(" & valExpr & ") == " & valExpr & ")"
+  of "float": "(type(" & valExpr & ") == \"number\" and math.floor(" & valExpr & ") ~= " & valExpr & ")"
+  of "number": "(type(" & valExpr & ") == \"number\")"
+  of "string": "(type(" & valExpr & ") == \"string\")"
+  of "logic": "(type(" & valExpr & ") == \"boolean\")"
+  of "function", "native": "(type(" & valExpr & ") == \"function\")"
+  of "block", "context", "map", "prototype": "(type(" & valExpr & ") == \"table\")"
+  of "none":
+    e.useHelper("_is_none")
+    "(_is_none(" & valExpr & "))"
+  else:
+    # Custom type — check _type tag
+    "(" & valExpr & " ~= nil and type(" & valExpr & ") == \"table\" and " & valExpr & "._type == \"" & typeName & "\")"
+
 # --- print ---
 exprHandlers["print"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   "print(" & e.emitExpr(vals, pos) & ")"
@@ -518,6 +549,21 @@ exprHandlers["substring"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: va
 exprHandlers["random"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   "math.random() * " & e.emitExpr(vals, pos)
 
+exprHandlers["random/int"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  "math.random(" & e.emitExpr(vals, pos) & ")"
+
+exprHandlers["random/int/range"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  let lo = e.emitExpr(vals, pos)
+  let hi = e.emitExpr(vals, pos)
+  "math.random(" & lo & ", " & hi & ")"
+
+exprHandlers["random/choice"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  let blk = e.emitExpr(vals, pos)
+  "(function() local _t = " & blk & "; return _t[math.random(#_t)] end)()"
+
+exprHandlers["random/seed"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  "math.randomseed(" & e.emitExpr(vals, pos) & ")"
+
 # --- Type conversion ---
 exprHandlers["to"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   let typeExpr = e.emitExpr(vals, pos)
@@ -547,10 +593,137 @@ exprHandlers["apply"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var in
 exprHandlers["reduce"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   e.emitExpr(vals, pos)
 
-# --- prototype: compile error ---
+# --- all/any: short-circuit boolean combinators ---
+exprHandlers["all"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  if pos < vals.len and vals[pos].kind == vkBlock:
+    let blk = vals[pos].blockVals
+    pos += 1
+    var parts: seq[string] = @[]
+    var bpos = 0
+    while bpos < blk.len:
+      parts.add(e.emitExpr(blk, bpos))
+    "(" & parts.join(" and ") & ")"
+  else:
+    "true"
+
+exprHandlers["any"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  if pos < vals.len and vals[pos].kind == vkBlock:
+    let blk = vals[pos].blockVals
+    pos += 1
+    var parts: seq[string] = @[]
+    var bpos = 0
+    while bpos < blk.len:
+      parts.add(e.emitExpr(blk, bpos))
+    "(" & parts.join(" or ") & ")"
+  else:
+    "false"
+
+# --- merge: copy entries from source into target, return target ---
+exprHandlers["merge"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  let target = e.emitExpr(vals, pos, primary = true)
+  let source = e.emitExpr(vals, pos, primary = true)
+  "(function() for k, v in pairs(" & source & ") do " & target & "[k] = v end; return " & target & " end)()"
+
+# --- prototype: emit as table with field defaults and methods ---
 exprHandlers["prototype"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  compileError("prototype", "prototype definitions require runtime evaluation; use context blocks or plain tables in compiled code", vals[pos - 1].line)
-  "nil"  # unreachable, compileError raises
+  if pos < vals.len and vals[pos].kind == vkBlock:
+    let specBlock = vals[pos].blockVals
+    pos += 1
+    # Parse field declarations into {name = default, ...} table
+    var parts: seq[string] = @[]
+    var i = 0
+    while i < specBlock.len:
+      let v = specBlock[i]
+      if v.kind == vkWord and v.wordKind == wkWord:
+        # fields [required [...] optional [...]] — bulk declaration
+        if v.wordName == "fields" and
+           i + 1 < specBlock.len and specBlock[i + 1].kind == vkBlock:
+          let fieldsBlock = specBlock[i + 1].blockVals
+          var fi = 0
+          while fi < fieldsBlock.len:
+            if fieldsBlock[fi].kind == vkWord and fieldsBlock[fi].wordKind == wkWord:
+              let section = fieldsBlock[fi].wordName
+              fi += 1
+              if fi < fieldsBlock.len and fieldsBlock[fi].kind == vkBlock:
+                let sectionBlock = fieldsBlock[fi].blockVals
+                fi += 1
+                # Parse name [type!] default? triples
+                var si = 0
+                while si < sectionBlock.len:
+                  if sectionBlock[si].kind == vkWord and sectionBlock[si].wordKind == wkWord:
+                    let fieldName = luaName(sectionBlock[si].wordName)
+                    si += 1
+                    # Skip type annotation block
+                    if si < sectionBlock.len and sectionBlock[si].kind == vkBlock:
+                      si += 1
+                    # Check for default: it's a default if the next value is NOT
+                    # a new field declaration (word followed by type block)
+                    let isNextField = si < sectionBlock.len and
+                      sectionBlock[si].kind == vkWord and sectionBlock[si].wordKind == wkWord and
+                      si + 1 < sectionBlock.len and sectionBlock[si + 1].kind == vkBlock
+                    if section == "optional" and si < sectionBlock.len and not isNextField:
+                      var dpos = si
+                      let defaultVal = e.emitExpr(sectionBlock, dpos)
+                      si = dpos
+                      parts.add(fieldName & " = " & defaultVal)
+                    else:
+                      parts.add(fieldName & " = nil")
+                  else:
+                    si += 1
+              else:
+                fi += 1
+            else:
+              fi += 1
+          i += 2
+          continue
+        # field/optional [name [type!] default] or field/required [name [type!]]
+        if v.wordName in ["field/optional", "field/required"] and
+           i + 1 < specBlock.len and specBlock[i + 1].kind == vkBlock:
+          let fieldBlock = specBlock[i + 1].blockVals
+          if fieldBlock.len >= 1 and fieldBlock[0].kind == vkWord:
+            let fieldName = luaName(fieldBlock[0].wordName)
+            if v.wordName == "field/optional" and fieldBlock.len >= 3:
+              # field/optional [name [type!] default]
+              var fpos = 2
+              let defaultVal = e.emitExpr(fieldBlock, fpos)
+              parts.add(fieldName & " = " & defaultVal)
+            else:
+              # field/required — no default, emit nil
+              parts.add(fieldName & " = nil")
+          i += 2
+          continue
+      # set-word: method or computed field
+      if v.kind == vkWord and v.wordKind == wkSetWord:
+        i += 1
+        let fieldName = luaName(v.wordName)
+        let value = e.emitExpr(specBlock, i)
+        parts.add(fieldName & " = " & value)
+        continue
+      i += 1
+    if parts.len == 0:
+      result = "{}"
+    else:
+      result = "{\n" & parts.mapIt(repeat("  ", e.indent + 1) & it).join(",\n") & "\n" & e.pad & "}"
+  else:
+    result = "{}"
+
+# --- make: emit _make(proto, overrides, typeName) ---
+exprHandlers["make"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  let protoExpr = e.emitExpr(vals, pos, primary = true)
+  # Overrides is a block of set-word pairs — emit as context table, not array
+  var overridesExpr: string
+  if pos < vals.len and vals[pos].kind == vkBlock:
+    overridesExpr = e.emitContextBlock(vals[pos].blockVals)
+    pos += 1
+  else:
+    overridesExpr = e.emitExpr(vals, pos, primary = true)
+  # Check if the proto name is a known custom type for tagging
+  e.useHelper("_make")
+  let protoName = protoExpr.toLower.replace("_", "-")
+  if protoName in e.customTypes:
+    "_make(" & protoExpr & ", " & overridesExpr & ", \"" & protoName & "\")"
+  else:
+    "_make(" & protoExpr & ", " & overridesExpr & ")"
 
 # --- exports: handled at module level, skip in expression context ---
 exprHandlers["exports"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
@@ -1415,9 +1588,7 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
     of wkMetaWord:
       if val.wordName == "parse":
         compileError("@parse", "the parse dialect is interpreter-only; restructure to avoid it in compiled code", val.line)
-      if val.wordName == "type":
-        compileError("@type", "custom type definitions are interpreter-only; use explicit type checks in compiled code", val.line)
-      # Other meta-words (@macro, @compose, etc.) are erased in compiled output
+      # Other meta-words (@type, @macro, @compose, etc.) are erased in compiled output
       result = "nil"
 
     of wkWord:
@@ -1688,6 +1859,26 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
         else:
           result = "nil"
 
+      elif name == "rejoin/with":
+        # rejoin/with [block] delimiter — join with separator
+        if pos < vals.len and vals[pos].kind == vkBlock:
+          let blk = vals[pos].blockVals
+          pos += 1
+          let delim = e.emitExpr(vals, pos)
+          var parts: seq[string] = @[]
+          var bpos = 0
+          while bpos < blk.len:
+            let elem = e.emitExpr(blk, bpos)
+            if elem.startsWith("\""):
+              parts.add(elem)
+            else:
+              parts.add("tostring(" & elem & ")")
+          result = "table.concat({" & parts.join(", ") & "}, " & delim & ")"
+        else:
+          let arg = e.emitExpr(vals, pos)
+          let delim = e.emitExpr(vals, pos)
+          result = "table.concat(" & arg & ", " & delim & ")"
+
       elif name == "rejoin":
         # rejoin on a block — build a table.concat with tostring on each element
         if pos < vals.len and vals[pos].kind == vkBlock:
@@ -1950,8 +2141,8 @@ proc findLastStmtStart(e: var LuaEmitter, vals: seq[KtgValue]): int =
           discard e.emitExprWithChain(vals, pos)
           continue
         continue
-      # @global prefix
-      if val.kind == vkWord and val.wordKind == wkMetaWord and val.wordName == "global":
+      # @shared prefix — in Lua, just a normal local (upvalues handle write-through)
+      if val.kind == vkWord and val.wordKind == wkMetaWord and val.wordName == "shared":
         pos += 1
         if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkSetWord:
           pos += 1
@@ -2254,21 +2445,23 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
         e.ln(resolvedLua)
         continue
 
-    # --- @global prefix: @global x: value — emit without 'local' ---
-    if val.kind == vkWord and val.wordKind == wkMetaWord and val.wordName == "global":
+    # --- @shared prefix: @shared x: value — normal local, Lua upvalues handle write-through ---
+    if val.kind == vkWord and val.wordKind == wkMetaWord and val.wordName == "shared":
       pos += 1
       if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkSetWord:
         let rawName = vals[pos].wordName
         let name = luaName(rawName)
         pos += 1
+        let prefix = if name in e.locals: "" else: "local "
+        e.locals.incl(name)
         let expr = e.emitExprWithChain(vals, pos)
-        e.ln(name & " = " & expr)  # no 'local' prefix — global
+        e.ln(prefix & name & " = " & expr)
         continue
-      # @global word or @global [words] — mark as global (no-op in compiled output)
+      # @shared word or @shared [words] — no-op in compiled output
       if pos < vals.len and vals[pos].kind == vkBlock:
-        pos += 1  # skip the block
+        pos += 1
       elif pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkWord:
-        pos += 1  # skip the word
+        pos += 1
       continue
 
     # --- @const prefix: @const x: value ---
@@ -2300,7 +2493,8 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
       pos += 1
 
       let prefix = if isBound: ""            # bound names: global path, no 'local'
-                   elif isPath: ""            # globals: no 'local'
+                   elif isPath: ""            # path access: no 'local'
+                   elif rawName in e.sharedNames: "" # @shared: no 'local' (upvalue)
                    elif name in e.locals: "" # already declared: no 'local'
                    else: "local "
       let constAnnotation = ""
@@ -2710,6 +2904,15 @@ const PreludeSplit = """local function _split(s, d)
 end
 """
 
+const PreludeMake = """local function _make(proto, overrides, typeName)
+  local inst = {}
+  for k, v in pairs(proto) do inst[k] = v end
+  if overrides then for k, v in pairs(overrides) do inst[k] = v end end
+  if typeName then inst._type = typeName end
+  return inst
+end
+"""
+
 proc buildPrelude(e: LuaEmitter): string =
   if e.usedHelpers.len == 0: return ""
   result = "-- Kintsugi runtime support\n"
@@ -2736,6 +2939,8 @@ proc buildPrelude(e: LuaEmitter): string =
     result &= PreludeAppend
   if "_split" in e.usedHelpers:
     result &= PreludeSplit
+  if "_make" in e.usedHelpers:
+    result &= PreludeMake
 
 proc prescanBindings(e: var LuaEmitter, blk: seq[KtgValue]) =
   ## Parse a bindings block and populate nameMap, arities, and bindingKinds.
@@ -2810,6 +3015,15 @@ proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
         i += 2
         continue
 
+    # @shared name: value — track shared names
+    if vals[i].kind == vkWord and vals[i].wordKind == wkMetaWord and
+       vals[i].wordName == "shared":
+      if i + 1 < vals.len and vals[i + 1].kind == vkWord and vals[i + 1].wordKind == wkSetWord:
+        e.sharedNames.incl(vals[i + 1].wordName)
+      # Don't skip — let the normal set-word handling process the binding
+      i += 1
+      continue
+
     # name: function [spec] [body]
     if vals[i].kind == vkWord and vals[i].wordKind == wkSetWord:
       let name = vals[i].wordName
@@ -2837,6 +3051,18 @@ proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
             e.prescanBlock(vals[i + 3].blockVals)
           i += 4
           continue
+      # name: prototype [...] — register custom type
+      elif i + 1 < vals.len and vals[i + 1].kind == vkWord and
+           vals[i + 1].wordKind == wkWord and vals[i + 1].wordName == "prototype":
+        let typeName = name.toLower.replace("-", "_")
+        let kebabName = name.toLower
+        e.customTypes.incl(kebabName)
+        e.bindings[name] = bindingVal()  # prototype is a value, not a function
+        if i + 2 < vals.len and vals[i + 2].kind == vkBlock:
+          i += 3
+        else:
+          i += 2
+        continue
       # name: require %path — prescan the dependency's exports
       elif i + 1 < vals.len and vals[i + 1].kind == vkWord and
            vals[i + 1].wordKind == wkWord and vals[i + 1].wordName == "import":

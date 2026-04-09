@@ -35,7 +35,7 @@ let nativeArities*: seq[tuple[name: string, arity: int]] = @[
   # Function creation
   ("function", 2), ("does", 1),
   # Context/Object
-  ("context", 1), ("scope", 1), ("words-of", 1),
+  ("context", 1), ("scope", 1), ("words-of", 1), ("merge", 2),
   # Type conversion
   ("to", 2),
   # Apply/Sort/Set

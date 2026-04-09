@@ -1030,21 +1030,21 @@ suite "Prototype dialect tests":
     discard eval.evalString("r: make CardReader []")
     check $eval.evalString("is? card-reader! r") == "true"
 
-  # -- auto-generated constructors --
+  # -- make with prototypes --
 
-  test "make-person with required fields":
+  test "make with required fields":
     let eval = makeEval()
     discard eval.evalString("""
       Person: prototype [
         field/required [name [string!]]
         field/required [age [integer!]]
       ]
-      p: make-person "Ray" 30
+      p: make Person [name: "Ray" age: 30]
     """)
     check $eval.evalString("p/name") == "Ray"
     check $eval.evalString("p/age") == "30"
 
-  test "zero-arg constructor for all-defaulted prototype":
+  test "make with all-defaulted prototype":
     let eval = makeEval()
     discard eval.evalString("""
       Counter: prototype [
@@ -1052,64 +1052,49 @@ suite "Prototype dialect tests":
         increment: function [] [self/n: self/n + 1]
         value: function [] [self/n]
       ]
-      c: make-counter
+      c: make Counter []
       c/increment
       c/increment
     """)
     check $eval.evalString("c/value") == "2"
 
-  test "self works on constructed instances":
+  test "self works on instances":
     let eval = makeEval()
     discard eval.evalString("""
       Thing: prototype [
         field/required [x [integer!]]
         get-x: function [] [self/x]
       ]
+      a: make Thing [x: 10]
+      b: make Thing [x: 20]
     """)
-    discard eval.evalString("a: make-thing 10")
-    discard eval.evalString("b: make-thing 20")
     check $eval.evalString("a/get-x") == "10"
     check $eval.evalString("b/get-x") == "20"
 
-  test "PascalCase to kebab-case in constructor name":
-    let eval = makeEval()
-    discard eval.evalString("""
-      CardReader: prototype [
-        field/optional [events [block!] []]
-      ]
-      r: make-card-reader
-    """)
-    # Just check it didn't error
-    check true
-
-  test "constructed instance passes type check":
+  test "instance passes type check":
     let eval = makeEval()
     discard eval.evalString("""
       Person: prototype [
         field/required [name [string!]]
         field/required [age [integer!]]
       ]
-      p: make-person "Ray" 30
+      p: make Person [name: "Ray" age: 30]
     """)
     check $eval.evalString("is? person! p") == "true"
 
-  # -- prototype immutability --
+  # -- prototype mutability --
 
-  test "prototype immutability":
+  test "prototype is mutable":
     let eval = makeEval()
-    var caught = false
-    try:
-      discard eval.evalString("""
-        Point: prototype [
-          field/optional [x [integer!] 0]
-          field/optional [y [integer!] 0]
-        ]
-        Point/x: 999
-      """)
-    except KtgError as e:
-      caught = true
-      check e.kind == "type"
-    check caught
+    let result = eval.evalString("""
+      Point: prototype [
+        field/optional [x [integer!] 0]
+        field/optional [y [integer!] 0]
+      ]
+      Point/x: 999
+      Point/x
+    """)
+    check $result == "999"
 
   # -- instance mutability --
 
@@ -1145,22 +1130,18 @@ suite "Prototype dialect tests":
       caught = true
     check caught
 
-  # -- name collision detection --
+  # -- type name and predicate registered --
 
-  test "name collision detection":
+  test "prototype registers type and predicate":
     let eval = makeEval()
-    var caught = false
-    try:
-      discard eval.evalString("""
-        point!: 42
-        Point: prototype [
-          field/optional [x [integer!] 0]
-        ]
-      """)
-    except KtgError as e:
-      caught = true
-      check e.kind == "name-collision"
-    check caught
+    discard eval.evalString("""
+      Point: prototype [
+        field/optional [x [integer!] 0]
+      ]
+      p: make Point [x: 5]
+    """)
+    check $eval.evalString("point? p") == "true"
+    check $eval.evalString("type point!") == "type!"
 
   # -- methods with parameters --
 
