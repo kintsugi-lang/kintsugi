@@ -56,8 +56,6 @@ type
     usedHelpers: HashSet[string]
     ## Track custom type names (from object definitions) for type tag emission.
     customTypes: HashSet[string]
-    ## Track @shared names — these skip 'local' in inner scopes.
-    sharedNames: HashSet[string]
 
   EmitError* = ref object of CatchableError
 
@@ -2145,14 +2143,6 @@ proc findLastStmtStart(e: var LuaEmitter, vals: seq[KtgValue]): int =
           discard e.emitExprWithChain(vals, pos)
           continue
         continue
-      # @shared prefix — in Lua, just a normal local (upvalues handle write-through)
-      if val.kind == vkWord and val.wordKind == wkMetaWord and val.wordName == "shared":
-        pos += 1
-        if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkSetWord:
-          pos += 1
-          discard e.emitExprWithChain(vals, pos)
-          continue
-        continue
       # Set-word
       if val.kind == vkWord and val.wordKind == wkSetWord:
         pos += 1
@@ -2449,25 +2439,6 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
         e.ln(resolvedLua)
         continue
 
-    # --- @shared prefix: @shared x: value — normal local, Lua upvalues handle write-through ---
-    if val.kind == vkWord and val.wordKind == wkMetaWord and val.wordName == "shared":
-      pos += 1
-      if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkSetWord:
-        let rawName = vals[pos].wordName
-        let name = luaName(rawName)
-        pos += 1
-        let prefix = if name in e.locals: "" else: "local "
-        e.locals.incl(name)
-        let expr = e.emitExprWithChain(vals, pos)
-        e.ln(prefix & name & " = " & expr)
-        continue
-      # @shared word or @shared [words] — no-op in compiled output
-      if pos < vals.len and vals[pos].kind == vkBlock:
-        pos += 1
-      elif pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkWord:
-        pos += 1
-      continue
-
     # --- @const prefix: @const x: value ---
     if val.kind == vkWord and val.wordKind == wkMetaWord and val.wordName == "const":
       pos += 1
@@ -2498,7 +2469,6 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
 
       let prefix = if isBound: ""            # bound names: global path, no 'local'
                    elif isPath: ""            # path access: no 'local'
-                   elif rawName in e.sharedNames: "" # @shared: no 'local' (upvalue)
                    elif name in e.locals: "" # already declared: no 'local'
                    else: "local "
       let constAnnotation = ""
@@ -3018,15 +2988,6 @@ proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
         e.prescanBindings(vals[i + 1].blockVals)
         i += 2
         continue
-
-    # @shared name: value — track shared names
-    if vals[i].kind == vkWord and vals[i].wordKind == wkMetaWord and
-       vals[i].wordName == "shared":
-      if i + 1 < vals.len and vals[i + 1].kind == vkWord and vals[i + 1].wordKind == wkSetWord:
-        e.sharedNames.incl(vals[i + 1].wordName)
-      # Don't skip — let the normal set-word handling process the binding
-      i += 1
-      continue
 
     # name: function [spec] [body]
     if vals[i].kind == vkWord and vals[i].wordKind == wkSetWord:

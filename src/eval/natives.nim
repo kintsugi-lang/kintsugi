@@ -622,6 +622,7 @@ proc registerNatives*(eval: Evaluator) =
     if args[0].kind != vkBlock:
       raise KtgError(kind: "type", msg: "scope expects block!", data: nil)
     let childCtx = eval.currentCtx.child
+    childCtx.localOnly = true
     eval.evalBlock(args[0].blockVals, childCtx)
   )
 
@@ -729,6 +730,7 @@ proc registerNatives*(eval: Evaluator) =
     let eval = cast[Evaluator](ep)
     if args[0].kind == vkBlock:
       let ctxInner = newContext(eval.currentCtx)
+      ctxInner.localOnly = true
       discard eval.evalBlock(args[0].blockVals, ctxInner)
       return KtgValue(kind: vkContext, ctx: ctxInner, line: 0)
     raise KtgError(kind: "type", msg: "context expects block!", data: nil)

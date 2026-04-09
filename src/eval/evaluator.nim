@@ -41,8 +41,7 @@ proc newEvaluator*(): Evaluator =
     callStack: @[],
     dialects: @[],
     moduleCache: initTable[string, KtgValue](),
-    moduleLoading: initHashSet[string](),
-    shared: initTable[string, KtgContext]()
+    moduleLoading: initHashSet[string]()
   )
 
 proc registerDialect*(eval: Evaluator, d: Dialect) =
@@ -441,11 +440,6 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
           msg: "cannot rebind self",
           data: nil)
 
-      # @shared words write to the declaring scope
-      if val.wordName in eval.shared:
-        eval.shared[val.wordName].set(val.wordName, rhs)
-        return rhs
-
       # set-path: word/field/field: value
       if val.wordName.contains('/'):
         let (head, segments) = parsePath(val.wordName)
@@ -569,8 +563,8 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
             ),
             line: 0))
 
-      # set in current scope (always shadows)
-      ctx.set(val.wordName, rhs)
+      # write-through: update existing binding, or create local if new
+      ctx.setThrough(val.wordName, rhs)
       return rhs
 
     of wkGetWord:
@@ -641,34 +635,6 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
           eval.applyInfix(rhs, vals, pos, ctx)
           ctx.set(setWord.wordName, rhs)
           return rhs
-        return val
-
-      # @shared word: value — declare in current scope, writable from inner scopes
-      # @shared word — mark existing word as shared
-      # @shared [words] — mark multiple words as shared
-      if val.wordName == "shared":
-        if pos < vals.len:
-          let next = vals[pos]
-          # @shared word: value
-          if next.kind == vkWord and next.wordKind == wkSetWord:
-            pos += 1
-            var rhs = eval.evalNext(vals, pos, ctx)
-            eval.applyInfix(rhs, vals, pos, ctx)
-            ctx.set(next.wordName, rhs)
-            eval.shared[next.wordName] = ctx
-            return rhs
-          # @shared [words]
-          if next.kind == vkBlock:
-            pos += 1
-            for v in next.blockVals:
-              if v.kind == vkWord and v.wordKind == wkWord:
-                eval.shared[v.wordName] = ctx
-            return ktgNone()
-          # @shared word
-          if next.kind == vkWord and next.wordKind == wkWord:
-            pos += 1
-            eval.shared[next.wordName] = ctx
-            return ktgNone()
         return val
 
       # @macro — tag the next function definition as a macro

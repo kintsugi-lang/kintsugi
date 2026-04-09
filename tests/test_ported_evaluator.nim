@@ -275,21 +275,25 @@ suite "Context scoping":
     discard eval.evalString("f: function [] [a]")
     check $eval.evalString("f") == "1"
 
-  test "shadowing":
-    ## Spec rule: set-word ALWAYS shadows, no write-through
+  test "write-through":
+    ## Set-word writes to where the name exists in scope chain
     let eval = makeEval()
     discard eval.evalString("x: 1")
     discard eval.evalString("f: function [] [x: 2 x]")
     check $eval.evalString("f") == "2"       # inner x is 2
-    check $eval.evalString("x") == "1"       # outer x unchanged — shadowed, not mutated
+    check $eval.evalString("x") == "2"       # outer x updated via write-through
 
-  test "set always shadows":
-    ## Spec rule: set-word in child scope never writes through to parent
+  test "new name in function is local":
+    ## Set-word creates local if name doesn't exist in parent
     let eval = makeEval()
-    discard eval.evalString("x: 1")
-    discard eval.evalString("f: function [] [x: 99 x]")
+    discard eval.evalString("f: function [] [y: 99 y]")
     check $eval.evalString("f") == "99"
-    check $eval.evalString("x") == "1"       # parent untouched
+    var caught = false
+    try:
+      discard eval.evalString("y")
+    except KtgError:
+      caught = true
+    check caught
 
   test "path access":
     let eval = makeEval()

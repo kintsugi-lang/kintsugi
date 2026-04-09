@@ -20,7 +20,7 @@ proc makeEval(): Evaluator =
 suite "Loop tests":
   test "loop with break":
     let eval = makeEval()
-    check $eval.evalString("@shared x: 0 loop [x: x + 1 if x = 3 [break]] x") == "3"
+    check $eval.evalString("x: 0 loop [x: x + 1 if x = 3 [break]] x") == "3"
 
   test "for-in with side effects":
     let eval = makeEval()
@@ -1384,7 +1384,7 @@ suite "Natives tests":
 
   test "loop with break":
     let eval = makeEval()
-    check $eval.evalString("@shared x: 0 loop [x: x + 1 if x = 5 [break]] x") == "5"
+    check $eval.evalString("x: 0 loop [x: x + 1 if x = 5 [break]] x") == "5"
 
   # -- logical ops --
 

@@ -146,16 +146,13 @@ Closures, objects, modules, scopes, instances — all contexts. A closure is a f
 
 **Why:** Eliminates special cases. One mechanism, many uses.
 
-### Set-Word Always Shadows (Unless @shared)
+### Set-Words Write Through
 
-`x: value` creates a binding in the current scope. Never mutates a parent scope. Two ways to write through:
+`x: value` writes to wherever `x` exists in the scope chain. If `x` doesn't exist anywhere, it creates a new local binding. Functions and loops can naturally update outer variables.
 
-1. **Set-path on a context:** `state/counter: state/counter + 1` — explicit, preferred for structured state.
-2. **`@shared` declaration:** `@shared counter: 0` marks a binding as writable from inner scopes. Inner `counter: counter + 1` walks the scope chain and writes to the declaring context.
+Context builders (`context [...]`, `make map! [...]`, `object [...]`, `scope [...]`) are isolated - set-words inside them always create local entries, never write through. This is because their purpose is to define a new set of bindings, not mutate the caller's scope.
 
-Without `@shared`, set-words in inner scopes always shadow — safe for dialect blocks. With `@shared`, the intent is at the declaration site, not sprinkled across mutation sites.
-
-**Why:** Prevents accidental mutations of outer scopes. Dialect blocks (`loop`, `parse`, `match`) are safe because their set-words are never marked `@shared` by anyone. When you do need write-through, you declare it once at the source.
+**Why:** Matches Lua's scoping model (the compilation target). Simple scripts work naturally without ceremony. The isolation rule for context builders prevents `make map! [name: "Ray"]` from accidentally overwriting an outer `name` variable.
 
 ### Closures Capture By Reference
 
@@ -296,7 +293,7 @@ Influenced by, not compatible with. Key divergences:
 - No variadic functions
 - No `make` delegation chains (stamp, not chain)
 - Money is cents-based (Red uses decimal)
-- `set-word` always shadows (REBOL allows write-through in some cases)
+- `set-word` writes through (REBOL shadows by default)
 - `==` is strict type equality (both sides must be same scalar type)
 
 ---

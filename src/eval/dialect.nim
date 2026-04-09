@@ -11,7 +11,6 @@ type
     dialects*: seq[Dialect]
     moduleCache*: Table[string, KtgValue]
     moduleLoading*: HashSet[string]
-    shared*: Table[string, KtgContext]  ## words declared with @shared → declaring context
     macros*: HashSet[string]   ## words declared with @macro
     parseFn*: proc(eval: Evaluator, input, rules: KtgValue, okOnly: bool): KtgValue  ## @parse implementation
 

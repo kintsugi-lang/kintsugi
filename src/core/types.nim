@@ -80,6 +80,7 @@ type
   KtgContext* = ref object
     entries*: OrderedTable[string, KtgValue]
     parent*: KtgContext
+    localOnly*: bool  ## when true, setThrough behaves like set (for context builders)
 
   FieldSpec* = object
     name*: string
@@ -202,13 +203,15 @@ proc set*(ctx: KtgContext, name: string, val: KtgValue) =
 proc setThrough*(ctx: KtgContext, name: string, val: KtgValue) =
   ## Write-through: if name exists in a parent scope, write there.
   ## If not, create in current scope (new local).
-  var c = ctx.parent
-  while c != nil:
-    if name in c.entries:
-      c.entries[name] = val
-      return
-    c = c.parent
-  # Not found in any parent — create local
+  ## Respects localOnly flag for context builders (make map!, context [...], etc.)
+  if not ctx.localOnly:
+    var c = ctx.parent
+    while c != nil:
+      if name in c.entries:
+        c.entries[name] = val
+        return
+      c = c.parent
+  # Not found in any parent (or localOnly) — create local
   ctx.entries[name] = val
 
 proc has*(ctx: KtgContext, name: string): bool =

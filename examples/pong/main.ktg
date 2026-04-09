@@ -71,11 +71,6 @@ Ball: object [
   ]
 ]
 
-; ============================================================
-; Game state — all mutable state lives in contexts so set-path
-; writes through instead of shadowing.
-; ============================================================
-
 game: context [
   paused: true
   font: none

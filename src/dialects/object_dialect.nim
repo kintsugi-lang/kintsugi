@@ -167,6 +167,7 @@ proc registerObjectDialect*(eval: Evaluator) =
       # Evaluate the body (method definitions)
       if bodyStart < blk.len:
         let bodyCtx = newContext(eval.currentCtx)
+        bodyCtx.localOnly = true
         for fs in fieldSpecs:
           if fs.hasDefault:
             bodyCtx.set(fs.name, fs.defaultVal)
@@ -197,6 +198,7 @@ proc registerObjectDialect*(eval: Evaluator) =
         if overrides.kind != vkBlock:
           raise KtgError(kind: "type", msg: "make map! expects block!", data: nil)
         let ctxInner = newContext(eval.currentCtx)
+        ctxInner.localOnly = true
         discard eval.evalBlock(overrides.blockVals, ctxInner)
         var entries = initOrderedTable[string, KtgValue]()
         for key, val in ctxInner.entries:
@@ -240,6 +242,7 @@ proc registerObjectDialect*(eval: Evaluator) =
 
       # Step 2: Apply overrides (type-checked)
       let overrideCtx = newContext(eval.currentCtx)
+      overrideCtx.localOnly = true
       if overrides.blockVals.len > 0:
         discard eval.evalBlock(overrides.blockVals, overrideCtx)
         for key, val in overrideCtx.entries:

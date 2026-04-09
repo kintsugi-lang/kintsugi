@@ -228,6 +228,7 @@ proc registerIoNatives*(eval: Evaluator) =
 
         if "eval" in eval.currentRefinements:
           let isoCtx = newContext(eval.global)
+          isoCtx.localOnly = true
           discard eval.evalBlock(ast, isoCtx)
           if doFreeze:
             return KtgValue(kind: vkObject,
@@ -236,6 +237,7 @@ proc registerIoNatives*(eval: Evaluator) =
 
         if doFreeze:
           let isoCtx = newContext(eval.global)
+          isoCtx.localOnly = true
           discard eval.evalBlock(ast, isoCtx)
           return KtgValue(kind: vkObject,
             obj: newObject(isoCtx.entries), line: 0)
@@ -333,6 +335,7 @@ proc registerIoNatives*(eval: Evaluator) =
             ast = ast[2..^1]
 
           let isoCtx = newContext(eval.global)
+          isoCtx.localOnly = true
           discard eval.evalBlock(ast, isoCtx)
 
           var resultCtx: KtgContext

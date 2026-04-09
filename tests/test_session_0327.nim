@@ -427,11 +427,11 @@ suite "does":
     """)
     check $r == "10"
 
-suite "@shared":
-  test "@shared word: value declares and sets":
+suite "write-through scoping":
+  test "function write-through to parent scope":
     let eval = makeEval()
     let r = eval.evalString("""
-      @shared counter: 0
+      counter: 0
       adder: does [counter: counter + 1]
       adder
       adder
@@ -440,10 +440,10 @@ suite "@shared":
     """)
     check $r == "3"
 
-  test "@shared word marks existing binding":
+  test "function accumulates to parent":
     let eval = makeEval()
     let r = eval.evalString("""
-      @shared total: 0
+      total: 0
       accumulate: function [n] [total: total + n]
       accumulate 5
       accumulate 3
@@ -451,10 +451,9 @@ suite "@shared":
     """)
     check $r == "8"
 
-  test "@shared [words] marks multiple":
+  test "multiple write-through vars":
     let eval = makeEval()
     discard eval.evalString("""
-      @shared [a b]
       a: 0
       b: 0
       inc: does [a: a + 1  b: b + 10]
@@ -464,19 +463,23 @@ suite "@shared":
     check $eval.evalString("a") == "2"
     check $eval.evalString("b") == "20"
 
-  test "non-shared words still shadow":
+  test "new names in function are local":
     let eval = makeEval()
     discard eval.evalString("""
-      x: 99
       f: function [n] [x: n * 2  x]
     """)
     check $eval.evalString("f 5") == "10"
-    check $eval.evalString("x") == "99"
+    var caught = false
+    try:
+      discard eval.evalString("x")
+    except KtgError:
+      caught = true
+    check caught
 
-  test "@shared from nested function writes to declaring scope":
+  test "nested function write-through":
     let eval = makeEval()
     let r = eval.evalString("""
-      @shared score: 0
+      score: 0
       outer: function [] [
         inner: does [score: score + 100]
         inner
@@ -634,7 +637,7 @@ suite "attempt retries":
   test "retries source until success":
     let eval = makeEval()
     let r = eval.evalString("""
-      @shared attempts: 0
+      attempts: 0
       attempt [
         source [
           attempts: attempts + 1
