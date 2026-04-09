@@ -244,8 +244,8 @@ suite "series operation emission":
     let code = emitLua(parseSource("x: pick [10 20 30] 2"))
     check ")[2]" in code
 
-  test "length? emits # operator":
-    let code = emitLua(parseSource("x: length? [1 2 3]"))
+  test "length emits # operator":
+    let code = emitLua(parseSource("x: length [1 2 3]"))
     check "#" in code
 
   test "empty? emits length comparison":

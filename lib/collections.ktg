@@ -45,7 +45,7 @@ flatten: function [data [block!] /deep] [
 ; zip [1 2 3] ["a" "b" "c"]  => [[1 "a"] [2 "b"] [3 "c"]]
 
 zip: function [a [block!] b [block!]] [
-  len: min length? a length? b
+  len: min length a length b
   loop/collect [for [i] from 1 to len do [
     reduce [pick a i pick b i]
   ]]
@@ -67,14 +67,14 @@ unique: function [data [block!]] [
 ; drop [1 2 3 4 5] 2  => [3 4 5]
 
 take: function [data [block!] n [integer!]] [
-  loop/collect [for [i] from 1 to (min n (size? data)) do [
+  loop/collect [for [i] from 1 to (min n (length data)) do [
     pick data i
   ]]
 ]
 
 drop: function [data [block!] n [integer!]] [
-  if n >= (size? data) [return []]
-  loop/collect [for [i] from (n + 1) to (size? data) do [
+  if n >= (length data) [return []]
+  loop/collect [for [i] from (n + 1) to (length data) do [
     pick data i
   ]]
 ]
@@ -97,7 +97,7 @@ partition: function [data [block!] n [integer!] /by key-fn] [
   ]
   ; Chunk by size
   result: []
-  len: size? data
+  len: length data
   i: 1
   loop [
     if i > len [break]
@@ -121,7 +121,7 @@ rotate: function [data n] [
     ny: (data/x * s) + (data/y * c)
     return to pair! reduce [(round nx) (round ny)]
   ]
-  len: size? data
+  len: length data
   if len = 0 [return []]
   offset: n % len
   if offset < 0 [offset: offset + len]
@@ -143,7 +143,7 @@ choice: function [items [block!] /weighted] [
     ]]
     return first last items
   ]
-  pick items ((random/int size? items) + 1)
+  pick items ((random/int length items) + 1)
 ]
 
 ; --- Repeat ---
@@ -163,7 +163,7 @@ repeat: function [val n [integer!]] [
 ; interleave [1 2 3] ["a" "b" "c"]  => [1 "a" 2 "b" 3 "c"]
 
 interleave: function [a [block!] b [block!]] [
-  len: min size? a size? b
+  len: min length a length b
   result: []
   loop [for [i] from 1 to len do [
     append result (pick a i)

@@ -29,12 +29,12 @@ proc deepCopyValue*(val: KtgValue): KtgValue =
     KtgValue(kind: vkMap, mapEntries: newEntries, line: val.line)
   of vkSet:
     KtgValue(kind: vkSet, setMembers: val.setMembers, line: val.line)
-  of vkPrototype:
+  of vkObject:
     var newEntries = initOrderedTable[string, KtgValue]()
-    for key, v in val.proto.entries:
+    for key, v in val.obj.entries:
       newEntries[key] = deepCopyValue(v)
-    KtgValue(kind: vkPrototype,
-      proto: newPrototype(newEntries, val.proto.fieldSpecs, val.proto.name),
+    KtgValue(kind: vkObject,
+      obj: newObject(newEntries, val.obj.fieldSpecs, val.obj.name),
       line: val.line)
   else:
     val
@@ -154,7 +154,7 @@ proc registerNatives*(eval: Evaluator) =
 
   for name in ["integer", "float", "string", "logic", "none", "money",
                "pair", "tuple", "date", "time", "file", "url", "email",
-               "block", "paren", "map", "set", "context", "prototype",
+               "block", "paren", "map", "set", "context", "object",
                "function", "native", "word", "type"]:
     ctx.native(name & "?", 1, makeTypePredicate(name & "!"))
 
@@ -171,7 +171,7 @@ proc registerNatives*(eval: Evaluator) =
 
   const builtinTypes = ["integer!", "float!", "string!", "logic!", "none!",
     "money!", "pair!", "tuple!", "date!", "time!", "file!", "url!", "email!",
-    "block!", "paren!", "map!", "set!", "context!", "prototype!",
+    "block!", "paren!", "map!", "set!", "context!", "object!",
     "function!", "native!", "word!", "type!", "set-word!", "get-word!",
     "lit-word!", "meta-word!", "op!"]
 
@@ -230,12 +230,12 @@ proc registerNatives*(eval: Evaluator) =
       )
       return ktgLogic(eval.matchesCustomType(value, ct, eval.currentCtx))
 
-    # Case 3: prototype! — e.g., is? :Person p
-    if typeArg.kind == vkPrototype:
-      # Structural check: value must be a context with all fields from prototype
+    # Case 3: object! — e.g., is? :Person p
+    if typeArg.kind == vkObject:
+      # Structural check: value must be a context with all fields from object
       if value.kind != vkContext:
         return ktgLogic(false)
-      for fs in typeArg.proto.fieldSpecs:
+      for fs in typeArg.obj.fieldSpecs:
         if fs.name notin value.ctx.entries:
           return ktgLogic(false)
       return ktgLogic(true)
@@ -246,19 +246,18 @@ proc registerNatives*(eval: Evaluator) =
 
   # --- Series operations ---
 
-  let sizeImpl = proc(args: seq[KtgValue], ep: pointer): KtgValue =
+  let lengthImpl = proc(args: seq[KtgValue], ep: pointer): KtgValue =
     case args[0].kind
     of vkBlock: ktgInt(int64(args[0].blockVals.len))
     of vkString: ktgInt(int64(args[0].strVal.len))
     of vkMap: ktgInt(int64(args[0].mapEntries.len))
     of vkSet: ktgInt(int64(args[0].setMembers.len))
     of vkContext: ktgInt(int64(args[0].ctx.entries.len))
-    of vkPrototype: ktgInt(int64(args[0].proto.entries.len))
+    of vkObject: ktgInt(int64(args[0].obj.entries.len))
     of vkParen: ktgInt(int64(args[0].parenVals.len))
     else:
-      raise KtgError(kind: "type", msg: "size? not supported on " & typeName(args[0]), data: nil)
-  ctx.native("size?", 1, sizeImpl)
-  ctx.native("length?", 1, sizeImpl)
+      raise KtgError(kind: "type", msg: "length not supported on " & typeName(args[0]), data: nil)
+  ctx.native("length", 1, lengthImpl)
 
   ctx.native("empty?", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     case args[0].kind
@@ -266,7 +265,7 @@ proc registerNatives*(eval: Evaluator) =
     of vkString: ktgLogic(args[0].strVal.len == 0)
     of vkMap: ktgLogic(args[0].mapEntries.len == 0)
     of vkContext: ktgLogic(args[0].ctx.entries.len == 0)
-    of vkPrototype: ktgLogic(args[0].proto.entries.len == 0)
+    of vkObject: ktgLogic(args[0].obj.entries.len == 0)
     else:
       raise KtgError(kind: "type", msg: "empty? not supported on " & typeName(args[0]), data: nil)
   )
@@ -639,22 +638,20 @@ proc registerNatives*(eval: Evaluator) =
     args[0]
   )
 
-  ctx.native("all", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+  ctx.native("all?", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     let eval = cast[Evaluator](ep)
     if args[0].kind == vkBlock:
-      var lastVal: KtgValue = ktgLogic(true)
       var pos = 0
       while pos < args[0].blockVals.len:
         var r = eval.evalNext(args[0].blockVals, pos, eval.currentCtx)
         eval.applyInfix(r, args[0].blockVals, pos, eval.currentCtx)
         if not isTruthy(r):
-          return r
-        lastVal = r
-      return lastVal
+          return ktgLogic(false)
+      return ktgLogic(true)
     ktgNone()
   )
 
-  ctx.native("any", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+  ctx.native("any?", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     let eval = cast[Evaluator](ep)
     if args[0].kind == vkBlock:
       var pos = 0
@@ -662,22 +659,22 @@ proc registerNatives*(eval: Evaluator) =
         var r = eval.evalNext(args[0].blockVals, pos, eval.currentCtx)
         eval.applyInfix(r, args[0].blockVals, pos, eval.currentCtx)
         if isTruthy(r):
-          return r
-      return ktgNone()
+          return ktgLogic(true)
+      return ktgLogic(false)
     ktgNone()
   )
 
-  ctx.native("words-of", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+  ctx.native("words", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     var names: seq[KtgValue] = @[]
     case args[0].kind
     of vkContext:
       for key in args[0].ctx.entries.keys:
         names.add(ktgWord(key, wkWord))
-    of vkPrototype:
-      for key in args[0].proto.entries.keys:
+    of vkObject:
+      for key in args[0].obj.entries.keys:
         names.add(ktgWord(key, wkWord))
     else:
-      raise KtgError(kind: "type", msg: "words-of expects context! or prototype!", data: nil)
+      raise KtgError(kind: "type", msg: "words expects context! or object!", data: nil)
     ktgBlock(names)
   )
 
@@ -685,33 +682,48 @@ proc registerNatives*(eval: Evaluator) =
     let mergeNative = KtgNative(
       name: "merge",
       arity: 2,
-      refinements: @[RefinementSpec(name: "deep", params: @[])],
+      refinements: @[
+        RefinementSpec(name: "deep", params: @[]),
+        RefinementSpec(name: "freeze", params: @[])
+      ],
       fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
         let eval = cast[Evaluator](ep)
         let isDeep = "deep" in eval.currentRefinements
-        if args[0].kind != vkContext:
-          raise KtgError(kind: "type", msg: "merge expects context! as first argument", data: nil)
-        let target = args[0].ctx
-        # Source can be context or prototype
-        var sourceEntries: OrderedTable[string, KtgValue]
-        case args[1].kind
-        of vkContext:
-          sourceEntries = args[1].ctx.entries
-        of vkPrototype:
-          sourceEntries = args[1].proto.entries
-        else:
-          raise KtgError(kind: "type", msg: "merge expects context! or prototype! as second argument", data: nil)
-        for key, val in sourceEntries:
-          if val.kind != vkNone:  # skip none values (missing captures)
+        let doFreeze = "freeze" in eval.currentRefinements
+
+        proc getEntries(val: KtgValue): OrderedTable[string, KtgValue] =
+          case val.kind
+          of vkContext: val.ctx.entries
+          of vkObject: val.obj.entries
+          else:
+            raise KtgError(kind: "type",
+              msg: "merge expects context! or object!, got " & typeName(val), data: val)
+
+        let aEntries = getEntries(args[0])
+        let bEntries = getEntries(args[1])
+
+        let merged = newContext(eval.global)
+        for key, val in aEntries:
+          if isDeep:
+            merged.set(key, deepCopyValue(val))
+          else:
+            merged.set(key, val)
+        for key, val in bEntries:
+          if val.kind != vkNone:
             if isDeep:
-              target.set(key, deepCopyValue(val))
+              merged.set(key, deepCopyValue(val))
             else:
-              target.set(key, val)
-        args[0]
+              merged.set(key, val)
+
+        if doFreeze:
+          KtgValue(kind: vkObject,
+            obj: newObject(merged.entries), line: 0)
+        else:
+          KtgValue(kind: vkContext, ctx: merged, line: 0)
     )
     ctx.set("merge", KtgValue(kind: vkNative, nativeFn: mergeNative, line: 0))
 
-  # --- Context/Prototype ---
+  # --- Context/Object ---
 
   ctx.native("context", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     let eval = cast[Evaluator](ep)
@@ -720,6 +732,51 @@ proc registerNatives*(eval: Evaluator) =
       discard eval.evalBlock(args[0].blockVals, ctxInner)
       return KtgValue(kind: vkContext, ctx: ctxInner, line: 0)
     raise KtgError(kind: "type", msg: "context expects block!", data: nil)
+  )
+
+  # --- Freeze ---
+
+  block:
+    proc freezeValue(val: KtgValue, deep: bool): KtgValue =
+      case val.kind
+      of vkContext:
+        var entries = initOrderedTable[string, KtgValue]()
+        for key, v in val.ctx.entries:
+          if deep and v.kind == vkContext:
+            entries[key] = freezeValue(v, true)
+          else:
+            entries[key] = v
+        KtgValue(kind: vkObject, obj: newObject(entries), line: val.line)
+      of vkObject:
+        if deep:
+          var entries = initOrderedTable[string, KtgValue]()
+          for key, v in val.obj.entries:
+            if v.kind == vkContext:
+              entries[key] = freezeValue(v, true)
+            else:
+              entries[key] = v
+          KtgValue(kind: vkObject,
+            obj: newObject(entries, val.obj.fieldSpecs, val.obj.name),
+            line: val.line)
+        else:
+          val
+      else:
+        raise KtgError(kind: "type",
+          msg: "freeze expects context! or object!, got " & typeName(val), data: val)
+
+    let freezeNative = KtgNative(
+      name: "freeze",
+      arity: 1,
+      refinements: @[RefinementSpec(name: "deep", params: @[])],
+      fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
+        let eval = cast[Evaluator](ep)
+        let deep = "deep" in eval.currentRefinements
+        freezeValue(args[0], deep)
+    )
+    ctx.set("freeze", KtgValue(kind: vkNative, nativeFn: freezeNative, line: 0))
+
+  ctx.native("frozen?", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    ktgLogic(args[0].kind == vkObject)
   )
 
   # --- Function creation ---
@@ -868,11 +925,11 @@ proc registerNatives*(eval: Evaluator) =
       for name in names:
         if name.kind == vkWord and name.wordName in source.ctx.entries:
           eval.currentCtx.set(name.wordName, source.ctx.entries[name.wordName])
-    elif source.kind == vkPrototype:
-      # named destructuring from prototype
+    elif source.kind == vkObject:
+      # named destructuring from object
       for name in names:
-        if name.kind == vkWord and name.wordName in source.proto.entries:
-          eval.currentCtx.set(name.wordName, source.proto.entries[name.wordName])
+        if name.kind == vkWord and name.wordName in source.obj.entries:
+          eval.currentCtx.set(name.wordName, source.obj.entries[name.wordName])
 
     source
   )
@@ -945,7 +1002,7 @@ proc registerNatives*(eval: Evaluator) =
     ctx.set("sort", KtgValue(kind: vkNative, nativeFn: sortNative, line: 0))
 
   # --- Make ---
-  # NOTE: `make` is registered in prototype_dialect.nim with full field validation,
+  # NOTE: `make` is registered in object_dialect.nim with full field validation,
   # type checking, required field checks, and self-binding support.
   # map!/set! handling is also there.
 

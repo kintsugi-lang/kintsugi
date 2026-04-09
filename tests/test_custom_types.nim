@@ -10,7 +10,7 @@ proc makeEval(): Evaluator =
   eval.registerNatives()
   eval.registerDialect(newLoopDialect())
   eval.registerMatch()
-  eval.registerPrototypeDialect()
+  eval.registerObjectDialect()
   eval.registerAttempt()
   eval.registerParse()
   eval
@@ -99,7 +99,7 @@ suite "@type/where guarded types":
 
   test "where with string length guard":
     let eval = makeEval()
-    discard eval.evalString("""short-string!: @type/where [string!] [3 > length? it]""")
+    discard eval.evalString("""short-string!: @type/where [string!] [3 > length it]""")
     check $eval.evalString("""is? short-string! "ab" """) == "true"
     check $eval.evalString("""is? short-string! "abcde" """) == "false"
 
@@ -254,7 +254,7 @@ suite "Typed blocks [block! integer!]":
 
   test "untyped block accepts anything":
     let eval = makeEval()
-    discard eval.evalString("""f: function [data [block!]] [length? data]""")
+    discard eval.evalString("""f: function [data [block!]] [length data]""")
     check $eval.evalString("""f [1 "a" true]""") == "3"
 
   test "typed block with string elements":

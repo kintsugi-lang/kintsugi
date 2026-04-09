@@ -12,7 +12,7 @@ let nativeArities*: seq[tuple[name: string, arity: int]] = @[
   # Type introspection
   ("type", 1), ("is?", 2),
   # Series
-  ("size?", 1), ("length?", 1), ("empty?", 1),
+  ("length", 1), ("empty?", 1),
   ("first", 1), ("second", 1), ("last", 1), ("pick", 2),
   ("append", 2), ("copy", 1), ("select", 2), ("has?", 2),
   ("find", 2), ("reverse", 1), ("insert", 3), ("remove", 2),
@@ -31,11 +31,11 @@ let nativeArities*: seq[tuple[name: string, arity: int]] = @[
   ("to-degrees", 1), ("to-radians", 1),
   ("floor", 1), ("ceil", 1), ("random", 1),
   # Block evaluation
-  ("reduce", 1), ("all", 1), ("any", 1),
+  ("reduce", 1), ("all?", 1), ("any?", 1),
   # Function creation
   ("function", 2), ("does", 1),
   # Context/Object
-  ("context", 1), ("scope", 1), ("words-of", 1), ("merge", 2),
+  ("context", 1), ("scope", 1), ("words", 1), ("merge", 2), ("freeze", 1),
   # Type conversion
   ("to", 2),
   # Apply/Sort/Set
@@ -57,6 +57,6 @@ let nativeArities*: seq[tuple[name: string, arity: int]] = @[
 let typePredNames*: seq[string] = @[
   "integer", "float", "string", "logic", "none", "money",
   "pair", "tuple", "date", "time", "file", "url", "email",
-  "block", "paren", "map", "set", "context", "prototype",
-  "function", "native", "word", "type", "number"
+  "block", "paren", "map", "set", "context", "object",
+  "function", "native", "word", "type", "number", "frozen"
 ]

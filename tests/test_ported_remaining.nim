@@ -19,7 +19,7 @@ proc makeEval(): Evaluator =
   eval.registerNatives()
   eval.registerDialect(newLoopDialect())
   eval.registerMatch()
-  eval.registerPrototypeDialect()
+  eval.registerObjectDialect()
   eval.registerAttempt()
   eval.registerParse()
   eval
@@ -188,7 +188,7 @@ suite "Require — caching":
 
 
 # =============================================================================
-# object.test.ts — tests not already covered by test_object.nim (now prototype)
+# object.test.ts — tests not already covered by test_object.nim (now object)
 # =============================================================================
 
 suite "Object — context tests (from object.test.ts)":
@@ -494,7 +494,7 @@ suite "Stdlib collections — reverse-block (inline)":
     let eval = makeEval()
     discard eval.evalString("""
       reverse-block: function [blk] [
-        len: length? blk
+        len: length blk
         either len = 0 [[]] [
           result: []
           loop [
@@ -517,7 +517,7 @@ suite "Stdlib collections — reverse-block (inline)":
     let eval = makeEval()
     discard eval.evalString("""
       reverse-block: function [blk] [
-        len: length? blk
+        len: length blk
         either len = 0 [[]] [
           result: []
           loop [
@@ -538,7 +538,7 @@ suite "Stdlib collections — reverse-block (inline)":
     let eval = makeEval()
     discard eval.evalString("""
       reverse-block: function [blk] [
-        len: length? blk
+        len: length blk
         either len = 0 [[]] [
           result: []
           loop [
@@ -907,7 +907,7 @@ suite "Typed blocks":
 
   test "untyped block accepts anything":
     let eval = makeEval()
-    discard eval.evalString("""f: function [data [block!]] [length? data]""")
+    discard eval.evalString("""f: function [data [block!]] [length data]""")
     check $eval.evalString("""f [1 "a" true]""") == "3"
 
 suite "@type validates context fields":

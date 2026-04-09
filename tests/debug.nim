@@ -6,12 +6,12 @@ let eval = newEvaluator()
 eval.registerNatives()
 eval.registerDialect(newLoopDialect())
 eval.registerMatch()
-eval.registerPrototypeDialect()
+eval.registerObjectDialect()
 eval.registerAttempt()
 eval.registerParse()
 
 discard eval.evalString("""
-  Card: prototype [
+  Card: object [
     field/required [name [string!]]
     field/optional [balance [money!] $0.00]
   ]

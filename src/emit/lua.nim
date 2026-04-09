@@ -9,7 +9,7 @@
 ##   - Type checks are ERASED — not emitted as runtime checks.
 ##   - `do`, `bind`, `compose` on dynamic blocks are COMPILE ERRORS.
 ##   - `match` specializes to if-chain.
-##   - `prototype` specializes to table + constructor function.
+##   - `object` specializes to table + constructor function.
 ##   - `loop` specializes to Lua for/ipairs loops.
 ##   - `#preprocess` runs at compile time (not in this file).
 ##   - `freeze`/`frozen?` are no-ops in compiled output.
@@ -54,7 +54,7 @@ type
     compiling: HashSet[string]
     ## Track which prelude helpers are actually used.
     usedHelpers: HashSet[string]
-    ## Track custom type names (from prototype definitions) for type tag emission.
+    ## Track custom type names (from object definitions) for type tag emission.
     customTypes: HashSet[string]
     ## Track @shared names — these skip 'local' in inner scopes.
     sharedNames: HashSet[string]
@@ -288,10 +288,7 @@ exprHandlers["trim"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int
   let arg = e.emitExpr(vals, pos)
   "(" & arg & "):match(\"^%s*(.-)%s*$\")"
 
-exprHandlers["length?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  "#" & e.emitExpr(vals, pos)
-
-exprHandlers["size?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+exprHandlers["length"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   "#" & e.emitExpr(vals, pos)
 
 exprHandlers["empty?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
@@ -325,8 +322,15 @@ exprHandlers["number?"] = typePred("number")
 # Table-backed types
 exprHandlers["block?"] = typePred("table")
 exprHandlers["context?"] = typePred("table")
-exprHandlers["prototype?"] = typePred("table")
+exprHandlers["object?"] = typePred("table")
 exprHandlers["map?"] = typePred("table")
+
+# Freeze - no-op in compiled output
+exprHandlers["freeze"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  e.emitExpr(vals, pos, primary = true)
+exprHandlers["frozen?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  discard e.emitExpr(vals, pos, primary = true)
+  "false"
 
 # Function types
 exprHandlers["function?"] = typePred("function")
@@ -419,7 +423,7 @@ exprHandlers["is?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int)
   of "string": "(type(" & valExpr & ") == \"string\")"
   of "logic": "(type(" & valExpr & ") == \"boolean\")"
   of "function", "native": "(type(" & valExpr & ") == \"function\")"
-  of "block", "context", "map", "prototype": "(type(" & valExpr & ") == \"table\")"
+  of "block", "context", "map", "object": "(type(" & valExpr & ") == \"table\")"
   of "none":
     e.useHelper("_is_none")
     "(_is_none(" & valExpr & "))"
@@ -594,7 +598,7 @@ exprHandlers["reduce"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var i
   e.emitExpr(vals, pos)
 
 # --- all/any: short-circuit boolean combinators ---
-exprHandlers["all"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+exprHandlers["all?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   if pos < vals.len and vals[pos].kind == vkBlock:
     let blk = vals[pos].blockVals
     pos += 1
@@ -602,11 +606,11 @@ exprHandlers["all"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int)
     var bpos = 0
     while bpos < blk.len:
       parts.add(e.emitExpr(blk, bpos))
-    "(" & parts.join(" and ") & ")"
+    "(not not (" & parts.join(" and ") & "))"
   else:
     "true"
 
-exprHandlers["any"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+exprHandlers["any?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   if pos < vals.len and vals[pos].kind == vkBlock:
     let blk = vals[pos].blockVals
     pos += 1
@@ -614,18 +618,18 @@ exprHandlers["any"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int)
     var bpos = 0
     while bpos < blk.len:
       parts.add(e.emitExpr(blk, bpos))
-    "(" & parts.join(" or ") & ")"
+    "(not not (" & parts.join(" or ") & "))"
   else:
     "false"
 
-# --- merge: copy entries from source into target, return target ---
+# --- merge: create new table with entries from both sources ---
 exprHandlers["merge"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  let target = e.emitExpr(vals, pos, primary = true)
-  let source = e.emitExpr(vals, pos, primary = true)
-  "(function() for k, v in pairs(" & source & ") do " & target & "[k] = v end; return " & target & " end)()"
+  let a = e.emitExpr(vals, pos, primary = true)
+  let b = e.emitExpr(vals, pos, primary = true)
+  "(function() local r = {} for k, v in pairs(" & a & ") do r[k] = v end for k, v in pairs(" & b & ") do r[k] = v end return r end)()"
 
-# --- prototype: emit as table with field defaults and methods ---
-exprHandlers["prototype"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+# --- object: emit as table with field defaults and methods ---
+exprHandlers["object"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   if pos < vals.len and vals[pos].kind == vkBlock:
     let specBlock = vals[pos].blockVals
     pos += 1
@@ -707,23 +711,23 @@ exprHandlers["prototype"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: va
   else:
     result = "{}"
 
-# --- make: emit _make(proto, overrides, typeName) ---
+# --- make: emit _make(obj, overrides, typeName) ---
 exprHandlers["make"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  let protoExpr = e.emitExpr(vals, pos, primary = true)
-  # Overrides is a block of set-word pairs — emit as context table, not array
+  let objExpr = e.emitExpr(vals, pos, primary = true)
+  # Overrides is a block of set-word pairs - emit as context table, not array
   var overridesExpr: string
   if pos < vals.len and vals[pos].kind == vkBlock:
     overridesExpr = e.emitContextBlock(vals[pos].blockVals)
     pos += 1
   else:
     overridesExpr = e.emitExpr(vals, pos, primary = true)
-  # Check if the proto name is a known custom type for tagging
+  # Check if the object name is a known custom type for tagging
   e.useHelper("_make")
-  let protoName = protoExpr.toLower.replace("_", "-")
-  if protoName in e.customTypes:
-    "_make(" & protoExpr & ", " & overridesExpr & ", \"" & protoName & "\")"
+  let objName = objExpr.toLower.replace("_", "-")
+  if objName in e.customTypes:
+    "_make(" & objExpr & ", " & overridesExpr & ", \"" & objName & "\")"
   else:
-    "_make(" & protoExpr & ", " & overridesExpr & ")"
+    "_make(" & objExpr & ", " & overridesExpr & ")"
 
 # --- exports: handled at module level, skip in expression context ---
 exprHandlers["exports"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
@@ -2046,9 +2050,9 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
       parts.add(luaName(k) & " = " & emitLiteral(v))
     result = "{" & parts.join(", ") & "}"
 
-  of vkPrototype:
+  of vkObject:
     var parts: seq[string] = @[]
-    for k, v in val.proto.entries:
+    for k, v in val.obj.entries:
       parts.add(luaName(k) & " = " & emitLiteral(v))
     result = "{" & parts.join(", ") & "}"
 
@@ -3051,13 +3055,13 @@ proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
             e.prescanBlock(vals[i + 3].blockVals)
           i += 4
           continue
-      # name: prototype [...] — register custom type
+      # name: object [...] - register custom type
       elif i + 1 < vals.len and vals[i + 1].kind == vkWord and
-           vals[i + 1].wordKind == wkWord and vals[i + 1].wordName == "prototype":
+           vals[i + 1].wordKind == wkWord and vals[i + 1].wordName == "object":
         let typeName = name.toLower.replace("-", "_")
         let kebabName = name.toLower
         e.customTypes.incl(kebabName)
-        e.bindings[name] = bindingVal()  # prototype is a value, not a function
+        e.bindings[name] = bindingVal()  # object is a value, not a function
         if i + 2 < vals.len and vals[i + 2].kind == vkBlock:
           i += 3
         else:

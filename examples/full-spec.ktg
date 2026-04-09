@@ -98,7 +98,7 @@ my-paren: (1 + 2)                       ; paren! evaluates immediately: 3
 ;   op!        -- operator (infix symbol)
 ;   type!      -- type name value (integer!, string!, etc.)
 ;   context!   -- mutable key-value scope
-;   prototype! -- prototype with typed field specs
+;   object! -- frozen object with typed field specs
 ;   set!       -- unordered unique collection
 ;   map!       -- hash-based key-value store
 
@@ -206,13 +206,12 @@ print not 1 = 2                         ; true
 print 1 = 1 and 2 = 2                  ; true
 print 1 = 2 or 2 = 2                   ; true
 
-; all/any -- block-based short-circuit for N values
-; all evaluates each expression; returns last if all truthy,
-; first falsy otherwise.
-; any evaluates each expression; returns first truthy, or none.
-print all [1 2 3]                       ; 3
-print all [1 false 3]                   ; false
-print any [false none 42]              ; 42
+; all?/any? -- block-based short-circuit predicates
+; all? returns true if every expression is truthy, false otherwise.
+; any? returns true if at least one is truthy, false otherwise.
+print all? [1 2 3]                      ; true
+print all? [1 false 3]                  ; false
+print any? [false none 42]             ; true
 
 ; --- Money arithmetic ---
 print $10.00 + $5.50                    ; $15.50
@@ -226,8 +225,8 @@ print 100x200 + 10x20                  ; 110x220
 print 100x200 - 10x20                  ; 90x180
 
 ; --- String concatenation ---
-; Strings support + for concatenation
-print "hello" + " world"               ; hello world
+; Use rejoin to concatenate strings. + on strings is an error.
+print rejoin ["hello" " world"]        ; hello world
 
 
 ; ============================================================
@@ -254,9 +253,9 @@ print unless false ["ran"]              ; ran
 ; loop is the only looping construct. See LOOP DIALECT below.
 ; For conditional loops, use loop with if/break:
 
-; "while" pattern
-n: 1
-factorial: 1
+; "while" pattern -- @shared lets the loop body write to outer scope
+@shared n: 1
+@shared factorial: 1
 loop [
   if n > 5 [break]
   factorial: factorial * n
@@ -265,7 +264,7 @@ loop [
 print factorial                         ; 120
 
 ; "until" pattern
-counter: 0
+@shared counter: 0
 loop [
   counter: counter + 1
   if counter = 10 [break]
@@ -519,8 +518,7 @@ match 25 [
 
 data: [10 20 30 40 50]
 
-print size? data                        ; 5
-print length? data                      ; 5 (alias for size?)
+print length data                       ; 5
 print empty? []                         ; true
 print pick data 3                       ; 30
 print first data                        ; 10
@@ -542,13 +540,13 @@ buf: [1 2 3]
 append buf 4                            ; [1 2 3 4]
 insert buf 0 1                          ; insert 0 at position 1
 remove buf 1                            ; remove at position 1
-print size? buf                         ; 4
+print length buf                         ; 4
 
 ; Copy creates an independent block
 original: [1 2 3]
 clone: copy original
 append clone 99
-print size? original                    ; 3 (unaffected)
+print length original                    ; 3 (unaffected)
 
 ; Sort mutates in place
 nums: [3 1 4 1 5 9 2 6]
@@ -649,7 +647,7 @@ print rejoin/with ["a" "b" "c"] " - "           ; a - b - c
 
 ; --- String functions ---
 
-print size? "hello"                     ; 5
+print length "hello"                     ; 5
 print join "hello" " world"             ; hello world
 print trim "  hello  "                  ; hello
 print find "hello world" "world"      ; 7
@@ -770,7 +768,7 @@ print m/age                               ; 30
 
 ; Predicates
 print has? m "name"                       ; true
-print size? m                             ; 2
+print length m                             ; 2
 
 ; --- Set & Charset ---
 ; set! is an unordered unique collection. charset creates a
@@ -1039,14 +1037,16 @@ print retry-count                       ; 3
 ; Contexts are the universal construct. Closures, objects,
 ; modules, and scopes are all contexts. Runtime type: context!
 ;
-; context! is a mutable scope. prototype! is a context
-; with typed field specs (created by the prototype dialect).
+; context! is a mutable scope. object! is a frozen context
+; with typed field specs (created by the object dialect).
+; freeze converts context! to object! (one-way).
 ;
 ; Created by:
 ;   context [...]  - mutable context
 ;   function       - parameters and local words
-;   prototype [...]   - mutable prototype with typed fields (prototype!)
-;   make Prototype [...]  - mutable instance stamped from prototype (context!)
+;   object [...]   - frozen object with typed fields (object!)
+;   make Object [...]  - mutable instance stamped from object (context!)
+;   freeze ctx     - convert context! to object! (one-way)
 
 ; context creates a mutable environment
 point: context [x: 10 y: 20]
@@ -1058,7 +1058,7 @@ point/x: 30
 print point/x                           ; 30
 
 ; Introspection
-print words-of point                    ; [x y]
+print words point                    ; [x y]
 
 ; copy/deep -- recursively copies nested blocks and contexts
 deep-src: [[1 2] [3 4]]
@@ -1108,23 +1108,24 @@ print g-counter                         ; 3
 a-block: [1 2 3]
 b-block: a-block
 append b-block 4
-print size? a-block                     ; 4 (same block!)
+print length a-block                     ; 4 (same block!)
 
 c-block: copy a-block
 append c-block 5
-print size? a-block                     ; 4 (independent)
-print size? c-block                     ; 5
+print length a-block                     ; 4 (independent)
+print length c-block                     ; 5
 
 ; --- merge ---
-; merge combines two contexts. Second overwrites first.
+; merge creates a new context from two sources. Second overwrites first.
 ; Skips none values (useful with capture results).
+; merge/freeze returns an object! instead of context!.
 
 defaults: context [name: "Unknown" hp: 100 attack: 10]
 overrides: context [name: "Warrior" hp: 200]
-merge defaults overrides
-print defaults/name                     ; Warrior
-print defaults/hp                       ; 200
-print defaults/attack                   ; 10 (not in overrides, kept)
+result: merge defaults overrides
+print result/name                       ; Warrior
+print result/hp                         ; 200
+print result/attack                     ; 10 (not in overrides, kept)
 
 ; merge/deep copies blocks and contexts instead of sharing.
 
@@ -1150,13 +1151,21 @@ probe second deep-code                  ; [nested]
 
 
 ; ============================================================
-; PROTOTYPE DIALECT
+; OBJECT DIALECT
 ; ============================================================
-; prototype defines a prototype with typed fields and methods.
-; make stamps instances from prototypes.
+; object defines a frozen object with typed fields and methods.
+; make stamps mutable instances (context!) from objects.
+; Objects are immutable -- mutation raises 'frozen error.
 ;
-; Convention: prototypes use PascalCase -- Person, Card,
+; Convention: objects use PascalCase -- Person, Card,
 ; Reader. This distinguishes them from regular words.
+;
+; If you need runtime customization, write a constructor:
+;   make-warrior: function [name [string!]] [
+;     w: make Unit [name: name class: "warrior"]
+;     w/attack: w/attack + 5    ; modify the mutable instance
+;     w
+;   ]
 ;
 ; Field declarations -- three forms:
 ;
@@ -1170,9 +1179,9 @@ probe second deep-code                  ; [nested]
 ; Everything after field declarations is the body (methods).
 ; Methods access the instance via self (lexically bound).
 
-; --- Prototype with singular field syntax ---
+; --- Object with singular field syntax ---
 
-Counter: prototype [
+Counter: object [
   field/optional [n [integer!] 0]
 
   increment: function [] [self/n: self/n + 1]
@@ -1197,7 +1206,7 @@ print c2 -> value                       ; 3
 
 ; --- Required fields ---
 
-Person: prototype [
+Person: object [
   field/required [name [string!]]
   field/required [age [integer!]]
 
@@ -1222,7 +1231,7 @@ print p/age                             ; 31 (original unchanged)
 
 ; --- Mixed required and defaulted fields ---
 
-Account: prototype [
+Account: object [
   field/required [owner [string!]]
   field/optional [balance [money!] $0.00]
 
@@ -1244,7 +1253,7 @@ print acct2/summary                     ; Jo: $50.00
 
 ; --- Bulk field declaration with fields [...] ---
 
-Enemy: prototype [
+Enemy: object [
   fields [
     required [
       name [string!]
@@ -1269,26 +1278,26 @@ goblin/damage 25
 print goblin/hp                          ; 75
 
 ; --- Auto-generation ---
-; When assigned to a set-word, prototype auto-generates:
+; When assigned to a set-word, object auto-generates:
 ;   person!       -- custom type predicate
 ;   make-person   -- constructor function
 ;
-; Person: prototype [...] generates person! and make-person.
+; Person: object [...] generates person! and make-person.
 ; make-person takes required field values in declaration order.
 ;
 ; is? checks structural compatibility:
 ;   is? :Person p    ; true if p has all Person fields
 
-; --- No prototype chains ---
+; --- No object chains ---
 ; make is a stamp. No delegation, no inheritance.
 ; Instances don't know where they came from.
 ; Compose via embedding:
 ;
-; Damageable: prototype [
+; Damageable: object [
 ;   field/optional [hp [integer!] 100]
 ;   damage: function [amount [integer!]] [self/hp: self/hp - amount]
 ; ]
-; Enemy: prototype [
+; Enemy: object [
 ;   field/required [stats [context!]]
 ;   field/optional [speed [float!] 40.0]
 ; ]
@@ -1454,7 +1463,7 @@ if @parse/ok? "12345" [some digit] [print "all digits"]
 data: [print "Hello"]
 
 ; Inspect code as data
-print size? data                        ; 2
+print length data                        ; 2
 print first data                        ; print (a word!)
 print second data                       ; Hello (a string)
 
@@ -1708,7 +1717,7 @@ raw "-- This is a Lua comment"
 ;
 ; --- Serialization ---
 ; save %file data writes context data as Kintsugi literals.
-; Functions are skipped -- behavior comes from the prototype.
+; Functions are skipped -- behavior comes from the object.
 ;   save %save.dat player
 ;   ; reload:
 ;   data: load %save.dat
@@ -1803,8 +1812,8 @@ print if [] ["empty block is truthy"]  ; empty block is truthy
 ;   byte "A"    -> 65
 ;   char 65     -> "A"
 
-; prototype uses field keyword with typed fields.
-; See Object Dialect above for the full prototype model.
+; object uses field keyword with typed fields.
+; See Object Dialect above for the full object model.
 
 ; first [hello] returns word!, not lit-word!
 ; Extraction from blocks preserves the original type.
@@ -1835,7 +1844,7 @@ print if [] ["empty block is truthy"]  ; empty block is truthy
 ; loop/partition and recursion.
 
 qsort: function [blk] [
-  if (size? blk) <= 1 [return blk]
+  if (length blk) <= 1 [return blk]
   set [pivot @rest] blk
   set [lo hi] loop/partition [for [x] in rest do [x < pivot]]
   append (append qsort lo pivot) qsort hi
@@ -1851,7 +1860,7 @@ fib: function [n] [
   seq: [0 1]
   loop [
     from 1 to (n - 2) do [
-      a: pick seq ((size? seq) - 1)
+      a: pick seq ((length seq) - 1)
       b: last seq
       append seq (a + b)
     ]
@@ -1866,7 +1875,7 @@ probe fib 10                            ; 0 1 1 2 3 5 8 13 21 34
 
 traffic-light-color!: @type/enum ['red | 'yellow | 'green]
 
-TrafficLight: prototype [
+TrafficLight: object [
   field/optional [state [traffic-light-color!] 'red]
   field/optional [timer [integer!] 0]
 

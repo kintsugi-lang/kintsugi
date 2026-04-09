@@ -92,7 +92,7 @@ result: @parse "user@example.com" [
   domain: some [alpha | digit | "." | "-"]
 ]
 
-; Object — prototypes with typed fields
+; Object — frozen objects with typed fields
 Enemy: object [
   field/required [hp [integer!]]
   field/optional [speed [float!] 1.0]

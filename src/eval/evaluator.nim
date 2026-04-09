@@ -160,15 +160,11 @@ proc applyOp*(eval: Evaluator, op: string, left, right: KtgValue): KtgValue =
     of "-": return ktgPair(left.px - right.px, left.py - right.py)
     else: discard
 
-  # string concatenation via +
-  if left.kind == vkString and right.kind == vkString and op == "+":
-    return ktgString(left.strVal & right.strVal)
-
   # comparison ops
   case op
   of "=":  return ktgLogic(valuesEqual(left, right))
   of "==":
-    const nonScalar = {vkBlock, vkParen, vkMap, vkSet, vkContext, vkPrototype,
+    const nonScalar = {vkBlock, vkParen, vkMap, vkSet, vkContext, vkObject,
                        vkFunction, vkNative, vkOp}
     if left.kind in nonScalar or right.kind in nonScalar:
       raise KtgError(kind: "type",
@@ -205,11 +201,11 @@ proc applyInfix*(eval: Evaluator, result: var KtgValue,
       var methodFn: KtgValue
       if result.kind == vkContext:
         methodFn = result.ctx.get(methodName)
-      elif result.kind == vkPrototype:
-        methodFn = result.proto.get(methodName)
+      elif result.kind == vkObject:
+        methodFn = result.obj.get(methodName)
       else:
         raise KtgError(kind: "type",
-          msg: "-> requires context! or prototype!, got " & typeName(result),
+          msg: "-> requires context! or object!, got " & typeName(result),
           data: result)
       result = eval.callCallable(methodFn, vals, pos, ctx, result)
       continue
@@ -271,17 +267,17 @@ proc navigatePath*(eval: Evaluator, head: KtgValue, segments: seq[string],
       elif current.kind == vkContext:
         let key = $idx
         current = current.ctx.get(key)
-      elif current.kind == vkPrototype:
+      elif current.kind == vkObject:
         let key = $idx
-        current = current.proto.get(key)
+        current = current.obj.get(key)
       else:
         raise KtgError(kind: "type",
           msg: "cannot index " & typeName(current) & " with dynamic path", data: idx)
     # Static word segment: literal field lookup
     elif current.kind == vkContext:
       current = current.ctx.get(seg)
-    elif current.kind == vkPrototype:
-      current = current.proto.get(seg)
+    elif current.kind == vkObject:
+      current = current.obj.get(seg)
     elif current.kind == vkMap:
       if seg in current.mapEntries:
         current = current.mapEntries[seg]
@@ -347,7 +343,7 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
     return eval.evalBlock(val.parenVals, ctx)
 
   # --- Context/Object: return self ---
-  of vkContext, vkPrototype:
+  of vkContext, vkObject:
     return val
 
   # --- Function/Native: return self (encountered as value, not via word) ---
@@ -497,8 +493,8 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
               current = current.mapEntries[seg]
             else:
               raise KtgError(kind: "undefined", msg: seg & " not found in map", data: nil)
-          elif current.kind == vkPrototype:
-            current = current.proto.get(seg)
+          elif current.kind == vkObject:
+            current = current.obj.get(seg)
           else:
             raise KtgError(kind: "type",
               msg: "cannot navigate path on " & typeName(current),
@@ -524,8 +520,9 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
             current.ctx.set($idx, rhs)
           elif current.kind == vkMap:
             current.mapEntries[$idx] = rhs
-          elif current.kind == vkPrototype:
-            current.proto.entries[$idx] = rhs
+          elif current.kind == vkObject:
+            raise KtgError(kind: "frozen",
+              msg: "cannot mutate frozen object", data: nil)
           else:
             raise KtgError(kind: "type",
               msg: "cannot set on " & typeName(current), data: current)
@@ -533,22 +530,23 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
           current.ctx.set(lastSeg, rhs)
         elif current.kind == vkMap:
           current.mapEntries[lastSeg] = rhs
-        elif current.kind == vkPrototype:
-          current.proto.entries[lastSeg] = rhs
+        elif current.kind == vkObject:
+          raise KtgError(kind: "frozen",
+            msg: "cannot mutate frozen object", data: nil)
         else:
           raise KtgError(kind: "type",
             msg: "cannot set field on " & typeName(current),
             data: current)
         return rhs
 
-      # Auto-generation for prototype! assignment
-      if rhs.kind == vkPrototype:
+      # Auto-generation for object! assignment
+      if rhs.kind == vkObject:
         let name = val.wordName
         let lowerName = toKebabCase(name)
         let customType = lowerName & "!"
 
-        # Store the prototype name on the prototype
-        rhs.proto.name = name
+        # Store the object name on the object
+        rhs.obj.name = name
 
         # Register the type name
         if not ctx.has(customType):
@@ -557,7 +555,7 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
         # Register type predicate function: checks if value has all fields
         let predicateName = lowerName & "?"
         if not ctx.has(predicateName):
-          let specs = rhs.proto.fieldSpecs
+          let specs = rhs.obj.fieldSpecs
           ctx.set(predicateName, KtgValue(kind: vkNative,
             nativeFn: KtgNative(name: predicateName, arity: 1, fn: proc(
                 args: seq[KtgValue], ep: pointer): KtgValue =

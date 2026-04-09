@@ -74,7 +74,7 @@ suite "copy/deep":
       original: [[1 2] [3 4]]
       cloned: copy/deep original
       append first cloned 99
-      length? first original
+      length first original
     """) == "2"
 
   test "shallow copy shares nested blocks":
@@ -83,7 +83,7 @@ suite "copy/deep":
       original: [[1 2] [3 4]]
       cloned: copy original
       append first cloned 99
-      length? first original
+      length first original
     """) == "3"
 
   test "copy/deep on context creates independent copy":
@@ -92,7 +92,7 @@ suite "copy/deep":
       original: context [items: [1 2 3]]
       cloned: copy/deep original
       append cloned/items 99
-      length? original/items
+      length original/items
     """) == "3"
 
 # ============================================================

@@ -54,7 +54,7 @@ suite "logic":
 suite "blocks":
   test "block operations":
     let eval = makeEval()
-    check $eval.evalString("size? [1 2 3]") == "3"
+    check $eval.evalString("length [1 2 3]") == "3"
     check $eval.evalString("first [10 20 30]") == "10"
     check $eval.evalString("last [10 20 30]") == "30"
     check $eval.evalString("pick [10 20 30] 2") == "20"

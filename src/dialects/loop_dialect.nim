@@ -151,9 +151,10 @@ method interpret*(d: LoopDialect, blk: seq[KtgValue],
   case spec.mode
 
   of lmInfinite:
+    let loopCtx = ctx.child
     while true:
       try:
-        discard eval.evalBlock(spec.body, ctx)
+        discard eval.evalBlock(spec.body, loopCtx)
       except BreakSignal:
         break
 

@@ -27,7 +27,7 @@ type
     vkMap       ## key-value store
     vkSet       ## unordered unique collection, O(1) membership
     vkContext   ## mutable scope/instance
-    vkPrototype ## frozen prototype/module
+    vkObject    ## frozen object/module
     vkFunction  ## user-defined function
     vkNative    ## built-in function
     vkOp        ## infix operator
@@ -66,7 +66,7 @@ type
     of vkMap:       mapEntries*: OrderedTable[string, KtgValue]
     of vkSet:       setMembers*: HashSet[string]
     of vkContext:   ctx*: KtgContext
-    of vkPrototype: proto*: KtgPrototype
+    of vkObject:    obj*: KtgObject
     of vkFunction:  fn*: KtgFunc
     of vkNative:    nativeFn*: KtgNative
     of vkOp:
@@ -87,10 +87,10 @@ type
     hasDefault*: bool
     defaultVal*: KtgValue
 
-  KtgPrototype* = ref object
+  KtgObject* = ref object
     entries*: OrderedTable[string, KtgValue]
     fieldSpecs*: seq[FieldSpec]
-    name*: string       ## prototype name for auto-gen
+    name*: string       ## object name for auto-gen
 
   ParamSpec* = object
     name*: string
@@ -223,24 +223,24 @@ proc child*(ctx: KtgContext): KtgContext =
   newContext(parent = ctx)
 
 
-# --- Prototype operations ---
+# --- Object operations ---
 
-proc newPrototype*(entries: OrderedTable[string, KtgValue],
-                   fieldSpecs: seq[FieldSpec] = @[],
-                   name: string = ""): KtgPrototype =
-  KtgPrototype(entries: entries, fieldSpecs: fieldSpecs, name: name)
+proc newObject*(entries: OrderedTable[string, KtgValue],
+                fieldSpecs: seq[FieldSpec] = @[],
+                name: string = ""): KtgObject =
+  KtgObject(entries: entries, fieldSpecs: fieldSpecs, name: name)
 
-proc get*(proto: KtgPrototype, name: string): KtgValue =
-  if name in proto.entries:
-    return proto.entries[name]
+proc get*(obj: KtgObject, name: string): KtgValue =
+  if name in obj.entries:
+    return obj.entries[name]
   raise KtgError(
     kind: "undefined",
-    msg: name & " not found on prototype",
+    msg: name & " not found on object",
     data: ktgWord(name, wkWord)
   )
 
-proc has*(proto: KtgPrototype, name: string): bool =
-  name in proto.entries
+proc has*(obj: KtgObject, name: string): bool =
+  name in obj.entries
 
 
 
@@ -276,7 +276,7 @@ proc typeName*(val: KtgValue): string =
   of vkMap:      "map!"
   of vkSet:      "set!"
   of vkContext:  "context!"
-  of vkPrototype: "prototype!"
+  of vkObject: "object!"
   of vkFunction: "function!"
   of vkNative:   "native!"
   of vkOp:       "op!"
@@ -339,7 +339,7 @@ proc `$`*(val: KtgValue): string =
   of vkMap:      "map!"
   of vkSet:      "set!"
   of vkContext:  "context!"
-  of vkPrototype: "prototype!"
+  of vkObject: "object!"
   of vkFunction: "function!"
   of vkNative:   "native!:" & val.nativeFn.name
   of vkOp:       val.opSymbol

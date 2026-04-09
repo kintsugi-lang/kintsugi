@@ -7,7 +7,7 @@ proc makeEval(): Evaluator =
   let eval = newEvaluator()
   eval.registerNatives()
   eval.registerDialect(newLoopDialect())
-  eval.registerPrototypeDialect()
+  eval.registerObjectDialect()
   eval
 
 
@@ -75,7 +75,7 @@ suite "bugfix: make validates required fields":
     let eval = makeEval()
     expect KtgError:
       discard eval.evalString("""
-        Person: prototype [
+        Person: object [
           field/required [name [string!]]
           field/required [age [integer!]]
         ]
@@ -85,7 +85,7 @@ suite "bugfix: make validates required fields":
   test "make succeeds with all required fields":
     let eval = makeEval()
     let result = eval.evalString("""
-      Person: prototype [
+      Person: object [
         field/required [name [string!]]
         field/required [age [integer!]]
       ]
@@ -100,7 +100,7 @@ suite "bugfix: make type-checks overrides":
     let eval = makeEval()
     expect KtgError:
       discard eval.evalString("""
-        Person: prototype [
+        Person: object [
           field/required [name [string!]]
         ]
         make Person [name: 42]
@@ -109,7 +109,7 @@ suite "bugfix: make type-checks overrides":
   test "make accepts correct types":
     let eval = makeEval()
     let result = eval.evalString("""
-      Person: prototype [
+      Person: object [
         field/required [name [string!]]
         field/optional [age [integer!] 0]
       ]

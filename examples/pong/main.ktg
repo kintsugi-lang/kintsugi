@@ -3,7 +3,7 @@ Kintsugi [
   version: 1.0.0
 ]
 
-; Pong in Kintsugi — a LÖVE2D game using prototypes, make, and merge.
+; Pong in Kintsugi — a LÖVE2D game using objects, make, and merge.
 ; Compile: kintsugi -c main.ktg -o main.lua
 ; Run:     love .
 
@@ -48,7 +48,7 @@ BALL-SPEED: 300
 ; Types
 ; ============================================================
 
-Paddle: prototype [
+Paddle: object [
   fields [
     optional [
       x [integer!] 0
@@ -59,7 +59,7 @@ Paddle: prototype [
   ]
 ]
 
-Ball: prototype [
+Ball: object [
   fields [
     optional [
       x [integer!] 0
@@ -161,7 +161,7 @@ love/update: function [dt] [
     ]
 
     ; Player paddle collision
-    if all [
+    if all? [
       ball/dx < 0
       ball/x < (player/x + PADDLE-W)
       ball/y > (player/y - BALL-SIZE)
@@ -173,7 +173,7 @@ love/update: function [dt] [
     ]
 
     ; CPU paddle collision
-    if all [
+    if all? [
       ball/dx > 0
       ball/x > (cpu/x - BALL-SIZE)
       ball/y > (cpu/y - BALL-SIZE)

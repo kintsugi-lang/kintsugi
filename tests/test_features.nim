@@ -7,7 +7,7 @@ proc makeEval(): Evaluator =
   let eval = newEvaluator()
   eval.registerNatives()
   eval.registerDialect(newLoopDialect())
-  eval.registerPrototypeDialect()
+  eval.registerObjectDialect()
   eval
 
 suite "make map!":
@@ -17,10 +17,10 @@ suite "make map!":
     check $eval.evalString("m/name") == "Ray"
     check $eval.evalString("m/age") == "30"
 
-  test "map size":
+  test "map length":
     let eval = makeEval()
     discard eval.evalString("""m: make map! [a: 1 b: 2 c: 3]""")
-    check $eval.evalString("size? m") == "3"
+    check $eval.evalString("length m") == "3"
 
   test "map has? with string key":
     let eval = makeEval()
@@ -48,10 +48,10 @@ suite "make set! and charset":
     check $eval.evalString("""has? hex "g" """) == "false"
     check $eval.evalString("""has? hex "0" """) == "true"
 
-  test "set size":
+  test "set length":
     let eval = makeEval()
     discard eval.evalString("""s: make set! ["x" "y" "z"]""")
-    check $eval.evalString("size? s") == "3"
+    check $eval.evalString("length s") == "3"
 
   test "has? on set with integer":
     let eval = makeEval()
@@ -68,7 +68,7 @@ suite "set operations":
     check $eval.evalString("""has? c "x" """) == "true"
     check $eval.evalString("""has? c "y" """) == "true"
     check $eval.evalString("""has? c "z" """) == "true"
-    check $eval.evalString("size? c") == "3"
+    check $eval.evalString("length c") == "3"
 
   test "intersect of two sets":
     let eval = makeEval()
@@ -78,7 +78,7 @@ suite "set operations":
     check $eval.evalString("""has? c "y" """) == "true"
     check $eval.evalString("""has? c "z" """) == "true"
     check $eval.evalString("""has? c "x" """) == "false"
-    check $eval.evalString("size? c") == "2"
+    check $eval.evalString("length c") == "2"
 
 suite "sort/by":
   test "sort/by with key function":
@@ -102,7 +102,7 @@ suite "load and import":
     writeFile(tmpFile, """x: 42""")
     let eval = makeEval()
     discard eval.evalString("data: load \"" & tmpFile & "\"")
-    check $eval.evalString("size? data") == "2"  # set-word x: and integer 42
+    check $eval.evalString("length data") == "2"  # set-word x: and integer 42
     removeFile(tmpFile)
 
   test "load/eval returns context":

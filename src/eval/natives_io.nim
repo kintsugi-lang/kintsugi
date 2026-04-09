@@ -206,10 +206,12 @@ proc registerIoNatives*(eval: Evaluator) =
       arity: 1,
       refinements: @[
         RefinementSpec(name: "eval", params: @[]),
-        RefinementSpec(name: "header", params: @[])
+        RefinementSpec(name: "header", params: @[]),
+        RefinementSpec(name: "freeze", params: @[])
       ],
       fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
         let eval = cast[Evaluator](ep)
+        let doFreeze = "freeze" in eval.currentRefinements
         let path = case args[0].kind
           of vkString: args[0].strVal
           of vkFile: args[0].filePath
@@ -227,7 +229,16 @@ proc registerIoNatives*(eval: Evaluator) =
         if "eval" in eval.currentRefinements:
           let isoCtx = newContext(eval.global)
           discard eval.evalBlock(ast, isoCtx)
+          if doFreeze:
+            return KtgValue(kind: vkObject,
+              obj: newObject(isoCtx.entries), line: 0)
           return KtgValue(kind: vkContext, ctx: isoCtx, line: 0)
+
+        if doFreeze:
+          let isoCtx = newContext(eval.global)
+          discard eval.evalBlock(ast, isoCtx)
+          return KtgValue(kind: vkObject,
+            obj: newObject(isoCtx.entries), line: 0)
 
         return ktgBlock(ast)
     )
@@ -261,10 +272,10 @@ proc registerIoNatives*(eval: Evaluator) =
           s &= key & ": " & serialize(v)
           first = false
         s
-      of vkPrototype:
+      of vkObject:
         var s = ""
         var first = true
-        for key, v in val.proto.entries:
+        for key, v in val.obj.entries:
           if v.kind in {vkFunction, vkNative}: continue
           if not first: s &= "\n"
           s &= key & ": " & serialize(v)

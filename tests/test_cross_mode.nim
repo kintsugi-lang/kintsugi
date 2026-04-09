@@ -19,7 +19,7 @@ proc makeEval(): Evaluator =
   eval.registerNatives()
   eval.registerDialect(newLoopDialect())
   eval.registerMatch()
-  eval.registerPrototypeDialect()
+  eval.registerObjectDialect()
   eval.registerAttempt()
   eval.registerParse()
   eval
@@ -65,8 +65,8 @@ suite "cross-mode: arithmetic":
     crossCheck("print 10 / 2")
     crossCheck("print 10 % 3")
 
-  test "string concatenation":
-    crossCheck("""print "hello" + " world" """)
+  test "string concatenation via rejoin":
+    crossCheck("""print rejoin ["hello" " world"] """)
 
   test "left-to-right evaluation":
     crossCheck("print 2 + 3 * 4")
@@ -175,10 +175,10 @@ suite "cross-mode: either (B4 fix)":
 # ============================================================
 
 suite "cross-mode: series (B1/B2 fixes)":
-  test "size? and length?":
-    crossCheck("print size? [1 2 3]")
-    crossCheck("""print size? "hello" """)
-    crossCheck("print length? [10 20 30 40]")
+  test "length":
+    crossCheck("print length [1 2 3]")
+    crossCheck("""print length "hello" """)
+    crossCheck("print length [10 20 30 40]")
 
   test "empty?":
     crossCheck("print empty? []")
@@ -240,8 +240,8 @@ suite "cross-mode: series (B1/B2 fixes)":
       a: [1 2 3]
       b: copy a
       append b 4
-      print size? a
-      print size? b
+      print length a
+      print length b
     """)
 
 # ============================================================
@@ -507,6 +507,6 @@ suite "cross-mode: loop refinements":
   test "loop with when guard":
     crossCheck("""
       result: loop/collect [for [x] in [1 2 3 4 5] when [x > 2] do [x]]
-      print length? result
+      print length result
       print first result
     """)

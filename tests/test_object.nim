@@ -7,25 +7,25 @@ proc makeEval(): Evaluator =
   let eval = newEvaluator()
   eval.registerNatives()
   eval.registerDialect(newLoopDialect())
-  eval.registerPrototypeDialect()
+  eval.registerObjectDialect()
   eval
 
-suite "prototype creation":
-  test "basic prototype creation":
+suite "object creation":
+  test "basic object creation":
     let eval = makeEval()
     let result = eval.evalString("""
-      Point: prototype [
+      Point: object [
         field/optional [x [integer!] 0]
         field/optional [y [integer!] 0]
       ]
       type Point
     """)
-    check $result == "prototype!"
+    check $result == "object!"
 
   test "make creates mutable instance":
     let eval = makeEval()
     let result = eval.evalString("""
-      Point: prototype [
+      Point: object [
         field/optional [x [integer!] 0]
         field/optional [y [integer!] 0]
       ]
@@ -37,7 +37,7 @@ suite "prototype creation":
   test "auto-generated type predicate":
     let eval = makeEval()
     let result = eval.evalString("""
-      Point: prototype [
+      Point: object [
         field/required [x [integer!]]
         field/required [y [integer!]]
       ]
@@ -46,12 +46,12 @@ suite "prototype creation":
     """)
     check $result == "true"
 
-suite "prototype fields":
+suite "object fields":
   test "required field validation":
     let eval = makeEval()
     expect KtgError:
       discard eval.evalString("""
-        Person: prototype [
+        Person: object [
           field/required [name [string!]]
           field/required [age [integer!]]
         ]
@@ -62,7 +62,7 @@ suite "prototype fields":
     let eval = makeEval()
     expect KtgError:
       discard eval.evalString("""
-        Point: prototype [
+        Point: object [
           field/optional [x [integer!] 0]
           field/optional [y [integer!] 0]
         ]
@@ -72,7 +72,7 @@ suite "prototype fields":
   test "field with default is optional in make":
     let eval = makeEval()
     let result = eval.evalString("""
-      Config: prototype [
+      Config: object [
         field/required [host [string!]]
         field/optional [port [integer!] 8080]
       ]
@@ -84,7 +84,7 @@ suite "prototype fields":
   test "mixed required and defaulted fields":
     let eval = makeEval()
     let result = eval.evalString("""
-      Account: prototype [
+      Account: object [
         field/required [owner [string!]]
         field/optional [balance [integer!] 0]
         field/optional [active [logic!] true]
@@ -98,23 +98,26 @@ suite "prototype fields":
     """)
     check $result == "100"
 
-suite "prototype mutability":
-  test "prototype is mutable":
+suite "object immutability":
+  test "object is frozen":
     let eval = makeEval()
-    let result = eval.evalString("""
-      Point: prototype [
-        field/optional [x [integer!] 0]
-        field/optional [y [integer!] 0]
-      ]
-      Point/x: 999
-      Point/x
-    """)
-    check $result == "999"
+    var caught = false
+    try:
+      discard eval.evalString("""
+        Point: object [
+          field/optional [x [integer!] 0]
+          field/optional [y [integer!] 0]
+        ]
+        Point/x: 999
+      """)
+    except KtgError as e:
+      caught = e.kind == "frozen"
+    check caught
 
   test "instance is mutable":
     let eval = makeEval()
     let result = eval.evalString("""
-      Point: prototype [
+      Point: object [
         field/optional [x [integer!] 0]
         field/optional [y [integer!] 0]
       ]
@@ -124,11 +127,11 @@ suite "prototype mutability":
     """)
     check $result == "999"
 
-suite "prototype methods":
+suite "object methods":
   test "self binding":
     let eval = makeEval()
     let result = eval.evalString("""
-      Counter: prototype [
+      Counter: object [
         field/optional [count [integer!] 0]
         increment: function [] [
           self/count: self/count + 1
@@ -149,7 +152,7 @@ suite "prototype methods":
     let eval = makeEval()
     expect KtgError:
       discard eval.evalString("""
-        Thing: prototype [
+        Thing: object [
           field/optional [val [integer!] 0]
           rebind-self: function [] [
             self: 42
@@ -162,7 +165,7 @@ suite "prototype methods":
   test "methods with parameters":
     let eval = makeEval()
     let result = eval.evalString("""
-      Enemy: prototype [
+      Enemy: object [
         field/optional [hp [integer!] 100]
         damage: function [amount [integer!]] [
           self/hp: self/hp - amount
@@ -177,7 +180,7 @@ suite "prototype methods":
   test "methods alongside fields":
     let eval = makeEval()
     let result = eval.evalString("""
-      Greeter: prototype [
+      Greeter: object [
         field/required [name [string!]]
         greet: function [] [
           join "Hello, " self/name
@@ -188,11 +191,11 @@ suite "prototype methods":
     """)
     check $result == "Hello, World"
 
-suite "prototype instances":
+suite "object instances":
   test "independent instances":
     let eval = makeEval()
     let result = eval.evalString("""
-      Counter: prototype [
+      Counter: object [
         field/optional [count [integer!] 0]
         increment: function [] [
           self/count: self/count + 1
@@ -207,11 +210,69 @@ suite "prototype instances":
     """)
     check $result == "3"
 
-  test "type name registered on prototype":
+  test "type name registered on object":
     let eval = makeEval()
     discard eval.evalString("""
-      Point: prototype [
+      Point: object [
         field/optional [x [integer!] 0]
       ]
     """)
     check $eval.evalString("type point!") == "type!"
+
+suite "freeze":
+  test "freeze converts context to object":
+    let eval = makeEval()
+    let r = eval.evalString("""
+      ctx: context [x: 1 y: 2]
+      obj: freeze :ctx
+      frozen? :obj
+    """)
+    check r.boolVal == true
+
+  test "frozen object rejects mutation":
+    let eval = makeEval()
+    var caught = false
+    try:
+      discard eval.evalString("""
+        ctx: context [x: 1]
+        obj: freeze :ctx
+        obj/x: 99
+      """)
+    except KtgError as e:
+      caught = e.kind == "frozen"
+    check caught
+
+  test "freeze/deep recursively freezes nested contexts":
+    let eval = makeEval()
+    let r = eval.evalString("""
+      inner: context [val: 42]
+      outer: context [child: :inner]
+      obj: freeze/deep :outer
+      frozen? obj/child
+    """)
+    check r.boolVal == true
+
+  test "freeze on already-frozen object is no-op":
+    let eval = makeEval()
+    let r = eval.evalString("""
+      Point: object [field/optional [x [integer!] 0]]
+      obj: freeze :Point
+      frozen? :obj
+    """)
+    check r.boolVal == true
+
+  test "frozen? returns false for context":
+    let eval = makeEval()
+    let r = eval.evalString("""
+      ctx: context [x: 1]
+      frozen? :ctx
+    """)
+    check r.boolVal == false
+
+  test "object keyword produces frozen value":
+    let eval = makeEval()
+    let r = eval.evalString("""
+      Point: object [field/optional [x [integer!] 0]]
+      frozen? :Point
+    """)
+    check r.boolVal == true

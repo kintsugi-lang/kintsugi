@@ -60,7 +60,7 @@ A function with N parameters always consumes exactly N values. No variadic funct
 
 ### 27 Built-in Types
 
-Beyond JSON's minimal set: money, pairs, tuples, dates, times, files, URLs, emails, sets, prototypes. Every value carries its type at runtime. Type names end with `!`.
+Beyond JSON's minimal set: money, pairs, tuples, dates, times, files, URLs, emails, sets, objects. Every value carries its type at runtime. Type names end with `!`.
 
 **Why:** The language is for domain-specific work — games with coordinates, payments with money, dates/times, file paths. A pair isn't a 2-element array; it's inherently 2D coordinates. Rich types make code self-documenting.
 
@@ -178,7 +178,7 @@ A dialect is a block where words change meaning. `loop [for [x] in series do [bo
 1. **Loop** — `for/in`, `from/to/by`, with `/collect`, `/fold`, `/partition` and `when` guards
 2. **Match** — Pattern matching with type checks, captures, destructuring, guards
 3. **Parse** — PEG-style parsing with backtracking (interpreter-only)
-4. **Object** — Prototypes with typed fields, auto-constructors, `make`
+4. **Object** — Frozen objects with typed fields, auto-constructors, `make`
 5. **Attempt** — Resilient pipelines with `source`, `then`, `when`, `catch`, `fallback`, `retries`
 
 **Why:** These are the essential abstractions. Loops, pattern matching, parsing, objects, and error handling. Everything else is built from these.
@@ -193,11 +193,13 @@ A dialect is a block where words change meaning. `loop [for [x] in series do [bo
 
 ## Object Protocol
 
-### Prototypes Are Templates, Instances Are Copies
+### Objects Are Frozen Templates, Instances Are Mutable Copies
 
-`prototype [...]` creates a `prototype!` — a template with field specs, defaults, and methods. `make Prototype [overrides]` stamps a mutable `context!` from that template. Both prototypes and instances are mutable. The instance has no link back to the prototype.
+`object [...]` creates an `object!` — a frozen template with field specs, defaults, and methods. `make Object [overrides]` stamps a mutable `context!` from that template. The object is immutable; the instance is mutable. The instance has no link back to the object.
 
-**Why:** No prototype chains, no delegation, no method resolution order. `make` copies fields into a new context — the result is a complete, independent object. There is no `freeze` in the language. If you want immutability, don't mutate.
+`freeze` converts a `context!` to an `object!` (one-way). `freeze/deep` does so recursively. `frozen?` returns true for `object!` values.
+
+**Why:** No prototype chains, no delegation, no method resolution order. `make` copies fields into a new context — the result is a complete, independent value. Objects are frozen because they define structure, not state. If you need runtime customization, write a constructor function that calls `make`, modifies the instance, and returns it.
 
 ### `make` Is a Stamp, Not Delegation
 
@@ -207,22 +209,21 @@ Shallow-copies fields, applies overrides, validates required fields, binds `self
 
 ### `merge` Is Mixin Composition
 
-`merge target source` copies all entries from source into target. This is how inheritance works — stamp a base, merge in traits.
+`merge a b` returns a new `context!` with entries from both (b wins on conflicts). `merge/freeze a b` returns an `object!`. Both arguments can be `context!` or `object!`.
 
 ```
-dragon: make Base [hp: 500]
-merge dragon Flying
+dragon: merge (make Base [hp: 500]) Flying
 ```
 
-No prototype chains. No diamond problem. Just data flowing into a context.
+No prototype chains. No diamond problem. Just data flowing into a new context.
 
 ---
 
 ## Boolean Combinators
 
-`all [cond1 cond2 ...]` returns `true` if every expression is truthy (short-circuits on first falsy). `any [cond1 cond2 ...]` returns `true` if at least one is truthy (short-circuits on first truthy).
+`all? [cond1 cond2 ...]` returns `true` if every expression is truthy (short-circuits on first falsy). `any? [cond1 cond2 ...]` returns `true` if at least one is truthy (short-circuits on first truthy). Both return `logic!`, never the intermediate values.
 
-**Why:** Replaces deeply nested `if` chains. `if all [x > 0  x < 100  is? integer! x] [...]` reads as a single condition.
+**Why:** Replaces deeply nested `if` chains. `if all? [x > 0  x < 100  is? integer! x] [...]` reads as a single condition. Returning `logic!` rather than values keeps the semantics explicit - these are predicates, not value selectors.
 
 ---
 
@@ -264,7 +265,7 @@ Emitted Lua has no external requires. Prelude helpers are tree-shaken — only h
 
 ### Type Checking in Compiled Output
 
-Built-in type checks (`is? integer! x`, `integer?`, `string?`, etc.) emit Lua `type()` checks — Lua can verify these natively. Custom type checks (`is? person! x`, `person?`) emit `_type` tag checks — `make` stamps instances with a `_type` string field, and `is?` checks it. `@type` definitions are erased (they define interpreter-only custom types), but `prototype`-based type tags work at both levels.
+Built-in type checks (`is? integer! x`, `integer?`, `string?`, etc.) emit Lua `type()` checks — Lua can verify these natively. Custom type checks (`is? person! x`, `person?`) emit `_type` tag checks — `make` stamps instances with a `_type` string field, and `is?` checks it. `@type` definitions are erased (they define interpreter-only custom types), but `object`-based type tags work at both levels. `freeze`/`frozen?` are no-ops in compiled output.
 
 ### AST Is the IR
 
@@ -293,7 +294,7 @@ Influenced by, not compatible with. Key divergences:
 - No operator precedence (Red has it)
 - No `opt` in function specs (refinements replace it)
 - No variadic functions
-- No `make` delegation chains (stamp, not prototype chain)
+- No `make` delegation chains (stamp, not chain)
 - Money is cents-based (Red uses decimal)
 - `set-word` always shadows (REBOL allows write-through in some cases)
 - `==` is strict type equality (both sides must be same scalar type)

@@ -10,7 +10,7 @@
 ##   5. Loop variables are scoped (don't leak)
 ##   6. Block equality is structural
 ##   7. Only `false` and `none` are falsy
-##   8. `size?` is canonical, `length?` is alias
+##   8. `length` is the size/length function
 ##   9. Lifecycle hooks — marked FAILS if not implemented
 ##  10. `do`, `bind` removed; `compose` → `@compose` stdlib native
 
@@ -24,7 +24,7 @@ proc makeEval(): Evaluator =
   eval.registerNatives()
   eval.registerDialect(newLoopDialect())
   eval.registerMatch()
-  eval.registerPrototypeDialect()
+  eval.registerObjectDialect()
   eval.registerAttempt()
   eval.registerParse()
   eval
@@ -133,9 +133,9 @@ suite "Arithmetic":
     let eval = makeEval()
     check $eval.evalString("1.5 + 2.5") == "4.0"
 
-  test "string concat":
+  test "string concat via rejoin":
     let eval = makeEval()
-    check $eval.evalString("\"hello\" + \" world\"") == "hello world"
+    check $eval.evalString("rejoin [\"hello\" \" world\"]") == "hello world"
 
   test "modulo":
     let eval = makeEval()
@@ -408,14 +408,14 @@ suite "To word types":
 # =============================================================================
 
 # =============================================================================
-# homoiconic.test.ts — words-of
+# homoiconic.test.ts — words
 # =============================================================================
 
-suite "Words-of":
+suite "Words":
   test "context":
     let eval = makeEval()
     discard eval.evalString("env: context [x: 10 y: 20]")
-    let result = eval.evalString("words-of env")
+    let result = eval.evalString("words env")
     check result.kind == vkBlock
     check result.blockVals.len == 2
 
@@ -559,14 +559,10 @@ suite "Equality":
     check $eval.evalString("1 = \"1\"") == "false"
     check $eval.evalString("true = 1") == "false"
 
-suite "Size and length":
-  test "size? canonical":
+suite "Length":
+  test "length":
     let eval = makeEval()
-    check $eval.evalString("size? [1 2 3]") == "3"
-
-  test "length? alias":
-    let eval = makeEval()
-    check $eval.evalString("length? [1 2 3]") == "3"
+    check $eval.evalString("length [1 2 3]") == "3"
 
 suite "Logic operators":
   test "and basic":
@@ -718,9 +714,9 @@ suite "String operations":
     check $eval.evalString("trim \"  hello  \"") == "hello"
 
 suite "Block series operations":
-  test "size?":
+  test "length":
     let eval = makeEval()
-    check $eval.evalString("size? [1 2 3]") == "3"
+    check $eval.evalString("length [1 2 3]") == "3"
 
   test "first":
     let eval = makeEval()

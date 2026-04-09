@@ -7,7 +7,7 @@ squares: loop/collect [for [n] from 1 to 5 do [n * n]]
 print rejoin ["Squares: " squares]
 
 qsort: function [blk] [
-  if (length? blk) <= 1 [return blk]
+  if (length blk) <= 1 [return blk]
   pivot: first blk
   rest: copy blk
   remove rest 1

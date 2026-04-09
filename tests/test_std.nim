@@ -12,7 +12,7 @@ proc makeEval(): Evaluator =
   eval.registerNatives()
   eval.registerDialect(newLoopDialect())
   eval.registerMatch()
-  eval.registerPrototypeDialect()
+  eval.registerObjectDialect()
   eval.registerAttempt()
   eval.registerParse()
   eval
@@ -25,30 +25,40 @@ proc evalStr(src: string): KtgValue =
   eval.evalString(src)
 
 suite "merge":
-  test "merge overwrites target fields":
+  test "merge returns new context with both fields":
     let eval = makeEval()
     let r = eval.evalString("""
       a: context [x: 1 y: 2]
       b: context [y: 99 z: 3]
-      merge a b
-      a
+      result: merge a b
+      result
     """)
     check r.ctx.get("x").intVal == 1
     check r.ctx.get("y").intVal == 99
     check r.ctx.get("z").intVal == 3
+
+  test "merge does not mutate original":
+    let eval = makeEval()
+    let r = eval.evalString("""
+      a: context [x: 1 y: 2]
+      b: context [y: 99]
+      merge a b
+      a/y
+    """)
+    check r.intVal == 2
 
   test "merge skips none values":
     let eval = makeEval()
     let r = eval.evalString("""
       a: context [x: 1 y: 2]
       b: context [x: none y: 99]
-      merge a b
-      a
+      result: merge a b
+      result
     """)
     check r.ctx.get("x").intVal == 1
     check r.ctx.get("y").intVal == 99
 
-  test "merge returns first arg":
+  test "merge returns new context":
     let eval = makeEval()
     let r = eval.evalString("""
       a: context [x: 1]
@@ -63,8 +73,8 @@ suite "merge":
     let r = eval.evalString("""
       defaults: context [name: "Unknown" hp: 100 attack: 10]
       parts: capture [name "Warrior" hp 200] [@name @hp @attack]
-      merge defaults parts
-      defaults
+      result: merge defaults parts
+      result
     """)
     check r.ctx.get("name").strVal == "Warrior"
     check r.ctx.get("hp").intVal == 200
@@ -75,22 +85,31 @@ suite "merge":
     discard eval.evalString("""
       a: context [items: [1 2 3]]
       b: context [items: [4 5]]
-      merge/deep a b
-      append a/items 6
+      result: merge/deep a b
+      append result/items 6
     """)
-    # deep copy means b's items shouldn't be affected
-    let r = eval.evalString("a/items")
+    let r = eval.evalString("result/items")
     check r.blockVals.len == 3  # [4 5 6]
 
-  test "merge accepts context as source":
+  test "merge accepts object as source":
     let eval = makeEval()
     let r = eval.evalString("""
       a: context [x: 1]
       b: context [y: 2]
-      merge a b
-      a/y
+      result: merge a b
+      result/y
     """)
     check r.intVal == 2
+
+  test "merge/freeze returns object":
+    let eval = makeEval()
+    let r = eval.evalString("""
+      a: context [x: 1]
+      b: context [y: 2]
+      result: merge/freeze a b
+      frozen? :result
+    """)
+    check r.boolVal == true
 
 suite "std namespace (via CLI)":
   const kintsugi = "bin/kintsugi"
@@ -114,9 +133,9 @@ suite "entity dialect pattern":
     let r = eval.evalString("""
       entity: function [spec [block!]] [
         defaults: context [name: "Unknown" hp: 100 attack: 10 defense: 5]
-        merge defaults (capture spec [@name @hp @attack @defense])
-        defaults/max-hp: defaults/hp
-        defaults
+        result: merge defaults (capture spec [@name @hp @attack @defense])
+        result/max-hp: result/hp
+        result
       ]
 
       warrior: entity [name "Warrior" hp 200 attack 25]

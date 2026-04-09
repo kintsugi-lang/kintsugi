@@ -41,7 +41,7 @@ smootherstep: function [t] [
 ; ease/out t       — ease-out
 ; ease/in/out t    — ease-in-out
 ease: function [t /in /out] [
-  if all [in out] [
+  if all? [in out] [
     return either t < 0.5 [
       2.0 * t * t
     ] [
@@ -107,11 +107,11 @@ grid-pos: function [index [integer!] width [integer!]] [
 ; --- Rect / AABB ---
 
 point-in-rect?: function [px py rx ry rw rh] [
-  all [(px >= rx) (px < (rx + rw)) (py >= ry) (py < (ry + rh))]
+  all? [(px >= rx) (px < (rx + rw)) (py >= ry) (py < (ry + rh))]
 ]
 
 rects-overlap?: function [ax ay aw ah bx by bw bh] [
-  not any [(ax >= (bx + bw)) ((ax + aw) <= bx) (ay >= (by + bh)) ((ay + ah) <= by)]
+  not any? [(ax >= (bx + bw)) ((ax + aw) <= bx) (ay >= (by + bh)) ((ay + ah) <= by)]
 ]
 
 ; --- Wrapping ---
