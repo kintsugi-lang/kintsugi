@@ -58,7 +58,7 @@ A function with N parameters always consumes exactly N values. No variadic funct
 
 ## Type System
 
-### 27 Built-in Types
+### 28 Built-in Types
 
 Beyond JSON's minimal set: money, pairs, tuples, dates, times, files, URLs, emails, sets, objects. Every value carries its type at runtime. Type names end with `!`.
 
@@ -142,7 +142,7 @@ No implicit type conversions. `to target-type! value` for all conversions. Faile
 
 ### Contexts Are Universal
 
-Closures, objects, modules, scopes, instances — all contexts. A closure is a function whose `boundCtx` points to the enclosing context. A module is a context. An object instance is a context. `words-of` works on all of them.
+Closures, objects, modules, scopes, instances — all contexts. A closure is a function whose `boundCtx` points to the enclosing context. A module is a context. An object instance is a context. `words` works on all of them.
 
 **Why:** Eliminates special cases. One mechanism, many uses.
 
@@ -232,7 +232,7 @@ No prototype chains. No diamond problem. Just data flowing into a new context.
 
 ### Standard Error Kinds
 
-`'type`, `'arity`, `'undefined`, `'math`, `'range`, `'syntax`, `'parse`, `'loop`, `'attempt`, `'load`, `'frozen`, `'make`, `'self`, `'name-collision`, `'user`. Users can raise custom kinds.
+`'type`, `'arity`, `'undefined`, `'math`, `'range`, `'syntax`, `'parse`, `'loop`, `'attempt`, `'load`, `'frozen`, `'make`, `'self`, `'object`, `'match`, `'dialect`, `'io`, `'stack`, `'user`. Users can raise custom kinds.
 
 ### Attempt Pipelines
 
@@ -262,7 +262,7 @@ Emitted Lua has no external requires. Prelude helpers are tree-shaken — only h
 
 ### Type Checking in Compiled Output
 
-Built-in type checks (`is? integer! x`, `integer?`, `string?`, etc.) emit Lua `type()` checks — Lua can verify these natively. Custom type checks (`is? person! x`, `person?`) emit `_type` tag checks — `make` stamps instances with a `_type` string field, and `is?` checks it. `@type` definitions are erased (they define interpreter-only custom types), but `object`-based type tags work at both levels. `freeze`/`frozen?` are no-ops in compiled output.
+Built-in type checks (`is? integer! x`, `integer?`, `string?`, etc.) emit Lua `type()` checks — Lua can verify these natively. Custom type checks (`is? person! x`, `person?`) emit `_type` tag checks — `make` stamps instances with a `_type` string field, and `is?` checks it. `@type` definitions are erased (they define interpreter-only custom types), but `object`-based type tags work at both levels. `freeze` is a no-op in compiled output (returns its argument unchanged). `frozen?` always returns `false` in compiled output (Lua tables are always mutable).
 
 ### AST Is the IR
 

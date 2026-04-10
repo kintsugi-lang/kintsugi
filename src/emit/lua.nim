@@ -392,7 +392,7 @@ exprHandlers["copy/deep"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: va
 exprHandlers["sort/by"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   let arr = e.emitExpr(vals, pos)
   let keyFn = e.emitExpr(vals, pos)
-  "(function() table.sort(" & arr & ", function(a, b) return " & keyFn & "(a) < " & keyFn & "(b) end); return " & arr & " end)()"
+  "(function() local _key = " & keyFn & "; table.sort(" & arr & ", function(a, b) return _key(a) < _key(b) end); return " & arr & " end)()"
 
 exprHandlers["sort/with"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   let arr = e.emitExpr(vals, pos)
@@ -402,6 +402,10 @@ exprHandlers["sort/with"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: va
 # --- system/platform → compile-time constant ---
 exprHandlers["system/platform"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   "\"lua\""
+
+# --- now → os.time() (epoch timestamp) ---
+exprHandlers["now"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  "os.time()"
 
 # --- is? — unified type checking ---
 exprHandlers["is?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
@@ -552,7 +556,8 @@ exprHandlers["random"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var i
   "math.random() * " & e.emitExpr(vals, pos)
 
 exprHandlers["random/int"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  "math.random(" & e.emitExpr(vals, pos) & ")"
+  let n = e.emitExpr(vals, pos)
+  "(math.random(" & n & ") - 1)"
 
 exprHandlers["random/int/range"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   let lo = e.emitExpr(vals, pos)
@@ -1275,10 +1280,13 @@ proc emitMatchStmt(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValu
     for (name, expr) in bindings:
       e.ln("local " & name & " = " & expr)
 
+    # Save locals before branch — Lua's local is block-scoped
+    let savedLocals = e.locals
     if asReturn:
       e.emitBlock(handler, asReturn = true)
     else:
       e.emitBlock(handler)
+    e.locals = savedLocals
     e.indent -= 1
     first = false
 
@@ -1355,13 +1363,15 @@ proc emitMatchExpr(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValu
     for (name, expr) in bindings:
       code &= baseIndent & "    local " & name & " = " & expr & "\n"
 
-    # Emit handler body with return
+    # Emit handler body with return — save/restore locals for Lua block scoping
     let savedIndent = e.indent
+    let savedLocals = e.locals
     e.indent = e.indent + 2
     let captured = withCapture(e):
       e.emitBody(handler, asReturn = true)
     code &= captured
     e.indent = savedIndent
+    e.locals = savedLocals
     first = false
 
   if not first:
@@ -1590,14 +1600,19 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
     of wkMetaWord:
       if val.wordName == "parse":
         compileError("@parse", "the parse dialect is interpreter-only; restructure to avoid it in compiled code", val.line)
-      # Other meta-words (@type, @macro, @compose, etc.) are erased in compiled output
+      if val.wordName == "compose" or val.wordName.startsWith("compose/"):
+        compileError("@compose", "@compose is a compile-time feature; use it inside @macro or @preprocess", val.line)
+      # Other meta-words (@type, etc.) are erased in compiled output
       result = "nil"
 
     of wkWord:
       let name = val.wordName
 
       # --- Dispatch table lookup (handlers registered above) ---
-      if name in exprHandlers:
+      # Skip if the name has been user-assigned as a value (prescan found name: expr)
+      let userAssigned = name in e.bindings and
+        not e.bindings[name].isFunction and not e.bindings[name].isUnknown
+      if name in exprHandlers and not userAssigned:
         result = exprHandlers[name](e, vals, pos)
 
       elif name == "try/handle":
@@ -1993,23 +2008,6 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
               for j in 0 ..< r.paramCount:
                 args.add("nil")
           result = resolvedLua & "(" & args.join(", ") & ")"
-        elif info.isParam and not primary and pos < vals.len:
-          # Unknown binding (e.g., function parameter) — check if followed by
-          # a consumable value (not infix, not keyword, not set-word).
-          # If so, emit as a function call with 1 argument.
-          let next = vals[pos]
-          let isConsumable = not isInfixOp(next) and
-            next.kind != vkBlock and
-            not (next.kind == vkWord and next.wordKind == wkSetWord) and
-            not (next.kind == vkWord and next.wordKind == wkMetaWord) and
-            not (next.kind == vkWord and next.wordKind == wkWord and
-                 next.wordName in ["if", "either", "unless", "loop", "match",
-                                    "return", "break", "error", "try"])
-          if isConsumable:
-            let arg = e.emitExpr(vals, pos)
-            result = resolvedLua & "(" & arg & ")"
-          else:
-            result = resolvedLua
         else:
           result = resolvedLua
 
@@ -2102,7 +2100,9 @@ proc emitExprWithChain(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): st
       if next.kind == vkWord and next.wordKind == wkMetaWord: break
       if next.kind == vkWord and next.wordKind == wkWord and
          next.wordName in ["if", "either", "unless", "loop", "match",
-                            "print", "return", "break", "error", "try"]: break
+                            "print", "probe", "assert", "return", "break", "error", "try",
+                            "do", "in", "from", "to", "by", "when",
+                            "source", "then", "fallback", "retries", "catch", "default"]: break
       if next.kind == vkWord and next.wordKind == wkWord and next.wordName.contains('/'): break
       if next.kind == vkBlock: break
       if next.kind == vkWord and next.wordKind == wkWord and
@@ -2568,11 +2568,13 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
     # --- Dispatch table lookup for statement-level natives ---
     if val.kind == vkWord and val.wordKind == wkWord:
       let name = val.wordName
-      if name in stmtHandlers:
+      let stmtUserAssigned = name in e.bindings and
+        not e.bindings[name].isFunction and not e.bindings[name].isUnknown
+      if name in stmtHandlers and not stmtUserAssigned:
         pos += 1
         stmtHandlers[name](e, vals, pos)
         continue
-      elif name in exprHandlers:
+      elif name in exprHandlers and not stmtUserAssigned:
         pos += 1
         var expr = exprHandlers[name](e, vals, pos)
         # Process -> method chains (same as emitExprWithChain)
@@ -2890,6 +2892,7 @@ end
 proc buildPrelude(e: LuaEmitter): string =
   if e.usedHelpers.len == 0: return ""
   result = "-- Kintsugi runtime support\n"
+  result &= "math.randomseed(os.time())\n"
   result &= PreludeUnpack
   if "_NONE" in e.usedHelpers or "_is_none" in e.usedHelpers:
     result &= PreludeNone
@@ -3069,9 +3072,8 @@ proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
           i += 3
           continue
       else:
-        # name: <non-function> — it's a value
-        if name notin e.bindings:
-          e.bindings[name] = bindingVal()
+        # name: <non-function> — it's a value (overrides native if same name)
+        e.bindings[name] = bindingVal()
     i += 1
 
 proc inferBindings(e: var LuaEmitter, vals: seq[KtgValue]) =

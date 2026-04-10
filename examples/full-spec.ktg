@@ -832,6 +832,15 @@ print money? $19.99                     ; true
 print function? :add                    ; true
 print function? :print                  ; true
 
+; context? and object? check value kind
+print context? context [x: 1]          ; true
+print object? object [field/optional [x [integer!] 0]]  ; true
+
+; frozen? checks if a value is an object! (frozen)
+print frozen? context [x: 1]           ; false
+Point: object [field/optional [x [integer!] 0]]
+print frozen? :Point                    ; true
+
 ; Union predicates
 print number? 3.14                      ; true (integer! or float!)
 print number? 42                        ; true

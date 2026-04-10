@@ -1027,28 +1027,44 @@ proc callCallable*(eval: Evaluator, fn: KtgValue, vals: seq[KtgValue],
 
 # --- Preprocessing (#preprocess) ---
 
-proc preprocess*(eval: Evaluator, ast: seq[KtgValue]): seq[KtgValue] =
-  ## Walk the AST looking for @preprocess meta-words followed by blocks,
-  ## and @#inline meta-words followed by blocks (inline preprocess #[expr]).
-  ## Evaluate those blocks in a preprocess context with `emit` to splice
-  ## results into the output AST.
-  var hasPreprocess = false
+proc preprocess*(eval: Evaluator, ast: seq[KtgValue],
+                 forCompilation: bool = false): seq[KtgValue] =
+  ## Walk the AST looking for:
+  ##   @preprocess [block]  - evaluate block, splice emitted values
+  ##   @inline [expr]       - evaluate expr, splice result
+  ##   @macro name: fn      - register macro (expanded at call site)
+  ##   macro calls          - expand and splice
+  ## When forCompilation=true, system/platform is set to 'lua.
+
+  # Quick scan: anything to do?
+  var hasWork = false
   for v in ast:
     if v.kind == vkWord and v.wordKind == wkMetaWord and
-       v.wordName in ["preprocess", "inline"]:
-      hasPreprocess = true
+       v.wordName in ["preprocess", "inline", "macro"]:
+      hasWork = true
       break
-  if not hasPreprocess:
+  # Also check for macro calls from prior passes
+  if not hasWork and eval.macros.len > 0:
+    for v in ast:
+      if v.kind == vkWord and v.wordKind == wkWord and v.wordName in eval.macros:
+        hasWork = true
+        break
+  if not hasWork:
     return ast
+
+  # Set platform for preprocessing
+  if forCompilation:
+    let sys = eval.global.get("system")
+    if sys.kind == vkContext:
+      sys.ctx.set("platform", ktgWord("lua", wkLitWord))
 
   result = @[]
   var i = 0
   while i < ast.len:
+    # @inline [expr]
     if ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
        ast[i].wordName == "inline" and i + 1 < ast.len and
        ast[i + 1].kind == vkBlock:
-      # Inline preprocess: #[expr] — evaluate and splice result.
-      # If result is a block, splice its contents (multi-node). Otherwise splice the value.
       let value = eval.evalBlock(ast[i + 1].blockVals, eval.global)
       if value != nil and value.kind != vkNone:
         if value.kind == vkBlock:
@@ -1057,10 +1073,11 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue]): seq[KtgValue] =
         else:
           result.add(value)
       i += 2
+
+    # @preprocess [block]
     elif ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
        ast[i].wordName == "preprocess" and i + 1 < ast.len and
        ast[i + 1].kind == vkBlock:
-      # Set up a preprocess context with `emit`
       let ppCtx = eval.global.child
       var emitted: seq[KtgValue] = @[]
 
@@ -1076,17 +1093,50 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue]): seq[KtgValue] =
         ),
         line: 0))
 
-      # Evaluate the preprocess block
       discard eval.evalBlock(ast[i + 1].blockVals, ppCtx)
 
-      # Splice emitted values into the result
       for v in emitted:
         result.add(v)
 
       i += 2
+
+    # @macro name: function [spec] [body] - register and skip
+    elif ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
+       ast[i].wordName == "macro" and i + 1 < ast.len and
+       ast[i + 1].kind == vkWord and ast[i + 1].wordKind == wkSetWord:
+      let macroName = ast[i + 1].wordName
+      # Evaluate the macro definition in global scope
+      var defPos = i + 2
+      let macroVal = eval.evalNext(ast, defPos, eval.global)
+      eval.macros.incl(macroName)
+      eval.global.set(macroName, macroVal)
+      i = defPos
+
+    # Macro call - expand
+    elif ast[i].kind == vkWord and ast[i].wordKind == wkWord and
+       ast[i].wordName in eval.macros:
+      let macroName = ast[i].wordName
+      let macroFn = eval.global.get(macroName)
+      # Consume the macro's arguments and call it
+      var callPos = i + 1
+      let expanded = eval.callCallable(macroFn, ast, callPos, eval.global)
+      # Splice the result block into the output
+      if expanded.kind == vkBlock:
+        for v in expanded.blockVals:
+          result.add(v)
+      else:
+        result.add(expanded)
+      i = callPos
+
     else:
       result.add(ast[i])
       i += 1
+
+  # Restore platform
+  if forCompilation:
+    let sys = eval.global.get("system")
+    if sys.kind == vkContext:
+      sys.ctx.set("platform", ktgWord("script", wkLitWord))
 
 
 # --- Convenience ---

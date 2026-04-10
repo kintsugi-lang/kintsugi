@@ -260,7 +260,7 @@ proc compileOne(path: string, outPath: string = "") =
   let source = stripHeader(content)
   let ast = parseSource(source)
   let eval = setupEval()
-  let processed = eval.preprocess(ast)
+  let processed = eval.preprocess(ast, forCompilation = true)
   let sourceDir = parentDir(absolutePath(path))
 
   let luaCode = if isEntrypoint:
@@ -298,7 +298,7 @@ proc dryRunPath(path: string) =
       let source = stripHeader(content)
       let ast = parseSource(source)
       let eval = setupEval()
-      let processed = eval.preprocess(ast)
+      let processed = eval.preprocess(ast, forCompilation = true)
       let sourceDir = parentDir(absolutePath(f))
       echo ";; " & f
       if isEntrypoint:
@@ -311,7 +311,7 @@ proc dryRunPath(path: string) =
     let source = stripHeader(content)
     let ast = parseSource(source)
     let eval = setupEval()
-    let processed = eval.preprocess(ast)
+    let processed = eval.preprocess(ast, forCompilation = true)
     let sourceDir = parentDir(absolutePath(path))
     if isEntrypoint:
       echo emitLua(processed, sourceDir)

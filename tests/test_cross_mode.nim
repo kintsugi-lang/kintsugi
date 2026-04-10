@@ -32,7 +32,9 @@ proc interpOutput(src: string): seq[string] =
 
 proc compileOutput(src: string): seq[string] =
   ## Compile to Lua, run via luajit, return stdout lines.
-  let luaCode = emitLua(parseSource(src))
+  let eval = makeEval()
+  let processed = eval.preprocess(parseSource(src), forCompilation = true)
+  let luaCode = emitLua(processed)
   let tmpFile = getTempDir() / "kintsugi_cross_mode.lua"
   writeFile(tmpFile, luaCode)
   let (output, exitCode) = execCmdEx("luajit " & tmpFile)
@@ -471,7 +473,7 @@ suite "cross-mode: contexts and functions":
 
   test "function as argument":
     crossCheck("""
-      apply-fn: function [f x] [f x]
+      apply-fn: function [f x] [(f x)]
       double: function [n] [n * 2]
       print apply-fn :double 5
     """)
@@ -510,3 +512,60 @@ suite "cross-mode: loop refinements":
       print length result
       print first result
     """)
+
+# ============================================================
+# Macros and preprocessing
+# ============================================================
+
+suite "cross-mode: macros":
+  test "macro expands at compile time":
+    crossCheck("""
+      @macro unless: function [cond body [block!]] [
+        @compose [if not (cond) (body)]
+      ]
+      unless (3 > 5) [print "yes"]
+    """)
+
+  test "macro with compose/deep":
+    crossCheck("""
+      @macro make-adder: function [n [integer!]] [
+        @compose/deep [function [x] [x + (n)]]
+      ]
+      add5: make-adder 5
+      print add5 10
+    """)
+
+  test "preprocess generates code":
+    crossCheck("""
+      @preprocess [
+        loop [
+          for [n] in [1 2 3] do [
+            emit @compose/deep [print (n)]
+          ]
+        ]
+      ]
+    """)
+
+  test "inline preprocess":
+    crossCheck("""
+      val: @inline [2 + 3]
+      print val
+    """)
+
+  test "preprocess platform is lua when compiling":
+    # Interpreter sees 'script, compiler sees 'lua
+    # So we test them separately, not crossCheck
+    let eval = makeEval()
+    discard eval.evalString("""
+      @preprocess [
+        if system/platform = 'script [emit [print "script"]]
+      ]
+    """)
+    check eval.output == @["script"]
+
+    let compiled = compileOutput("""
+      @preprocess [
+        if system/platform = 'lua [emit [print "compiled"]]
+      ]
+    """)
+    check compiled == @["compiled"]
