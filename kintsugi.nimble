@@ -14,6 +14,13 @@ task build, "Build the interpreter":
   exec "nim c -d:release --outdir:bin src/kintsugi.nim"
 
 task test, "Run all tests":
+  var failed: seq[string] = @[]
   for f in listFiles("tests"):
     if f.endsWith(".nim") and f.startsWith("tests/test_") and f != "tests/debug.nim":
-      exec "nim c -r --outdir:bin/tests " & f
+      try:
+        exec "nim c -r --outdir:bin/tests " & f
+      except:
+        failed.add(f)
+  if failed.len > 0:
+    echo "FAILED: " & $failed
+    quit(1)

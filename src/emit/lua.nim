@@ -25,6 +25,7 @@ type
     bkAlias   ## name mapping, emits as-is
     bkAssign  ## callback assignment target
     bkOverride ## function definition: emits `function lua.path(...)` form
+    bkMethod  ## method call: emits obj:method(args) with : syntax
 
   RefinementInfo* = object
     name*: string
@@ -337,9 +338,7 @@ exprHandlers["native?"] = typePred("function")
 # none? — uses _is_none helper
 exprHandlers["none?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   let arg = e.emitExpr(vals, pos)
-  let safeArg = if needsParens(arg): "(" & arg & ")" else: arg
-  e.useHelper("_is_none")
-  "_is_none(" & safeArg & ")"
+  "(" & arg & " == nil)"
 
 # integer? — number + floor check (references arg multiple times, needs safeArg)
 exprHandlers["integer?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
@@ -427,8 +426,7 @@ exprHandlers["is?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int)
   of "function", "native": "(type(" & valExpr & ") == \"function\")"
   of "block", "context", "map", "object": "(type(" & valExpr & ") == \"table\")"
   of "none":
-    e.useHelper("_is_none")
-    "(_is_none(" & valExpr & "))"
+    "(" & valExpr & " == nil)"
   else:
     # Custom type — check _type tag
     "(" & valExpr & " ~= nil and type(" & valExpr & ") == \"table\" and " & valExpr & "._type == \"" & typeName & "\")"
@@ -467,7 +465,11 @@ exprHandlers["second"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var i
 
 exprHandlers["last"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   let arg = e.emitExpr(vals, pos)
-  "(function() local _t = " & arg & "; return _t[#_t] end)()"
+  # Simple identifier: emit arg[#arg]. Complex expression: use temp to avoid double eval.
+  if arg.allCharsInSet({'a'..'z', 'A'..'Z', '0'..'9', '_', '.'}):
+    arg & "[#" & arg & "]"
+  else:
+    "(function() local _t = " & arg & "; return _t[#_t] end)()"
 
 exprHandlers["pick"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   let blk = e.emitExpr(vals, pos)
@@ -943,18 +945,28 @@ proc emitLoopBody(e: var LuaEmitter, bodyVals: seq[KtgValue], refinement: string
   case refinement
   of "collect":
     # Body result appended to result table
-    e.ln("_collect_r[#_collect_r+1] = (function()")
-    e.indent += 1
-    e.emitBlock(bodyVals, asReturn = true)
-    e.indent -= 1
-    e.ln("end)()")
+    if bodyVals.len <= 3:  # simple expression: emit directly
+      var bpos = 0
+      let expr = e.emitExpr(bodyVals, bpos)
+      e.ln("_collect_r[#_collect_r+1] = " & expr)
+    else:
+      e.ln("_collect_r[#_collect_r+1] = (function()")
+      e.indent += 1
+      e.emitBlock(bodyVals, asReturn = true)
+      e.indent -= 1
+      e.ln("end)()")
   of "fold":
     # Body result becomes new accumulator
-    e.ln("_fold_acc = (function()")
-    e.indent += 1
-    e.emitBlock(bodyVals, asReturn = true)
-    e.indent -= 1
-    e.ln("end)()")
+    if bodyVals.len <= 3:
+      var bpos = 0
+      let expr = e.emitExpr(bodyVals, bpos)
+      e.ln("_fold_acc = " & expr)
+    else:
+      e.ln("_fold_acc = (function()")
+      e.indent += 1
+      e.emitBlock(bodyVals, asReturn = true)
+      e.indent -= 1
+      e.ln("end)()")
   of "partition":
     # Body is predicate — element goes to true or false bucket
     e.ln("if (function()")
@@ -1221,8 +1233,8 @@ proc emitMatchStmt(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValu
   while pos < rulesBlock.len:
     let current = rulesBlock[pos]
 
-    # default: handler
-    if current.kind == vkWord and current.wordKind == wkSetWord and
+    # default handler
+    if current.kind == vkWord and current.wordKind == wkWord and
        current.wordName == "default":
       pos += 1
       if pos < rulesBlock.len and rulesBlock[pos].kind == vkBlock:
@@ -1271,9 +1283,13 @@ proc emitMatchStmt(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValu
     if guardExpr.len > 0:
       conditions.add(guardExpr)
 
-    let keyword = if first: "if" else: "elseif"
-    let condStr = if conditions.len > 0: conditions.join(" and ") else: "true"
-    e.ln(keyword & " " & condStr & " then")
+    let condStr = if conditions.len > 0: conditions.join(" and ") else: ""
+    if condStr.len == 0 and not first:
+      e.ln("else")
+    else:
+      let keyword = if first: "if" else: "elseif"
+      let cond = if condStr.len > 0: condStr else: "true"
+      e.ln(keyword & " " & cond & " then")
     e.indent += 1
 
     # Emit bindings as locals
@@ -1308,7 +1324,7 @@ proc emitMatchExpr(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValu
   while pos < rulesBlock.len:
     let current = rulesBlock[pos]
 
-    if current.kind == vkWord and current.wordKind == wkSetWord and
+    if current.kind == vkWord and current.wordKind == wkWord and
        current.wordName == "default":
       pos += 1
       if pos < rulesBlock.len and rulesBlock[pos].kind == vkBlock:
@@ -1355,9 +1371,14 @@ proc emitMatchExpr(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValu
     if guardExpr.len > 0:
       conditions.add(guardExpr)
 
-    let keyword = if first: "if" else: "elseif"
-    let condStr = if conditions.len > 0: conditions.join(" and ") else: "true"
-    code &= baseIndent & "  " & keyword & " " & condStr & " then\n"
+    let condStr = if conditions.len > 0: conditions.join(" and ") else: ""
+    if condStr.len == 0 and not first:
+      # Unconditional pattern after other branches - emit as else
+      code &= baseIndent & "  else\n"
+    else:
+      let keyword = if first: "if" else: "elseif"
+      let cond = if condStr.len > 0: condStr else: "true"
+      code &= baseIndent & "  " & keyword & " " & cond & " then\n"
 
     # Emit bindings
     for (name, expr) in bindings:
@@ -1572,10 +1593,26 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
     result = e.emitBlockLiteral(val.blockVals)
 
   # --- Paren: emit contents as grouped expression ---
+  # (f x) where f is unknown param = function call. (expr op expr) = grouping.
   of vkParen:
-    var ppos = 0
-    let inner = e.emitExpr(val.parenVals, ppos)
-    result = "(" & inner & ")"
+    let pvals = val.parenVals
+    # Check for (f x) pattern: unknown param, not a path, next token not infix
+    let isParamCall = pvals.len >= 2 and
+      pvals[0].kind == vkWord and pvals[0].wordKind == wkWord and
+      not pvals[0].wordName.contains('/') and
+      not isInfixOp(pvals[1]) and
+      (let info = e.getBinding(pvals[0].wordName); info.isParam)
+    if isParamCall:
+      let headName = pvals[0].wordName
+      var ppos = 1
+      var args: seq[string] = @[]
+      while ppos < pvals.len:
+        args.add(e.emitExpr(pvals, ppos))
+      result = "(" & e.resolvedName(headName) & "(" & args.join(", ") & "))"
+    else:
+      var ppos = 0
+      let inner = e.emitExpr(pvals, ppos)
+      result = "(" & inner & ")"
 
   # --- Op: shouldn't appear here, handled by infix ---
   of vkOp:
@@ -1897,7 +1934,7 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
           result = "table.concat(" & arg & ", " & delim & ")"
 
       elif name == "rejoin":
-        # rejoin on a block — build a table.concat with tostring on each element
+        # rejoin on a block — concatenate with .. operator
         if pos < vals.len and vals[pos].kind == vkBlock:
           let blk = vals[pos].blockVals
           pos += 1
@@ -1905,12 +1942,27 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
           var bpos = 0
           while bpos < blk.len:
             let elem = e.emitExpr(blk, bpos)
-            # Strings don't need tostring, everything else does
-            if elem.startsWith("\""):
-              parts.add(elem)
-            else:
+            # Lua's .. auto-coerces numbers. Only wrap types that could error.
+            let needsWrap = not (
+              elem.startsWith("\"") or          # string literal
+              elem.startsWith("(") or           # grouped expr (arithmetic/call)
+              (elem.len > 0 and elem[0] in {'0'..'9', '-'})  # number literal
+            )
+            if needsWrap:
               parts.add("tostring(" & elem & ")")
-          result = "table.concat({" & parts.join(", ") & "})"
+            else:
+              parts.add(elem)
+          # Merge adjacent string literals
+          var merged: seq[string] = @[]
+          for p in parts:
+            if merged.len > 0 and merged[^1].endsWith("\"") and p.startsWith("\""):
+              merged[^1] = merged[^1][0..^2] & p[1..^1]
+            else:
+              merged.add(p)
+          if merged.len == 1:
+            result = merged[0]
+          else:
+            result = merged.join(" .. ")
         else:
           let arg = e.emitExpr(vals, pos)
           result = "table.concat(" & arg & ")"
@@ -1996,6 +2048,7 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
       else:
         let resolvedLua = e.resolvedName(name)
         let info = e.getBinding(name)
+        let isMethod = name in e.bindingKinds and e.bindingKinds[name] == bkMethod
         let a = e.arity(name)
         if a >= 0:
           var args: seq[string] = @[]
@@ -2007,7 +2060,13 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
               args.add("false")
               for j in 0 ..< r.paramCount:
                 args.add("nil")
-          result = resolvedLua & "(" & args.join(", ") & ")"
+          if isMethod:
+            # obj.method -> obj:method
+            let dotPos = resolvedLua.rfind('.')
+            let methodLua = resolvedLua[0..<dotPos] & ":" & resolvedLua[dotPos+1..^1]
+            result = methodLua & "(" & args.join(", ") & ")"
+          else:
+            result = resolvedLua & "(" & args.join(", ") & ")"
         else:
           result = resolvedLua
 
@@ -2063,22 +2122,15 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
       let opStr = if op.kind == vkOp: luaOp(op.opSymbol) else: luaOp(op.wordName)
       pos += 1
       let right = e.emitExpr(vals, pos, primary = true)
-      # Special case: = none / <> none → _is_none() / not _is_none()
+      # Special case: = none / <> none → == nil / ~= nil
       if right == "nil" and opStr == "==":
-        e.useHelper("_is_none")
-        result = "_is_none(" & result & ")"
+        result = "(" & result & " == nil)"
       elif right == "nil" and opStr == "~=":
-        e.useHelper("_is_none")
-        result = "not _is_none(" & result & ")"
+        result = "(" & result & " ~= nil)"
       elif result == "nil" and opStr == "==":
-        e.useHelper("_is_none")
-        result = "_is_none(" & right & ")"
+        result = "(" & right & " == nil)"
       elif result == "nil" and opStr == "~=":
-        e.useHelper("_is_none")
-        result = "not _is_none(" & right & ")"
-      elif opStr == "+":
-        e.useHelper("_add")
-        result = "_add(" & result & ", " & right & ")"
+        result = "(" & right & " ~= nil)"
       else:
         result = "(" & result & " " & opStr & " " & right & ")"
 
@@ -2426,13 +2478,25 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
         e.ln(resolvedLua & " = " & arg)
         continue
       elif a > 0:
+        let isMethod = name in e.bindingKinds and e.bindingKinds[name] == bkMethod
         var args: seq[string] = @[]
         for i in 0 ..< a:
           args.add(e.emitExpr(vals, pos))
-        e.ln(resolvedLua & "(" & args.join(", ") & ")")
+        if isMethod:
+          let dotPos = resolvedLua.rfind('.')
+          let methodLua = resolvedLua[0..<dotPos] & ":" & resolvedLua[dotPos+1..^1]
+          e.ln(methodLua & "(" & args.join(", ") & ")")
+        else:
+          e.ln(resolvedLua & "(" & args.join(", ") & ")")
         continue
       elif a == 0:
-        e.ln(resolvedLua & "()")
+        let isMethod = name in e.bindingKinds and e.bindingKinds[name] == bkMethod
+        if isMethod:
+          let dotPos = resolvedLua.rfind('.')
+          let methodLua = resolvedLua[0..<dotPos] & ":" & resolvedLua[dotPos+1..^1]
+          e.ln(methodLua & "()")
+        else:
+          e.ln(resolvedLua & "()")
         continue
       else:
         # const or alias — emit bare
@@ -2543,7 +2607,7 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
           e.ln(prefix & name & " = " & matchExpr)
           continue
 
-      # Check if RHS is an either expression
+      # Check if RHS is an either expression — emit as hoisted if/else
       if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkWord and
          vals[pos].wordName == "either":
         pos += 1
@@ -2556,8 +2620,25 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
         if pos < vals.len and vals[pos].kind == vkBlock:
           falseBlock = vals[pos].blockVals
           pos += 1
-        let eitherExpr = e.emitEitherExpr(cond, trueBlock, falseBlock)
-        e.ln(prefix & name & " = " & eitherExpr)
+        # Simple case: single expression in each branch
+        if trueBlock.len <= 3 and falseBlock.len <= 3:
+          var tpos = 0
+          let trueExpr = e.emitExpr(trueBlock, tpos)
+          var fpos = 0
+          let falseExpr = e.emitExpr(falseBlock, fpos)
+          e.ln(prefix & name)
+          e.ln("if " & cond & " then")
+          e.indent += 1
+          e.ln(name & " = " & trueExpr)
+          e.indent -= 1
+          e.ln("else")
+          e.indent += 1
+          e.ln(name & " = " & falseExpr)
+          e.indent -= 1
+          e.ln("end")
+        else:
+          let eitherExpr = e.emitEitherExpr(cond, trueBlock, falseBlock)
+          e.ln(prefix & name & " = " & eitherExpr)
         continue
 
       # Regular assignment (with -> chain support)
@@ -2847,11 +2928,6 @@ const PreludeCopy = """local function _copy(t)
 end
 """
 
-const PreludeAdd = """local function _add(a, b)
-  if type(a) == "string" or type(b) == "string" then return tostring(a) .. tostring(b)
-  else return a + b end
-end
-"""
 
 const PreludeAppend = """local function _append(t, v)
   if type(v) == "table" then
@@ -2900,8 +2976,6 @@ proc buildPrelude(e: LuaEmitter): string =
     result &= PreludeDeepCopy
   if "_capture" in e.usedHelpers:
     result &= PreludeCapture
-  if "_add" in e.usedHelpers:
-    result &= PreludeAdd
   if "_equals" in e.usedHelpers:
     result &= PreludeEquals
   if "_has" in e.usedHelpers:
@@ -2977,6 +3051,15 @@ proc prescanBindings(e: var LuaEmitter, blk: seq[KtgValue]) =
     of "override":
       e.nameMap[name] = luaPath
       e.bindingKinds[name] = bkOverride
+    of "method":
+      e.nameMap[name] = luaPath
+      e.bindingKinds[name] = bkMethod
+      if pos < blk.len and blk[pos].kind == vkInteger:
+        let arity = int(blk[pos].intVal)
+        pos += 1
+        e.bindings[name] = bindingFunc(arity)
+      else:
+        e.bindings[name] = bindingFunc(0)
     else:
       discard
 

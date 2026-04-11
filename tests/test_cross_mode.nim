@@ -346,7 +346,7 @@ suite "cross-mode: match (B14 fix)":
       x: 99
       print match x [
         [1] ["one"]
-        default: ["other"]
+        default ["other"]
       ]
     """)
 
@@ -389,7 +389,7 @@ suite "cross-mode: match (B14 fix)":
       result: match x [
         [1] ["one"]
         [2] ["two"]
-        default: ["other"]
+        default ["other"]
       ]
       print result
     """)

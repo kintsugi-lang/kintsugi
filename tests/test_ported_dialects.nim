@@ -95,7 +95,7 @@ suite "Match tests":
     check $eval.evalString("""
       match [9 9 9] [
         [1 2 3] ["nope"]
-        default: ["default"]
+        default ["default"]
       ]
     """) == "default"
 

@@ -36,10 +36,12 @@ suite "emitter: split":
     check "s:find(d, p, true)" in code
 
 suite "emitter: last":
-  test "last does not double-evaluate":
+  test "last on simple var emits direct indexing":
     let code = emitLua(parseSource("last x"))
-    # Should use IIFE or local var to avoid double-eval
-    # The expression 'x' should appear only once as argument, not twice
+    check "x[#x]" in code
+
+  test "last on complex expr avoids double-eval":
+    let code = emitLua(parseSource("last (f 1)"))
     check "local _t" in code
 
 suite "emitter: @const":

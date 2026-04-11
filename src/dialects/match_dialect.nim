@@ -7,7 +7,7 @@ import ../eval/[dialect, evaluator]
 ##
 ## The rules block contains [pattern] [handler] pairs.
 ## Optional `when [guard]` between pattern and handler.
-## `default:` as a set-word acts as catch-all.
+## `default` as a bare word acts as catch-all.
 ##
 ## Pattern elements:
 ##   literal      — matches exactly (integer, float, string, logic)
@@ -17,7 +17,7 @@ import ../eval/[dialect, evaluator]
 ##   _            — wildcard, matches anything, doesn't bind
 ##   (expr)       — evaluates expr and matches the result literally
 ##   when [guard] — guard clause evaluated after pattern match
-##   default:     — fallback if nothing else matched
+##   default      — fallback if nothing else matched
 
 # Forward declaration for mutual recursion
 proc matchBlock(patterns: seq[KtgValue], values: seq[KtgValue],
@@ -146,17 +146,17 @@ proc registerMatch*(eval: Evaluator) =
       while pos < rulesData.len:
         let current = rulesData[pos]
 
-        # Check for default: (set-word)
-        if current.kind == vkWord and current.wordKind == wkSetWord and
+        # Check for default (bare word)
+        if current.kind == vkWord and current.wordKind == wkWord and
            current.wordName == "default":
           pos += 1
           if pos >= rulesData.len:
             raise KtgError(kind: "match",
-              msg: "default: missing handler block", data: nil)
+              msg: "default missing handler block", data: nil)
           let handler = rulesData[pos]
           if handler.kind != vkBlock:
             raise KtgError(kind: "match",
-              msg: "default: handler must be a block", data: handler)
+              msg: "default handler must be a block", data: handler)
           return eval.evalBlock(handler.blockVals, eval.currentCtx)
 
         # Expect a pattern block

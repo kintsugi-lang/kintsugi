@@ -29,7 +29,7 @@ suite "match":
 
   test "default":
     let eval = makeEval()
-    check $eval.evalString("""match 99 [[1] ["one"] default: ["other"]]""") == "other"
+    check $eval.evalString("""match 99 [[1] ["one"] default ["other"]]""") == "other"
 
   test "no match returns none":
     let eval = makeEval()

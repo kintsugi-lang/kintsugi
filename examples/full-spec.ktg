@@ -480,12 +480,12 @@ probe partial                           ; 10 20 30
 ;   'word      - matches the literal word
 ;   _          - wildcard (matches anything, doesn't bind)
 ;   when       - guard clause
-;   default:   - fallback if nothing matched
+;   default    - fallback if nothing matched
 
 match [1 2 3] [
   [1 2 3]  [print "got 1 2 3"]
   [1 _ 3]  [print "1, anything, 3"]
-  default: [print "nothing matched"]
+  default [print "nothing matched"]
 ]
 ; got 1 2 3
 

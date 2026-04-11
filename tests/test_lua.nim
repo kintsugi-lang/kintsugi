@@ -17,12 +17,12 @@ suite "lua emitter":
 
   test "emit arithmetic":
     let code = emitLua(parseSource("x: 1 + 2"))
-    check "_add(1, 2)" in code
+    check "(1 + 2)" in code
 
   test "emit function":
     let code = emitLua(parseSource("add: function [a b] [a + b]"))
     check "local function add(a, b)" in code
-    check "return a + b" in code
+    check "return (a + b)" in code
 
   test "emit if":
     let code = emitLua(parseSource("if true [print 42]"))
@@ -104,7 +104,7 @@ suite "emission context":
         match x [
           [1] ["one"]
           [2] ["two"]
-          default: ["other"]
+          default ["other"]
         ]
       ]
     """))
@@ -304,9 +304,9 @@ suite "string operation emission":
     let code = emitLua(parseSource("""x: substring "hello" 2 3"""))
     check "string.sub(" in code
 
-  test "rejoin emits table.concat":
-    let code = emitLua(parseSource("""x: rejoin ["a" "b" "c"]"""))
-    check "table.concat(" in code
+  test "rejoin emits concatenation":
+    let code = emitLua(parseSource("""x: rejoin ["a" 1 "b"]"""))
+    check ".." in code
 
   test "join emits .. concatenation":
     # join takes two args and concatenates them with ..

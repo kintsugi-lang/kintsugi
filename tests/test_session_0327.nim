@@ -239,20 +239,19 @@ suite "refinement lexer":
 # --- = none compilation ---
 
 suite "none comparison compilation":
-  test "= none compiles to _is_none":
+  test "= none compiles to == nil":
     let code = emitLua(parseSource("""
       x: 42
       if x = none [print "nil"]
     """))
-    check "_is_none(x)" in code
-    check "x == nil" notin code
+    check "x == nil" in code
 
-  test "<> none compiles to not _is_none":
+  test "<> none compiles to ~= nil":
     let code = emitLua(parseSource("""
       x: 42
       if x <> none [print "exists"]
     """))
-    check "not _is_none(x)" in code
+    check "x ~= nil" in code
 
 # --- Math/trig ---
 

@@ -56,7 +56,7 @@ suite "match: lit-word case insensitivity":
     let result = eval.evalString("""
       match 'hello [
         ['hello] [true]
-        default: [false]
+        default [false]
       ]
     """)
     check $result == "true"
@@ -66,7 +66,7 @@ suite "match: lit-word case insensitivity":
     let result = eval.evalString("""
       match 'Hello [
         ['hello] [true]
-        default: [false]
+        default [false]
       ]
     """)
     check $result == "true"
@@ -76,7 +76,7 @@ suite "match: lit-word case insensitivity":
     let result = eval.evalString("""
       match 'FOO [
         ['foo] [42]
-        default: [0]
+        default [0]
       ]
     """)
     check $result == "42"

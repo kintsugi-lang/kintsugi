@@ -104,7 +104,7 @@ apply-ability: function [user ability target] [
         " (" target/hp "/" target/max-hp ")"
       ]
     ]
-    default: [
+    default [
       dmg: calc-damage user ability target
       target/hp: target/hp - dmg
       if target/hp < 0 [target/hp: 0]
