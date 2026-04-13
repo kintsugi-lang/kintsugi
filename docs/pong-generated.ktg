@@ -1,0 +1,177 @@
+Kintsugi [name: 'pong  using [math]]
+
+; ============================================================
+; This file is what the (hypothetical) @game dialect would splice
+; in place of the user's @game [...] block. Hand-written here to
+; validate that the resulting plain Kintsugi flows cleanly through
+; the existing compile pipeline. No dialect residue should appear
+; in the Lua output.
+; ============================================================
+
+bindings [
+  lg "love.graphics" 'alias
+  lw "love.window"   'alias
+  lk "love.keyboard" 'alias
+  le "love.event"    'alias
+  lg/setColor  "love.graphics.setColor"  'call 4
+  lg/rectangle "love.graphics.rectangle" 'call 5
+  lg/print     "love.graphics.print"     'call 3
+  lg/setFont   "love.graphics.setFont"   'call 1
+  lg/newFont   "love.graphics.newFont"   'call 1
+  lw/setMode   "love.window.setMode"     'call 2
+  lw/setTitle  "love.window.setTitle"    'call 1
+  lk/isDown    "love.keyboard.isDown"    'call 1
+  le/quit      "love.event.quit"         'call 0
+  love/load       "love.load"        'assign
+  love/update     "love.update"      'assign
+  love/draw       "love.draw"        'assign
+  love/keypressed "love.keypressed"  'assign
+]
+
+@const SCREEN-W: 800
+@const SCREEN-H: 600
+@const PADDLE-W: 12
+@const PADDLE-H: 80
+@const PADDLE-SPEED: 400
+@const BALL-SIZE: 8
+@const BALL-SPEED: 300
+
+; --- Entities (generated from entity declarations) ---
+
+player: context [
+  x: 20  y: 260
+  w: PADDLE-W  h: PADDLE-H
+  cr: 0.9  cg: 0.9  cb: 1
+  score: 0
+]
+
+cpu: context [
+  x: 768  y: 260
+  w: PADDLE-W  h: PADDLE-H
+  cr: 0.9  cg: 0.9  cb: 1
+  score: 0
+]
+
+ball: context [
+  x: 396  y: 296
+  w: BALL-SIZE  h: BALL-SIZE
+  cr: 1  cg: 0.8  cb: 0.2
+  dx: 1  dy: 1  speed: BALL-SPEED
+]
+
+; --- Scene state (from `state [paused?: true]`) ---
+
+paused?: true
+game-font: none
+
+; --- User-defined scene-local function (lifted verbatim) ---
+
+reset-ball: function [] [
+  ball/x: 396
+  ball/y: 296
+  ball/dx: either ball/dx > 0 [-1] [1]
+  ball/dy: either (random/int 2) = 1 [1] [-1]
+  ball/speed: BALL-SPEED
+  paused?: true
+]
+
+; --- Generated LOVE load ---
+
+love/load: function [] [
+  lw/setMode SCREEN-W SCREEN-H
+  lw/setTitle "Kintsugi Pong"
+  game-font: lg/newFont 24
+]
+
+; --- Generated LOVE update: per-entity update blocks + collisions ---
+
+love/update: function [dt] [
+  ; player update (self -> player)
+  if not paused? [
+    if lk/isDown "w" [player/y: player/y - (PADDLE-SPEED * dt)]
+    if lk/isDown "s" [player/y: player/y + (PADDLE-SPEED * dt)]
+    player/y: clamp player/y 0 (SCREEN-H - PADDLE-H)
+  ]
+
+  ; cpu update (self -> cpu)
+  if not paused? [
+    center: cpu/y + (PADDLE-H / 2)
+    if center < (ball/y - 20) [cpu/y: cpu/y + (PADDLE-SPEED * dt * 0.7)]
+    if center > (ball/y + 20) [cpu/y: cpu/y - (PADDLE-SPEED * dt * 0.7)]
+    cpu/y: clamp cpu/y 0 (SCREEN-H - PADDLE-H)
+  ]
+
+  ; ball update (self -> ball)
+  if not paused? [
+    ball/x: ball/x + (ball/dx * ball/speed * dt)
+    ball/y: ball/y + (ball/dy * ball/speed * dt)
+    if ball/y < 0 [ball/y: 0  ball/dy: negate ball/dy]
+    if ball/y > (SCREEN-H - BALL-SIZE) [
+      ball/y: SCREEN-H - BALL-SIZE
+      ball/dy: negate ball/dy
+    ]
+    if ball/x < 0 [cpu/score: cpu/score + 1  reset-ball]
+    if ball/x > SCREEN-W [player/score: player/score + 1  reset-ball]
+  ]
+
+  ; collision: ball vs player (inlined AABB, specialized branch)
+  if all? [
+    ball/x < (player/x + player/w)
+    player/x < (ball/x + ball/w)
+    ball/y < (player/y + player/h)
+    player/y < (ball/y + ball/h)
+  ] [
+    if ball/dx < 0 [
+      ball/x: player/x + player/w
+      ball/dx: 1
+      ball/speed: ball/speed + 20
+    ]
+  ]
+
+  ; collision: ball vs cpu (inlined AABB, specialized branch)
+  if all? [
+    ball/x < (cpu/x + cpu/w)
+    cpu/x < (ball/x + ball/w)
+    ball/y < (cpu/y + cpu/h)
+    cpu/y < (ball/y + ball/h)
+  ] [
+    if ball/dx > 0 [
+      ball/x: cpu/x - ball/w
+      ball/dx: -1
+      ball/speed: ball/speed + 20
+    ]
+  ]
+]
+
+; --- Generated LOVE draw: auto entity draws + user HUD ---
+
+love/draw: function [] [
+  lg/setColor player/cr player/cg player/cb 1
+  lg/rectangle "fill" player/x player/y player/w player/h
+  lg/setColor cpu/cr cpu/cg cpu/cb 1
+  lg/rectangle "fill" cpu/x cpu/y cpu/w cpu/h
+  lg/setColor ball/cr ball/cg ball/cb 1
+  lg/rectangle "fill" ball/x ball/y ball/w ball/h
+
+  ; User draw block (verbatim)
+  lg/setColor 0.3 0.3 0.4 1
+  lg/rectangle "fill" 398 0 4 SCREEN-H
+  lg/setFont game-font
+  lg/setColor 1 1 1 1
+  lg/print (to string! player/score) 340 20
+  lg/print (to string! cpu/score)    440 20
+  if paused? [
+    lg/setColor 1 1 1 0.6
+    lg/print "SPACE to start  |  W/S to move  |  R to reset" 200 560
+  ]
+]
+
+; --- Generated LOVE keypressed: match from on-key handlers ---
+
+love/keypressed: function [key] [
+  match key [
+    ["space"]  [paused?: not paused?]
+    ["r"]      [player/score: 0  cpu/score: 0  reset-ball]
+    ["escape"] [le/quit]
+  ]
+]

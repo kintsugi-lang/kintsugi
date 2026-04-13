@@ -424,3 +424,295 @@ suite "emitter: type inference for sequences":
       x: subset s 1 3
     """))
     check "_subset(" notin code
+
+suite "emitter: either as rhs of assignment (Bug A)":
+  # When `either` is used as the value for a set-word or set-path, the
+  # emitter must hoist the assignment into each branch, not leave an
+  # orphan target before the if/else.
+  #
+  # Regression: `ball/dx: either ball/dx > 0 [-1] [1]` was compiling to
+  #   ball.dx            -- orphan bare reference
+  #   if ball.dx > 0 then
+  #     ball.dx = -1
+  #   else
+  #     ball.dx = 1
+  #   end
+
+  test "set-word with either hoists into branches":
+    let code = emitLua(parseSource("""
+      x: 5
+      x: either x > 0 [-1] [1]
+    """))
+    check "x = -1" in code
+    check "x = 1" in code
+    # No orphan bare `x` line
+    for line in code.splitLines:
+      check line.strip != "x"
+
+  test "set-path with either hoists into branches":
+    let code = emitLua(parseSource("""
+      obj: context [val: 0]
+      obj/val: either obj/val > 0 [-1] [1]
+    """))
+    check "obj.val = -1" in code
+    check "obj.val = 1" in code
+    for line in code.splitLines:
+      check line.strip != "obj.val"
+
+  test "set-path with either using function-call branches":
+    # The branches produce values via function calls — must still
+    # compose cleanly as assignments.
+    let code = emitLua(parseSource("""
+      obj: context [val: 0]
+      obj/val: either obj/val > 0 [negate obj/val] [obj/val + 1]
+    """))
+    check "obj.val = -" in code
+    check "obj.val = obj.val + 1" in code
+    for line in code.splitLines:
+      check line.strip != "obj.val"
+
+  test "set-word with match hoists into branches":
+    # Same bug shape: orphan target line before hoisted match.
+    let code = emitLua(parseSource("""
+      k: "hello"
+      x: 0
+      x: match k [
+        ["hello"] [1]
+        ["world"] [2]
+        default   [0]
+      ]
+    """))
+    check "x = 1" in code
+    check "x = 2" in code
+    check "x = 0" in code
+    for line in code.splitLines:
+      check line.strip != "x"
+
+  test "set-path with match hoists into branches":
+    let code = emitLua(parseSource("""
+      obj: context [val: 0]
+      k: "hello"
+      obj/val: match k [
+        ["hello"] [1]
+        ["world"] [2]
+        default   [0]
+      ]
+    """))
+    check "obj.val = 1" in code
+    check "obj.val = 2" in code
+    check "obj.val = 0" in code
+    for line in code.splitLines:
+      check line.strip != "obj.val"
+
+suite "emitter: write-through scoping from function bodies (Bug B)":
+  # Set-words inside a function body should write through to a matching
+  # name in the enclosing (module) scope, not create a shadow `local`.
+  # Matches the interpreter's write-through semantics from 2026-04-09.
+  #
+  # Regression: `counter: counter + 1` inside a function was compiling to
+  #   local counter = counter + 1
+  # which shadows instead of mutating the outer binding.
+
+  test "function body writes through to outer set-word":
+    let code = emitLua(parseSource("""
+      counter: 0
+      bump: function [] [
+        counter: counter + 1
+      ]
+    """))
+    check "local counter = 0" in code
+    check code.count("local counter") == 1
+    check "counter = counter + 1" in code
+
+  test "new name inside function body is still a local":
+    # Names that don't exist at outer scope must still emit `local`
+    # inside the function — otherwise they'd become globals.
+    let code = emitLua(parseSource("""
+      compute: function [x] [
+        tmp: x * 2
+        tmp + 1
+      ]
+    """))
+    check "local tmp = " in code
+
+  test "function param name is a parameter, not a write-through":
+    # A parameter with the same name as an outer binding should bind
+    # the parameter locally — references inside the body use the param,
+    # not the outer value.
+    let code = emitLua(parseSource("""
+      name: "outer"
+      greet: function [name] [
+        print name
+      ]
+    """))
+    check "function greet(name)" in code
+    # The param `name` shadows the outer. Should not emit `local name` again.
+    check code.count("local name") == 1  # only the outer `local name = "outer"`
+
+  test "set-path writes through without local declaration":
+    # Set-paths never emit `local` since they can't declare. Sanity check.
+    let code = emitLua(parseSource("""
+      game: context [score: 0]
+      bump: function [] [
+        game/score: game/score + 1
+      ]
+    """))
+    check "game.score = game.score + 1" in code
+    check "local game.score" notin code
+
+  test "either on set-path inside function writes through":
+    # Combines Bug A (either-as-rhs) with Bug B (write-through).
+    # The either must hoist into branches AND the set-path must write
+    # through without creating a shadow.
+    let code = emitLua(parseSource("""
+      ball: context [dx: 1]
+      flip: function [] [
+        ball/dx: either ball/dx > 0 [-1] [1]
+      ]
+    """))
+    check "ball.dx = -1" in code
+    check "ball.dx = 1" in code
+    for line in code.splitLines:
+      check line.strip != "ball.dx"
+
+  test "set-word assignment to outer bool inside function":
+    # Exact pong-generated pattern: `paused?: not paused?` inside a
+    # keypressed handler, where `paused?` is declared at module scope.
+    let code = emitLua(parseSource("""
+      paused?: true
+      toggle: function [] [
+        paused?: not paused?
+      ]
+    """))
+    check "local is_paused = true" in code
+    check code.count("local is_paused") == 1
+    check "is_paused = not " in code
+
+  test "forward reference: function defined before outer name":
+    # Function is defined before the module-level binding it writes to.
+    # The write must still thread through — the interpreter's
+    # write-through rule looks at the runtime scope chain, not source
+    # order.
+    let code = emitLua(parseSource("""
+      f: function [] [
+        counter: counter + 1
+      ]
+      counter: 0
+      f
+    """))
+    check "local counter = 0" in code
+    check code.count("local counter") == 1
+    check "counter = counter + 1" in code
+
+suite "emitter: using header inlines stdlib modules (Bug C)":
+  # Source with `Kintsugi [using [math]]` must have the stdlib math
+  # module's function bodies prepended before compilation, so calls
+  # like `clamp 15 0 10` resolve to real function definitions in the
+  # emitted Lua. Before the fix, the emitter didn't know clamp's arity
+  # and emitted `local x = clamp` followed by bare lines for the args.
+
+  test "using [math] header inlines clamp function into compiled output":
+    let source = """
+Kintsugi [using [math]]
+x: clamp 15 0 10
+"""
+    let processed = applyUsingHeader(source)
+    let code = emitLua(parseSource(processed))
+    check "function clamp" in code
+    check "clamp(15, 0, 10)" in code
+
+  test "using [collections] header inlines range function":
+    let source = """
+Kintsugi [using [collections]]
+xs: range 1 5
+"""
+    let processed = applyUsingHeader(source)
+    let code = emitLua(parseSource(processed))
+    check "function range" in code
+    check "range(1, 5" in code
+
+  test "using with multiple modules inlines all of them":
+    let source = """
+Kintsugi [using [math collections]]
+x: clamp 5 0 10
+ys: range 1 3
+"""
+    let processed = applyUsingHeader(source)
+    let code = emitLua(parseSource(processed))
+    check "function clamp" in code
+    check "function range" in code
+
+  test "source without using header is unchanged":
+    let source = "x: 1 + 2\n"
+    let processed = applyUsingHeader(source)
+    check processed == source
+
+  test "using with unknown module is silently skipped":
+    let source = """
+Kintsugi [using [nonexistent]]
+x: 42
+"""
+    let processed = applyUsingHeader(source)
+    # Body survives, unknown module ignored
+    let code = emitLua(parseSource(processed))
+    check "x" in code
+
+suite "emitter: paren preservation for mixed precedence (Bug D)":
+  # Kintsugi is left-to-right, no operator precedence. When a paren
+  # wraps a mixed-op expression, the parens are load-bearing. Lua *does*
+  # have precedence, so the parens must survive translation whenever
+  # Lua would otherwise evaluate the inner expression differently.
+  #
+  # Regression: `(b - a) * t` was compiling to `b - a * t`, which Lua
+  # evaluates as `b - (a * t)` because `*` > `-`. Wrong result.
+
+  test "paren around subtraction inside multiplication is preserved":
+    let code = emitLua(parseSource("""
+      f: function [a b] [(b - a) * 2]
+    """))
+    check "(b - a) * 2" in code
+
+  test "paren around sum inside multiplication is preserved":
+    let code = emitLua(parseSource("""
+      area: function [w h border] [(w + h) * border]
+    """))
+    check "(w + h) * border" in code
+
+  test "lerp compiles correctly":
+    # a + ((b - a) * t) — classic case that was silently wrong.
+    let code = emitLua(parseSource("""
+      lerp: function [a b t] [a + ((b - a) * t)]
+    """))
+    # Inner (b - a) must survive because it's subtraction inside
+    # multiplication. Outer paren around ((b - a) * t) is redundant in
+    # Lua (+ and * already have the right precedence) and may or may
+    # not be preserved — what matters is the final semantics.
+    check "(b - a)" in code
+    # Sanity: the compiled expression must equal a + (b - a) * t
+    # which Lua evaluates as a + ((b - a) * t) = correct.
+    check "a + (b - a) * t" in code or "a + ((b - a) * t)" in code
+
+  test "nested paren with subtraction in mul":
+    let code = emitLua(parseSource("""
+      f: function [x y z] [((x - y) * (y - z))]
+    """))
+    check "(x - y) * (y - z)" in code
+
+  test "single-token paren drops parens":
+    # `(x)` around a bare variable should not keep parens.
+    let code = emitLua(parseSource("""
+      f: function [x] [(x) + 1]
+    """))
+    # Should be `return x + 1`, not `return (x) + 1`
+    check "return x + 1" in code
+
+  test "function call paren doesn't add unneeded parens":
+    # `(g x)` is a param-call pattern or a head-position call.
+    # Shouldn't produce double parens like `((g(x)))`.
+    let code = emitLua(parseSource("""
+      g: function [n] [n * 2]
+      h: function [x] [1 + (g x)]
+    """))
+    check "((g" notin code
+    check "g(x)" in code
+

@@ -47,6 +47,10 @@ type
     bindings: Table[string, BindingInfo]
     ## Track locally declared names. Undeclared names emit as globals.
     locals: HashSet[string]
+    ## All set-word names at module scope, collected in a pre-pass
+    ## before emission. Used at function-entry to make write-through
+    ## work for names declared later in source order than the function.
+    moduleNames: HashSet[string]
     ## Map Kintsugi name -> Lua path for foreign bindings.
     nameMap: Table[string, string]
     ## Track the kind for each binding entry.
@@ -2061,11 +2065,19 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
     else:
       var ppos = 0
       let inner = e.emitExpr(pvals, ppos)
-      # Kintsugi parens group evaluation order. The infix handler already
-      # manages Lua precedence, so we only need Lua parens when there are
-      # unconsumed tokens (which means the paren group wasn't purely an
-      # expression - preserve original wrapping for safety).
-      if ppos < pvals.len:
+      # Kintsugi parens group evaluation order. Lua has operator
+      # precedence, Kintsugi does not — so we must preserve parens
+      # whenever the inner expression contains an infix operator that
+      # Lua could otherwise re-associate. Dropping parens around a
+      # subtraction inside a multiplication (e.g. `(b - a) * t`) would
+      # silently change the result. Single-token or pure-call paren
+      # groups still drop their parens.
+      var hasInfix = false
+      for pv in pvals:
+        if isInfixOp(pv):
+          hasInfix = true
+          break
+      if ppos < pvals.len or hasInfix:
         result = "(" & inner & ")"
       else:
         result = inner
@@ -3102,7 +3114,15 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
           let savedVarTypes = e.varTypes
           let savedSafeVars = e.concatSafeVars
           let savedSeqTypes = e.varSeqTypes
-          e.locals = initHashSet[string]()
+          # Inherit outer-scope names so set-words in the function body
+          # that match an enclosing name thread through instead of
+          # shadowing (matches interpreter write-through semantics).
+          # moduleNames covers names declared later in source order than
+          # this function — the interpreter sees them via scope chain at
+          # call time, so the emitter must too.
+          e.locals = savedLocals
+          for n in e.moduleNames:
+            e.locals.incl(n)
           for p in params:
             e.locals.incl(p)
             if p notin e.bindings:
@@ -3199,7 +3219,8 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
         if pos < vals.len and vals[pos].kind == vkBlock:
           let rulesBlock = vals[pos].blockVals
           pos += 1
-          e.ln(prefix & name)
+          if prefix.len > 0:
+            e.ln(prefix & name)
           e.emitMatchHoisted(name, valueExpr, rulesBlock)
           continue
 
@@ -3222,7 +3243,8 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
           let trueExpr = e.emitExpr(trueBlock, tpos)
           var fpos = 0
           let falseExpr = e.emitExpr(falseBlock, fpos)
-          e.ln(prefix & name)
+          if prefix.len > 0:
+            e.ln(prefix & name)
           e.ln("if " & cond & " then")
           e.indent += 1
           e.ln(name & " = " & trueExpr)
@@ -3986,6 +4008,83 @@ proc findExports(ast: seq[KtgValue]): seq[string] =
         return result
     i += 1
 
+proc stripKtgHeader(source: string): string =
+  ## Strip a leading `Kintsugi [...]` header if present, returning the
+  ## body. Used both at compile time (for embedding stdlib sources) and
+  ## at runtime (inside applyUsingHeader).
+  let trimmed = source.strip
+  if not trimmed.startsWith("Kintsugi"):
+    return source
+  var depth = 0
+  var inHeader = false
+  for i in 0 ..< source.len:
+    if source[i] == '[' and not inHeader:
+      inHeader = true
+      depth = 1
+    elif source[i] == '[' and inHeader:
+      depth += 1
+    elif source[i] == ']' and inHeader:
+      depth -= 1
+      if depth == 0:
+        return source[i+1 .. ^1]
+  source
+
+const
+  stdlibMathSrc = stripKtgHeader(staticRead("../../lib/math.ktg"))
+  stdlibCollectionsSrc = stripKtgHeader(staticRead("../../lib/collections.ktg"))
+
+proc extractUsingModules(source: string): seq[string] =
+  ## Scan the optional `Kintsugi [using [names]]` header for module names.
+  let trimmed = source.strip
+  if not trimmed.startsWith("Kintsugi"):
+    return @[]
+  let ast = parseSource(source)
+  if ast.len < 2 or ast[0].kind != vkWord or ast[0].wordName != "Kintsugi":
+    return @[]
+  if ast[1].kind != vkBlock:
+    return @[]
+  let header = ast[1].blockVals
+  var i = 0
+  while i < header.len:
+    if header[i].kind == vkWord and
+       header[i].wordKind in {wkWord, wkSetWord} and
+       header[i].wordName == "using":
+      i += 1
+      if i < header.len and header[i].kind == vkBlock:
+        for n in header[i].blockVals:
+          if n.kind == vkWord:
+            result.add(n.wordName)
+        return
+    i += 1
+
+proc applyUsingHeader*(source: string): string =
+  ## If the source has a `Kintsugi [using [math collections ...]]`
+  ## header, strip the user's header and return a new source string
+  ## with the requested stdlib module bodies prepended. Unknown module
+  ## names are silently skipped. Sources without a header (or without
+  ## `using`) are returned unchanged.
+  let names = extractUsingModules(source)
+  if names.len == 0:
+    return source
+  let userBody = stripKtgHeader(source)
+  var combined = ""
+  for name in names:
+    case name
+    of "math":        combined &= stdlibMathSrc & "\n"
+    of "collections": combined &= stdlibCollectionsSrc & "\n"
+    else:             discard  # unknown module — silently skip
+  combined & userBody
+
+proc collectModuleNames(vals: seq[KtgValue]): HashSet[string] =
+  ## Walk the top-level values linearly and pick up every set-word.
+  ## Does NOT recurse into blocks, so set-words inside function bodies,
+  ## object specs, `if` bodies, etc. are not included — only names that
+  ## are defined at module scope end up in the set.
+  result = initHashSet[string]()
+  for v in vals:
+    if v.kind == vkWord and v.wordKind == wkSetWord and not v.wordName.contains('/'):
+      result.incl(luaName(v.wordName))
+
 proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
                     compiling: HashSet[string] = initHashSet[string]()): string =
   ## Compile a Kintsugi module to Lua. Emits exports as return statement.
@@ -3996,7 +4095,8 @@ proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
     nameMap: initTable[string, string](),
     bindingKinds: initTable[string, BindingKind](),
     sourceDir: sourceDir,
-    compiling: compiling
+    compiling: compiling,
+    moduleNames: collectModuleNames(ast)
   )
   e.prescanBlock(ast)
   e.inferBindings(ast)
@@ -4037,7 +4137,8 @@ proc emitLua*(ast: seq[KtgValue], sourceDir: string = ""): string =
     bindings: initNativeBindings(),
     nameMap: initTable[string, string](),
     bindingKinds: initTable[string, BindingKind](),
-    sourceDir: sourceDir
+    sourceDir: sourceDir,
+    moduleNames: collectModuleNames(ast)
   )
   e.prescanBlock(ast)
   e.inferBindings(ast)

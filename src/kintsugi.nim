@@ -257,7 +257,7 @@ proc compileOne(path: string, outPath: string = "") =
 
   let content = readFile(path)
   let isEntrypoint = hasHeader(content)
-  let source = stripHeader(content)
+  let source = applyUsingHeader(content)
   let ast = parseSource(source)
   let eval = setupEval()
   let processed = eval.preprocess(ast, forCompilation = true)
@@ -295,7 +295,7 @@ proc dryRunPath(path: string) =
     for f in collectKtgFiles(path):
       let content = readFile(f)
       let isEntrypoint = hasHeader(content)
-      let source = stripHeader(content)
+      let source = applyUsingHeader(content)
       let ast = parseSource(source)
       let eval = setupEval()
       let processed = eval.preprocess(ast, forCompilation = true)
@@ -308,7 +308,7 @@ proc dryRunPath(path: string) =
   else:
     let content = readFile(path)
     let isEntrypoint = hasHeader(content)
-    let source = stripHeader(content)
+    let source = applyUsingHeader(content)
     let ast = parseSource(source)
     let eval = setupEval()
     let processed = eval.preprocess(ast, forCompilation = true)
