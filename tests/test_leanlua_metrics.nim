@@ -95,3 +95,11 @@ suite "lean-lua metrics":
   test "set destructure with loop refinement has no IIFE":
     let stress = compileGolden("leanlua_stress")
     check countOccurrences(stress, "local _set_tmp = (function()") == 0
+
+  test "if as expression uses and-or when body is simple":
+    let src = "Kintsugi [name: 'if-expr-test]\nx: if (1 > 0) [42]\nprint x\n"
+    let ast = parseSource(src)
+    let eval = setupEvalForTest()
+    let processed = eval.preprocess(ast, forCompilation = true)
+    let lua = emitLua(processed, "")
+    check countOccurrences(lua, "(function()") == 0

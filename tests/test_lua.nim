@@ -74,12 +74,12 @@ suite "binding tracking":
     check "greet(\"world\", false)" in code
 
 suite "emission context":
-  test "if in expression position wraps in IIFE":
+  test "if in expression position with literal body uses and-or":
     let code = emitLua(parseSource("""
       x: if true [42]
     """))
-    check "function()" in code
-    check "local x" in code
+    check "local x = (true and 42 or nil)" in code
+    check "function()" notin code
 
   test "if in statement position emits directly":
     let code = emitLua(parseSource("""

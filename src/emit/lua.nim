@@ -2221,13 +2221,28 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
         if pos < vals.len and vals[pos].kind == vkBlock:
           let bodyBlock = vals[pos].blockVals
           pos += 1
-          e.indent += 1
-          let bodyOut = withCapture(e):
-            e.emitBody(bodyBlock, asReturn = true)
-          e.indent -= 1
-          result = "(function()\n" & e.pad & "  if " & cond & " then\n" &
-                   bodyOut &
-                   e.pad & "  end\n" & e.pad & "end)()"
+          # Try `cond and expr or nil` when the body is a single expression
+          # with a literal-truthy result. Only literal-shaped truthy values
+          # are safe; variables/calls could evaluate to false/nil.
+          var inlined = false
+          if bodyBlock.len <= 3:
+            var bpos = 0
+            let bodyExpr = e.emitExpr(bodyBlock, bpos)
+            if bpos >= bodyBlock.len:
+              let safe = bodyExpr.startsWith("{") or
+                         (bodyExpr.startsWith("\"") and bodyExpr != "\"\"") or
+                         (bodyExpr.len > 0 and bodyExpr[0] in {'1'..'9'})
+              if safe:
+                result = "(" & cond & " and " & bodyExpr & " or nil)"
+                inlined = true
+          if not inlined:
+            e.indent += 1
+            let bodyOut = withCapture(e):
+              e.emitBody(bodyBlock, asReturn = true)
+            e.indent -= 1
+            result = "(function()\n" & e.pad & "  if " & cond & " then\n" &
+                     bodyOut &
+                     e.pad & "  end\n" & e.pad & "end)()"
         else:
           result = "nil"
 
