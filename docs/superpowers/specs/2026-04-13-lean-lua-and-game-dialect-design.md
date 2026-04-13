@@ -479,3 +479,38 @@ Hard stops. If any trigger, stop and reassess before continuing.
 - Interpreter-time `@game` evaluation.
 - Animation/tweening sub-dialect.
 - Real ECS.
+
+---
+
+## Appendix: String helpers audit (Phase 2.4)
+
+Decision per helper. `keep` means the helper stays in the prelude; `inline` means the helper is replaced by a direct `string.*` call and the helper is dropped.
+
+### `_split`
+**Decision: keep.**
+Lua has `string.gmatch(s, "[^" .. d .. "]+")` which approximates split-on-delimiter, but:
+- Empty delimiter (split into chars) is not expressible with `gmatch`.
+- Escaping special pattern characters inside `d` would require extra logic.
+The helper's 10-line implementation is clearer than escaping gmatch dynamically.
+
+### `_replace`
+**Decision: keep.**
+`string.gsub(s, old, new)` requires `old` to be escaped for Lua patterns. Our `_replace` does literal (non-pattern) find/replace, which is simpler and more predictable than gsub + pattern escaping.
+
+### `_subset`
+**Decision: inline for string arg (already implemented).**
+`string.sub(s, start, stop)` is a direct equivalent for string inputs. Block inputs still need inline loop-building; unknown types keep `_subset`. The existing `exprHandlers["subset"]` already branches on `inferSeqType`: `stString` emits `string.sub`, `stBlock` inlines a slice loop, `stUnknown` keeps the helper.
+
+### `_insert`
+**Decision: keep.**
+String insertion uses concatenation which is fine inline, but block insertion is `table.insert(t, i, v)` - also fine inline. However, the helper unifies the two branches and the emitter doesn't always know the type. Keep for safety; revisit if type inference improves.
+
+### `_remove`
+**Decision: keep.**
+Same reasoning as `_insert`. Dual-mode helper unifies string/block removal.
+
+### `_sort`
+**Decision: keep.**
+`table.sort(x)` works in-place on blocks. The helper wraps this to also handle strings (by char) and to return the table. Keep for the return-value convention.
+
+**Net result: one helper partial inline (`_subset` for known strings, already in place), five helpers kept with justification. Lean-lua Phase 2.4 done.**

@@ -148,3 +148,14 @@ suite "lean-lua metrics":
     let lua = emitLua(processed, "")
     check countOccurrences(lua, "type(") >= 1
     check countOccurrences(lua, "_is_integer") == 0
+
+  test "subset on typed string var emits string.sub":
+    let src = "Kintsugi [name: 'subset-str-test]\n" &
+              "f: function [s [string!]] [subset s 1 3]\n" &
+              "print f \"hello\"\n"
+    let ast = parseSource(src)
+    let eval = setupEvalForTest()
+    let processed = eval.preprocess(ast, forCompilation = true)
+    let lua = emitLua(processed, "")
+    check countOccurrences(lua, "string.sub(") >= 1
+    check countOccurrences(lua, "_subset(") == 0
