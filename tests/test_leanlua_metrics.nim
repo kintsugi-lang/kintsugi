@@ -132,3 +132,8 @@ suite "lean-lua metrics":
     let lua = emitLua(processed, "")
     check countOccurrences(lua, "pairs(c)") >= 1
     check countOccurrences(lua, "ipairs(c)") == 0
+
+  test "match conditions have no trailing 'and true'":
+    for name in ["hello", "pong", "combat", "playdate", "leanlua_stress"]:
+      let lua = compileGolden(name)
+      check countOccurrences(lua, "and true") == 0
