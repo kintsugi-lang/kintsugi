@@ -3870,6 +3870,29 @@ proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
           # Track return type for concat-safe inference in rejoin
           if spec.returnType.len > 0:
             e.funcReturnTypes[name] = spec.returnType
+          else:
+            # Narrow heuristic: if every param is integer! and the body's
+            # tail contains an arithmetic op, infer integer! return.
+            if i + 3 < vals.len and vals[i + 3].kind == vkBlock:
+              let body = vals[i + 3].blockVals
+              if body.len >= 1:
+                let j = body.len - 1
+                var hasArith = false
+                for k in max(0, j - 2) .. j:
+                  let v = body[k]
+                  if v.kind == vkOp or
+                     (v.kind == vkWord and v.wordKind == wkWord and
+                      v.wordName in ["+", "-", "*", "/"]):
+                    hasArith = true
+                    break
+                if hasArith:
+                  var allIntParams = spec.params.len > 0
+                  for ps in spec.params:
+                    if ps.typeName != "integer!":
+                      allIntParams = false
+                      break
+                  if allIntParams:
+                    e.funcReturnTypes[name] = "integer!"
           # Recurse into function body
           if i + 3 < vals.len and vals[i + 3].kind == vkBlock:
             e.prescanBlock(vals[i + 3].blockVals)
