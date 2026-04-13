@@ -2257,7 +2257,26 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
         if pos < vals.len and vals[pos].kind == vkBlock:
           falseBlock = vals[pos].blockVals
           pos += 1
-        result = e.emitEitherExpr(cond, trueBlock, falseBlock)
+        # Short-branch optimization: when both branches are single
+        # expressions and the true-branch expression is literal-safe
+        # (never false/nil), emit `cond and trueExpr or falseExpr`.
+        var inlined = false
+        if trueBlock.len <= 3 and falseBlock.len <= 3:
+          var tpos = 0
+          let trueExpr = e.emitExpr(trueBlock, tpos)
+          var fpos = 0
+          let falseExpr = e.emitExpr(falseBlock, fpos)
+          if tpos >= trueBlock.len and fpos >= falseBlock.len:
+            let truthySafe = trueExpr.startsWith("{") or
+                             (trueExpr.startsWith("\"") and trueExpr != "\"\"") or
+                             (trueExpr.len > 0 and trueExpr[0] in {'1'..'9'}) or
+                             (trueExpr.len > 1 and trueExpr[0] == '-' and
+                              trueExpr[1] in {'1'..'9'})
+            if truthySafe:
+              result = "(" & cond & " and " & trueExpr & " or " & falseExpr & ")"
+              inlined = true
+        if not inlined:
+          result = e.emitEitherExpr(cond, trueBlock, falseBlock)
 
       # --- function definition ---
       elif name == "function":

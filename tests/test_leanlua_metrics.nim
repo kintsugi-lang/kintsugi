@@ -103,3 +103,11 @@ suite "lean-lua metrics":
     let processed = eval.preprocess(ast, forCompilation = true)
     let lua = emitLua(processed, "")
     check countOccurrences(lua, "(function()") == 0
+
+  test "either as expression uses and-or when both branches are literal":
+    let src = "Kintsugi [name: 'either-expr-test]\nprint (either 1 > 0 [\"yes\"] [\"no\"])\n"
+    let ast = parseSource(src)
+    let eval = setupEvalForTest()
+    let processed = eval.preprocess(ast, forCompilation = true)
+    let lua = emitLua(processed, "")
+    check countOccurrences(lua, "(function()") == 0
