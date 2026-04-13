@@ -2,4 +2,5 @@
 bin/
 web/
 *.lua
+!tests/golden/*.lua
 *.js
