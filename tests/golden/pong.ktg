@@ -1,0 +1,219 @@
+Kintsugi [
+  name: 'pong
+  version: 1.0.0
+]
+
+; Pong in Kintsugi — a LÖVE2D game using objects, make, and merge.
+; Compile: kintsugi -c main.ktg -o main.lua
+; Run:     love .
+
+; ============================================================
+; LÖVE2D bindings
+; ============================================================
+
+bindings [
+  lg "love.graphics" 'alias
+  le "love.event" 'alias
+  lw "love.window" 'alias
+  lk "love.keyboard" 'alias
+  le/quit "love.event.quit" 'call 0
+  lw/setTitle     "love.window.setTitle"          'call 1
+  lw/setMode      "love.window.setMode"           'call 2
+  lk/isDown     "love.keyboard.isDown"          'call 1
+  lg/setColor   "love.graphics.setColor"        'call 4
+  lg/rectangle  "love.graphics.rectangle"       'call 5
+  lg/circle     "love.graphics.circle"          'call 4
+  lg/print      "love.graphics.print"           'call 3
+  lg/setFont    "love.graphics.setFont"         'call 1
+  lg/newFont    "love.graphics.newFont"         'call 1
+  love/load                "love.load"                     'assign
+  love/update              "love.update"                   'assign
+  love/draw                "love.draw"                     'assign
+  love/keypressed          "love.keypressed"               'assign
+]
+
+; ============================================================
+; Constants
+; ============================================================
+
+SCREEN-W: 800
+SCREEN-H: 600
+PADDLE-W: 12
+PADDLE-H: 80
+PADDLE-SPEED: 400
+BALL-SIZE: 8
+BALL-SPEED: 300
+
+; ============================================================
+; Types
+; ============================================================
+
+Paddle: object [
+  fields [
+    optional [
+      x [integer!] 0
+      y [integer!] 0
+      score [integer!] 0
+      speed [integer!] PADDLE-SPEED
+    ]
+  ]
+]
+
+Ball: object [
+  fields [
+    optional [
+      x [integer!] 0
+      y [integer!] 0
+      dx [integer!] 1
+      dy [integer!] 1
+      speed [integer!] BALL-SPEED
+    ]
+  ]
+]
+
+game: context [
+  paused: true
+  font: none
+]
+
+player: make Paddle [x: 20  y: 260]
+cpu:    make Paddle [x: 768 y: 260]
+ball:   make Ball   [x: 396 y: 296]
+
+; ============================================================
+; Game logic
+; ============================================================
+
+reset-ball: function [] [
+  ball/x: 396
+  ball/y: 296
+  ball/dx: either ball/dx > 0 [-1] [1]
+  ball/dy: either (random/int 2) = 1 [1] [-1]
+  ball/speed: BALL-SPEED
+  game/paused: true
+]
+
+; ============================================================
+; LÖVE callbacks
+; ============================================================
+
+love/load: function [] [
+  lw/setMode SCREEN-W SCREEN-H
+  lw/setTitle "Kintsugi Pong"
+  game/font: lg/newFont 24
+]
+
+love/keypressed: function [key] [
+  match key [
+    ["space"] [game/paused: not game/paused]
+    ["r"] [
+      player/score: 0
+      cpu/score: 0
+      reset-ball
+    ]
+    ["escape"] [le/quit]
+  ]
+]
+
+love/update: function [dt] [
+  unless game/paused [
+
+    ; --- Player movement ---
+    if lk/isDown "w" [
+      player/y: player/y - (player/speed * dt)
+    ]
+    if lk/isDown "s" [
+      player/y: player/y + (player/speed * dt)
+    ]
+
+    ; Clamp player
+    if player/y < 0 [player/y: 0]
+    if player/y > (SCREEN-H - PADDLE-H) [player/y: SCREEN-H - PADDLE-H]
+
+    ; --- CPU AI: follow ball ---
+    cpu-center: cpu/y + (PADDLE-H / 2)
+    if cpu-center < (ball/y - 20) [
+      cpu/y: cpu/y + (cpu/speed * dt * 0.7)
+    ]
+    if cpu-center > (ball/y + 20) [
+      cpu/y: cpu/y - (cpu/speed * dt * 0.7)
+    ]
+    if cpu/y < 0 [cpu/y: 0]
+    if cpu/y > (SCREEN-H - PADDLE-H) [cpu/y: SCREEN-H - PADDLE-H]
+
+    ; --- Ball movement ---
+    ball/x: ball/x + (ball/dx * ball/speed * dt)
+    ball/y: ball/y + (ball/dy * ball/speed * dt)
+
+    ; Top/bottom bounce
+    if ball/y < 0 [
+      ball/y: 0
+      ball/dy: negate ball/dy
+    ]
+    if ball/y > (SCREEN-H - BALL-SIZE) [
+      ball/y: SCREEN-H - BALL-SIZE
+      ball/dy: negate ball/dy
+    ]
+
+    ; Player paddle collision
+    if all? [
+      ball/dx < 0
+      ball/x < (player/x + PADDLE-W)
+      ball/y > (player/y - BALL-SIZE)
+      ball/y < (player/y + PADDLE-H)
+    ] [
+      ball/x: player/x + PADDLE-W
+      ball/dx: negate ball/dx
+      ball/speed: ball/speed + 20
+    ]
+
+    ; CPU paddle collision
+    if all? [
+      ball/dx > 0
+      ball/x > (cpu/x - BALL-SIZE)
+      ball/y > (cpu/y - BALL-SIZE)
+      ball/y < (cpu/y + PADDLE-H)
+    ] [
+      ball/x: cpu/x - BALL-SIZE
+      ball/dx: negate ball/dx
+      ball/speed: ball/speed + 20
+    ]
+
+    ; Score
+    if ball/x < 0 [
+      cpu/score: cpu/score + 1
+      reset-ball
+    ]
+    if ball/x > SCREEN-W [
+      player/score: player/score + 1
+      reset-ball
+    ]
+  ]
+]
+
+love/draw: function [] [
+  ; Center line
+  lg/setColor 0.3 0.3 0.4 1
+  lg/rectangle "fill" 398 0 4 SCREEN-H
+
+  ; Paddles
+  lg/setColor 0.9 0.9 1 1
+  lg/rectangle "fill" player/x player/y PADDLE-W PADDLE-H
+  lg/rectangle "fill" cpu/x cpu/y PADDLE-W PADDLE-H
+
+  ; Ball
+  lg/setColor 1 0.8 0.2 1
+  lg/circle "fill" ball/x ball/y BALL-SIZE
+
+  ; Score
+  lg/setFont game/font
+  lg/setColor 1 1 1 1
+  lg/print to string! player/score 340 20
+  lg/print to string! cpu/score 440 20
+
+  ; Instructions
+  if game/paused [
+    lg/setColor 1 1 1 0.6
+    lg/print "SPACE to start  |  W/S to move  |  R to reset" 200 560
+  ]
+]

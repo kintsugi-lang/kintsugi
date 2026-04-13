@@ -1,0 +1,47 @@
+Kintsugi [name: 'leanlua-stress]
+
+; Stress test for lean-lua phases. Exercises every IIFE-prone construct,
+; helper-prone path, and defensive wrapping case in one file.
+
+; --- either / if as expression ---
+max-of: function [a [integer!] b [integer!]] [
+  either a > b [a] [b]
+]
+
+abs-of: function [n [integer!]] [
+  either n < 0 [negate n] [n]
+]
+
+; --- loop/collect as expression ---
+squares-up-to: function [n [integer!]] [
+  loop/collect [for [i] from 1 to n do [i * i]]
+]
+
+; --- loop/partition with set destructure ---
+split-even-odd: function [blk [block!]] [
+  set [evens odds] loop/partition [for [x] in blk do [(modulo x 2) = 0]]
+  [evens odds]
+]
+
+; --- match as expression ---
+classify: function [n [integer!]] [
+  match n [
+    [0]            ["zero"]
+    [1]            ["one"]
+    [negative?]    ["negative"]
+    default        ["other"]
+  ]
+]
+
+; --- rejoin with mixed types ---
+greeting: function [name [string!] count [integer!]] [
+  rejoin ["Hello, " name "! Count: " count " (doubled: " (count * 2) ")"]
+]
+
+; --- direct use ---
+print max-of 3 7
+print abs-of -5
+print squares-up-to 5
+print split-even-odd [1 2 3 4 5]
+print classify -3
+print greeting "Kintsugi" 42
