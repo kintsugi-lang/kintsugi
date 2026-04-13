@@ -100,6 +100,22 @@ var stmtHandlers = initTable[string, StmtHandler]()
 # Helpers
 # ---------------------------------------------------------------------------
 
+const BuiltinTypePredicates = ["integer?", "float?", "number?", "string?",
+                               "logic?", "none?", "block?"]
+
+proc inlineTypePredicate(name, valueExpr: string): string =
+  ## Inline emission for built-in type predicates in match patterns.
+  case name
+  of "integer?":
+    "type(" & valueExpr & ") == \"number\" and math.floor(" &
+      valueExpr & ") == " & valueExpr
+  of "float?", "number?": "type(" & valueExpr & ") == \"number\""
+  of "string?":           "type(" & valueExpr & ") == \"string\""
+  of "logic?":            "type(" & valueExpr & ") == \"boolean\""
+  of "none?":             valueExpr & " == nil"
+  of "block?":            "type(" & valueExpr & ") == \"table\""
+  else: ""  # unreachable — caller gates on BuiltinTypePredicates
+
 proc pad(e: LuaEmitter): string =
   repeat("  ", e.indent)
 
@@ -1473,6 +1489,8 @@ proc buildPatternMatch(e: var LuaEmitter, pattern: seq[KtgValue], valueExpr: str
     of vkWord:
       if p.wordKind == wkWord and p.wordName == "_":
         discard  # wildcard — always matches
+      elif p.wordKind == wkWord and p.wordName in BuiltinTypePredicates:
+        conditions.add(inlineTypePredicate(p.wordName, valueExpr))
       elif p.wordKind == wkWord:
         bindings.add((luaName(p.wordName), valueExpr))
       elif p.wordKind == wkLitWord:

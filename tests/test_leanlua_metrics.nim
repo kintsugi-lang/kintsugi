@@ -137,3 +137,14 @@ suite "lean-lua metrics":
     for name in ["hello", "pong", "combat", "playdate", "leanlua_stress"]:
       let lua = compileGolden(name)
       check countOccurrences(lua, "and true") == 0
+
+  test "match integer? emits inline type check":
+    let src = "Kintsugi [name: 'match-type-test]\n" &
+              "describe: function [v] [match v [[integer?] [\"int\"] default [\"?\"]]]\n" &
+              "print describe 42\n"
+    let ast = parseSource(src)
+    let eval = setupEvalForTest()
+    let processed = eval.preprocess(ast, forCompilation = true)
+    let lua = emitLua(processed, "")
+    check countOccurrences(lua, "type(") >= 1
+    check countOccurrences(lua, "_is_integer") == 0
