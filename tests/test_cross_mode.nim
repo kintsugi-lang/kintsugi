@@ -422,8 +422,8 @@ suite "cross-mode: string operations":
     crossCheck("""print starts-with? "hello" "he" """)
     crossCheck("""print ends-with? "hello" "lo" """)
 
-  test "substring":
-    crossCheck("""print substring "hello world" 1 5""")
+  test "subset":
+    crossCheck("""print subset "hello world" 1 5""")
 
   test "rejoin":
     crossCheck("""print rejoin ["a" "b" "c"]""")
@@ -569,3 +569,92 @@ suite "cross-mode: macros":
       ]
     """)
     check compiled == @["compiled"]
+
+# ============================================================
+# Attempt dialect
+# ============================================================
+
+suite "cross-mode: attempt":
+  test "source + then chain":
+    crossCheck("""
+      x: attempt [
+        source [10]
+        then [it * 2]
+        then [it + 1]
+      ]
+      print x
+    """)
+
+  test "fallback on error":
+    crossCheck("""
+      x: attempt [
+        source [error 'bad "oops" none]
+        fallback [42]
+      ]
+      print x
+    """)
+
+  test "catch specific error kind":
+    crossCheck("""
+      x: attempt [
+        source [error 'parse "bad input" none]
+        catch 'parse [0]
+        fallback [-1]
+      ]
+      print x
+    """)
+
+  test "catch unrelated kind falls through to fallback":
+    crossCheck("""
+      x: attempt [
+        source [error 'network "offline" none]
+        catch 'parse [0]
+        fallback [-1]
+      ]
+      print x
+    """)
+
+  test "when guard short-circuits to none":
+    crossCheck("""
+      x: attempt [
+        source [5]
+        when [it > 10]
+        then [it * 2]
+        fallback [0]
+      ]
+      print either x = none ["none"] [x]
+    """)
+
+  test "retries eventually succeed":
+    crossCheck("""
+      counter: context [n: 0]
+      get-n: function [] [
+        counter/n: counter/n + 1
+        either counter/n < 3 [error 'transient "not yet" none] [counter/n]
+      ]
+      x: attempt [
+        source [get-n]
+        retries 5
+      ]
+      print x
+    """)
+
+  test "retries exhausted hits fallback":
+    crossCheck("""
+      x: attempt [
+        source [error 'transient "always fails" none]
+        retries 3
+        fallback [99]
+      ]
+      print x
+    """)
+
+  test "then chain without error":
+    crossCheck("""
+      x: attempt [
+        source ["hello"]
+        then [uppercase it]
+        then [length it]
+      ]
+      print x
+    """)

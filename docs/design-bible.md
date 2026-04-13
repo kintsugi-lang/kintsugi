@@ -136,6 +136,21 @@ No implicit type conversions. `to target-type! value` for all conversions. Faile
 
 **Why:** Lua strings are immutable. Since Kintsugi compiles to Lua, mutable strings in the interpreter would create a parity gap — code that works in dev would silently break in compiled output. Immutable strings keep the interpreter and emitter in agreement.
 
+### Sequence Operations Work on Both
+
+Blocks and strings are both sequential. Operations that make semantic sense on both work on both:
+
+- **Access:** `first`, `second`, `last`, `pick`
+- **Length:** `length`, `empty?`
+- **Search:** `find`, `has?`
+- **Transform:** `reverse`, `sort`, `subset`
+- **Iterate:** `for/in` yields elements (block) or characters (string)
+- **Build (immutable forms):** `insert`, `remove` return a new value when applied to strings
+
+Mutation (`append`, in-place `insert`, in-place `remove`) only applies to blocks. For strings, `insert` and `remove` return a new string — matching the `replace`/`rejoin`/`uppercase` pattern.
+
+**Why:** A sequential data structure should support sequential operations. Forcing users to convert strings to blocks just to iterate, slice, or sort is ceremony for no benefit. The mutable/immutable split remains: blocks mutate, strings rebuild.
+
 ---
 
 ## Scope and Binding
@@ -238,7 +253,17 @@ No prototype chains. No diamond problem. Just data flowing into a new context.
 
 `attempt [source [...] then [...] catch ['kind [...]] fallback [...] retries N]` — declarative error handling for sequences of operations that might fail.
 
-**Why:** Game code has many fallible operations (file I/O, network, parsing). Pipeline-style error handling is more readable than nested try/catch.
+**Steps:**
+- `source [expr]` — initial value. Required for compiled use. Inside the pipeline body, `it` is bound to the current value.
+- `then [expr]` — transform step. `it` is the previous result.
+- `when [expr]` — guard. If falsy, the whole pipeline short-circuits to `none`.
+- `catch 'kind [expr]` — handler for a specific error kind. Inside, `error` is bound to the error message string.
+- `fallback [expr]` — last-resort handler for any unhandled error. `error` is bound the same way.
+- `retries N` — re-run the source up to N times on error before running handlers.
+
+**Error model:** `error 'kind "msg" data` raises an error carrying all three fields. Inside `catch` and `fallback` blocks, `error` is bound to the message string (not the error object). Catch handlers dispatch on kind by exact match — `'parse` catches only `'parse`.
+
+**Why:** Game code has many fallible operations (file I/O, network, parsing). Pipeline-style error handling is more readable than nested try/catch. Binding `error` to the message string is the common case — if a handler needs the kind or data, `try [expr]` returns a richer value context instead.
 
 ---
 

@@ -67,23 +67,23 @@ make-healer: function [n [string!]] [
 ; Combat helpers
 ; ============================================================
 
-alive?: function [unit] [unit/hp > 0]
+alive?: function [unit [unit!]] [unit/hp > 0]
 
-clamp: function [val lo hi] [
+clamp: function [val [integer!] lo [integer!] hi [integer!] return: [integer!]] [
   if val < lo [return lo]
   if val > hi [return hi]
   val
 ]
 
 ; Calculate damage: attacker power - defender defense, min 1
-calc-damage: function [attacker ability defender] [
+calc-damage: function [attacker [unit!] ability [ability!] defender [unit!] return: [integer!]] [
   dmg: attacker/attack + ability/power - defender/defense
   if dmg < 1 [dmg: 1]
   dmg
 ]
 
 ; Apply an ability to a target
-apply-ability: function [user ability target] [
+apply-ability: function [user [unit!] ability [ability!] target [unit!]] [
   match ability/kind [
     ["heal"] [
       amount: clamp ability/power 0 (target/max-hp - target/hp)
@@ -118,23 +118,23 @@ apply-ability: function [user ability target] [
 ]
 
 ; Pick a random living enemy
-pick-enemy: function [enemies] [
+pick-enemy: function [enemies [block!]] [
   living: loop/collect [for [e] in enemies when [alive? e] do [e]]
   if empty? living [return none]
-  pick living ((random/int length living) + 1)
+  pick living (random/int length living)
 ]
 
 ; Pick a wounded ally (for healer AI)
-pick-wounded: function [allies] [
+pick-wounded: function [allies [block!]] [
   wounded: loop/collect [
     for [a] in allies when [all? [alive? a  a/hp < a/max-hp]] do [a]
   ]
   if empty? wounded [return none]
-  pick wounded ((random/int length wounded) + 1)
+  pick wounded (random/int length wounded)
 ]
 
 ; AI: healer heals wounded allies, others attack random enemy
-pick-action: function [unit allies enemies] [
+pick-action: function [unit [unit!] allies [block!] enemies [block!]] [
   ; If unit has heal and there's a wounded ally, heal
   if has? unit/abilities "heal" [
     w: pick-wounded allies
@@ -143,7 +143,7 @@ pick-action: function [unit allies enemies] [
     ]
   ]
   ; Otherwise pick a random ability and a random enemy
-  ability-name: pick unit/abilities ((random/int length unit/abilities) + 1)
+  ability-name: pick unit/abilities (random/int length unit/abilities)
   target: pick-enemy enemies
   if target = none [return none]
 
@@ -159,12 +159,12 @@ pick-action: function [unit allies enemies] [
 
 ; Sort units by speed for turn order (sort/by uses a key function)
 ; sort/by is ascending, so negate speed for descending
-turn-order: function [all-units] [
-  sort/by all-units function [u] [negate u/speed]
+turn-order: function [all-units [block!]] [
+  sort/by all-units function [u [unit!]] [negate u/speed]
 ]
 
 ; Count living units
-count-alive: function [team] [
+count-alive: function [team [block!] return: [integer!]] [
   n: 0
   loop [for [u] in team do [
     if alive? u [n: n + 1]
@@ -188,7 +188,7 @@ all-units: reduce [
 ; Battle loop
 ; ============================================================
 
-name-of: function [unit] [unit/name]
+name-of: function [unit [unit!] return: [string!]] [unit/name]
 
 print-team: function [label [string!] team [block!]] [
   print rejoin [

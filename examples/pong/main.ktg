@@ -88,7 +88,7 @@ reset-ball: function [] [
   ball/x: 396
   ball/y: 296
   ball/dx: either ball/dx > 0 [-1] [1]
-  ball/dy: either (random/int 2) = 0 [1] [-1]
+  ball/dy: either (random/int 2) = 1 [1] [-1]
   ball/speed: BALL-SPEED
   game/paused: true
 ]

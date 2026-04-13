@@ -54,7 +54,7 @@ proc registerMathNatives*(eval: Evaluator) =
   )
 
   ctx.native("round", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let eval = cast[Evaluator](ep)
+    let eval = getEvaluator(ep)
     let v = case args[0].kind
       of vkFloat: args[0].floatVal
       of vkInteger: float64(args[0].intVal)
@@ -179,7 +179,7 @@ proc registerMathNatives*(eval: Evaluator) =
         RefinementSpec(name: "seed", params: @[])
       ],
       fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-        let eval = cast[Evaluator](ep)
+        let eval = getEvaluator(ep)
 
         if "seed" in eval.currentRefinements:
           let s = case args[0].kind
@@ -207,7 +207,7 @@ proc registerMathNatives*(eval: Evaluator) =
           let n = case args[0].kind
             of vkInteger: int(args[0].intVal)
             else: raise KtgError(kind: "type", msg: "random/int expects integer!", data: nil)
-          return ktgInt(int64(rand(n - 1)))
+          return ktgInt(int64(rand(n - 1) + 1))
 
         let n = numArg(args[0], "random")
         ktgFloat(rand(n))

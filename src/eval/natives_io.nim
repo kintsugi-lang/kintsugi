@@ -1,4 +1,6 @@
-import std/[strutils, tables, sets, os, times, algorithm]
+import std/[strutils, tables, sets, times, algorithm]
+when not defined(js):
+  import std/os
 import ../core/types
 import ../parse/parser
 import dialect, evaluator
@@ -28,89 +30,93 @@ proc registerIoNatives*(eval: Evaluator) =
     ktgString($chr(code))
   )
 
-  # --- read: unified input primitive ---
-  block:
-    let readNative = KtgNative(
-      name: "read",
-      arity: 1,
-      refinements: @[
-        RefinementSpec(name: "dir", params: @[]),
-        RefinementSpec(name: "lines", params: @[]),
-        RefinementSpec(name: "stdin", params: @[])
-      ],
-      fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-        let eval = cast[Evaluator](ep)
+  when not defined(js):
+    # --- read: unified input primitive ---
+    block:
+      let readNative = KtgNative(
+        name: "read",
+        arity: 1,
+        refinements: @[
+          RefinementSpec(name: "dir", params: @[]),
+          RefinementSpec(name: "lines", params: @[]),
+          RefinementSpec(name: "stdin", params: @[])
+        ],
+        fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
+          let eval = getEvaluator(ep)
 
-        if "stdin" in eval.currentRefinements:
-          let prompt = $args[0]
-          if prompt.len > 0 and prompt != "none":
-            stdout.write(prompt)
-            stdout.flushFile()
-          var line: string
-          if stdin.readLine(line):
-            return ktgString(line)
-          return ktgNone()
+          if "stdin" in eval.currentRefinements:
+            let prompt = $args[0]
+            if prompt.len > 0 and prompt != "none":
+              stdout.write(prompt)
+              stdout.flushFile()
+            var line: string
+            if stdin.readLine(line):
+              return ktgString(line)
+            return ktgNone()
 
-        let path = case args[0].kind
-          of vkString: args[0].strVal
-          of vkFile: args[0].filePath
-          else:
-            raise KtgError(kind: "type", msg: "read expects string! or file!", data: nil)
+          let path = case args[0].kind
+            of vkString: args[0].strVal
+            of vkFile: args[0].filePath
+            else:
+              raise KtgError(kind: "type", msg: "read expects string! or file!", data: nil)
 
-        if "dir" in eval.currentRefinements:
-          if not dirExists(path):
-            raise KtgError(kind: "io", msg: "directory not found: " & path, data: args[0])
-          var entries: seq[KtgValue] = @[]
-          for kind, entry in walkDir(path):
-            entries.add(ktgString(lastPathPart(entry)))
-          entries.sort(proc(a, b: KtgValue): int = cmp(a.strVal, b.strVal))
-          return ktgBlock(entries)
+          if "dir" in eval.currentRefinements:
+            if not dirExists(path):
+              raise KtgError(kind: "io", msg: "directory not found: " & path, data: args[0])
+            var entries: seq[KtgValue] = @[]
+            for kind, entry in walkDir(path):
+              entries.add(ktgString(lastPathPart(entry)))
+            entries.sort(proc(a, b: KtgValue): int = cmp(a.strVal, b.strVal))
+            return ktgBlock(entries)
 
-        if "lines" in eval.currentRefinements:
+          if "lines" in eval.currentRefinements:
+            if not fileExists(path):
+              raise KtgError(kind: "io", msg: "file not found: " & path, data: args[0])
+            let content = readFile(path)
+            var lines: seq[KtgValue] = @[]
+            for line in content.splitLines:
+              lines.add(ktgString(line))
+            return ktgBlock(lines)
+
           if not fileExists(path):
             raise KtgError(kind: "io", msg: "file not found: " & path, data: args[0])
-          let content = readFile(path)
-          var lines: seq[KtgValue] = @[]
-          for line in content.splitLines:
-            lines.add(ktgString(line))
-          return ktgBlock(lines)
+          ktgString(readFile(path))
+      )
+      ctx.set("read", KtgValue(kind: vkNative, nativeFn: readNative, line: 0))
 
-        if not fileExists(path):
-          raise KtgError(kind: "io", msg: "file not found: " & path, data: args[0])
-        ktgString(readFile(path))
+  when not defined(js):
+    # --- write ---
+    ctx.native("write", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+      let path = case args[0].kind
+        of vkString: args[0].strVal
+        of vkFile: args[0].filePath
+        else:
+          raise KtgError(kind: "type", msg: "write expects string! or file!", data: nil)
+      if args[1].kind != vkString:
+        raise KtgError(kind: "type", msg: "write expects string! as content", data: nil)
+      writeFile(path, args[1].strVal)
+      ktgNone()
     )
-    ctx.set("read", KtgValue(kind: vkNative, nativeFn: readNative, line: 0))
 
-  # --- write ---
-  ctx.native("write", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let path = case args[0].kind
-      of vkString: args[0].strVal
-      of vkFile: args[0].filePath
-      else:
-        raise KtgError(kind: "type", msg: "write expects string! or file!", data: nil)
-    if args[1].kind != vkString:
-      raise KtgError(kind: "type", msg: "write expects string! as content", data: nil)
-    writeFile(path, args[1].strVal)
-    ktgNone()
-  )
+  when not defined(js):
+    ctx.native("dir?", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+      let path = case args[0].kind
+        of vkString: args[0].strVal
+        of vkFile: args[0].filePath
+        else:
+          raise KtgError(kind: "type", msg: "dir? expects string! or file!", data: nil)
+      ktgLogic(dirExists(path))
+    )
 
-  ctx.native("dir?", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let path = case args[0].kind
-      of vkString: args[0].strVal
-      of vkFile: args[0].filePath
-      else:
-        raise KtgError(kind: "type", msg: "dir? expects string! or file!", data: nil)
-    ktgLogic(dirExists(path))
-  )
-
-  ctx.native("file?", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let path = case args[0].kind
-      of vkString: args[0].strVal
-      of vkFile: args[0].filePath
-      else:
-        raise KtgError(kind: "type", msg: "file? expects string! or file!", data: nil)
-    ktgLogic(fileExists(path))
-  )
+  when not defined(js):
+    ctx.native("file?", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+      let path = case args[0].kind
+        of vkString: args[0].strVal
+        of vkFile: args[0].filePath
+        else:
+          raise KtgError(kind: "type", msg: "file? expects string! or file!", data: nil)
+      ktgLogic(fileExists(path))
+    )
 
   ctx.native("exit", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     let code = case args[0].kind
@@ -198,179 +204,182 @@ proc registerIoNatives*(eval: Evaluator) =
       ), line: 0))
     ctx.set("date", KtgValue(kind: vkContext, ctx: dateCtx, line: 0))
 
-  # --- Load ---
+  when not defined(js):
+    # --- Load ---
 
-  block:
-    let loadNative = KtgNative(
-      name: "load",
-      arity: 1,
-      refinements: @[
-        RefinementSpec(name: "eval", params: @[]),
-        RefinementSpec(name: "header", params: @[]),
-        RefinementSpec(name: "freeze", params: @[])
-      ],
-      fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-        let eval = cast[Evaluator](ep)
-        let doFreeze = "freeze" in eval.currentRefinements
-        let path = case args[0].kind
-          of vkString: args[0].strVal
-          of vkFile: args[0].filePath
-          else: raise KtgError(kind: "type", msg: "load expects string! or file!", data: nil)
+    block:
+      let loadNative = KtgNative(
+        name: "load",
+        arity: 1,
+        refinements: @[
+          RefinementSpec(name: "eval", params: @[]),
+          RefinementSpec(name: "header", params: @[]),
+          RefinementSpec(name: "freeze", params: @[])
+        ],
+        fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
+          let eval = getEvaluator(ep)
+          let doFreeze = "freeze" in eval.currentRefinements
+          let path = case args[0].kind
+            of vkString: args[0].strVal
+            of vkFile: args[0].filePath
+            else: raise KtgError(kind: "type", msg: "load expects string! or file!", data: nil)
 
-        let content = readFile(path)
-        let ast = parseSource(content)
+          let content = readFile(path)
+          let ast = parseSource(content)
 
-        if "header" in eval.currentRefinements:
-          if ast.len >= 2 and ast[0].kind == vkWord and ast[0].wordKind == wkWord and
-             ast[0].wordName == "Kintsugi" and ast[1].kind == vkBlock:
-            return ast[1]
-          return ktgNone()
+          if "header" in eval.currentRefinements:
+            if ast.len >= 2 and ast[0].kind == vkWord and ast[0].wordKind == wkWord and
+               ast[0].wordName == "Kintsugi" and ast[1].kind == vkBlock:
+              return ast[1]
+            return ktgNone()
 
-        if "eval" in eval.currentRefinements:
-          let isoCtx = newContext(eval.global)
-          isoCtx.localOnly = true
-          discard eval.evalBlock(ast, isoCtx)
+          if "eval" in eval.currentRefinements:
+            let isoCtx = newContext(eval.global)
+            isoCtx.localOnly = true
+            discard eval.evalBlock(ast, isoCtx)
+            if doFreeze:
+              return KtgValue(kind: vkObject,
+                obj: newObject(isoCtx.entries), line: 0)
+            return KtgValue(kind: vkContext, ctx: isoCtx, line: 0)
+
           if doFreeze:
+            let isoCtx = newContext(eval.global)
+            isoCtx.localOnly = true
+            discard eval.evalBlock(ast, isoCtx)
             return KtgValue(kind: vkObject,
               obj: newObject(isoCtx.entries), line: 0)
-          return KtgValue(kind: vkContext, ctx: isoCtx, line: 0)
 
-        if doFreeze:
-          let isoCtx = newContext(eval.global)
-          isoCtx.localOnly = true
-          discard eval.evalBlock(ast, isoCtx)
-          return KtgValue(kind: vkObject,
-            obj: newObject(isoCtx.entries), line: 0)
+          return ktgBlock(ast)
+      )
+      ctx.set("load", KtgValue(kind: vkNative, nativeFn: loadNative, line: 0))
 
-        return ktgBlock(ast)
+  when not defined(js):
+    # --- Save ---
+
+    ctx.native("save", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+      let path = case args[0].kind
+        of vkString: args[0].strVal
+        of vkFile: args[0].filePath
+        else: raise KtgError(kind: "type", msg: "save expects string! or file! as first arg", data: nil)
+
+      proc serialize(val: KtgValue): string =
+        case val.kind
+        of vkString:
+          "\"" & val.strVal.replace("\\", "\\\\").replace("\"", "\\\"") & "\""
+        of vkBlock:
+          var s = "["
+          for i, v in val.blockVals:
+            if i > 0: s &= " "
+            s &= serialize(v)
+          s & "]"
+        of vkContext:
+          var s = ""
+          var first = true
+          for key, v in val.ctx.entries:
+            if v.kind in {vkFunction, vkNative}: continue
+            if key == "self": continue
+            if not first: s &= "\n"
+            s &= key & ": " & serialize(v)
+            first = false
+          s
+        of vkObject:
+          var s = ""
+          var first = true
+          for key, v in val.obj.entries:
+            if v.kind in {vkFunction, vkNative}: continue
+            if not first: s &= "\n"
+            s &= key & ": " & serialize(v)
+            first = false
+          s
+        of vkMap:
+          var s = "make map! ["
+          var first = true
+          for key, v in val.mapEntries:
+            if not first: s &= " "
+            s &= key & ": " & serialize(v)
+            first = false
+          s & "]"
+        of vkFunction, vkNative:
+          ""
+        else:
+          $val
+
+      writeFile(path, serialize(args[1]))
+      ktgNone()
     )
-    ctx.set("load", KtgValue(kind: vkNative, nativeFn: loadNative, line: 0))
 
-  # --- Save ---
+  when not defined(js):
+    # --- Import (module loading) ---
 
-  ctx.native("save", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let path = case args[0].kind
-      of vkString: args[0].strVal
-      of vkFile: args[0].filePath
-      else: raise KtgError(kind: "type", msg: "save expects string! or file! as first arg", data: nil)
+    block:
+      let importNative = KtgNative(
+        name: "import",
+        arity: 1,
+        refinements: @[RefinementSpec(name: "fresh", params: @[])],
+        fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
+          let eval = getEvaluator(ep)
+          let rawPath = case args[0].kind
+            of vkString: args[0].strVal
+            of vkFile: args[0].filePath
+            else: raise KtgError(kind: "type", msg: "import expects string! or file!", data: nil)
 
-    proc serialize(val: KtgValue): string =
-      case val.kind
-      of vkString:
-        "\"" & val.strVal.replace("\\", "\\\\").replace("\"", "\\\"") & "\""
-      of vkBlock:
-        var s = "["
-        for i, v in val.blockVals:
-          if i > 0: s &= " "
-          s &= serialize(v)
-        s & "]"
-      of vkContext:
-        var s = ""
-        var first = true
-        for key, v in val.ctx.entries:
-          if v.kind in {vkFunction, vkNative}: continue
-          if key == "self": continue
-          if not first: s &= "\n"
-          s &= key & ": " & serialize(v)
-          first = false
-        s
-      of vkObject:
-        var s = ""
-        var first = true
-        for key, v in val.obj.entries:
-          if v.kind in {vkFunction, vkNative}: continue
-          if not first: s &= "\n"
-          s &= key & ": " & serialize(v)
-          first = false
-        s
-      of vkMap:
-        var s = "make map! ["
-        var first = true
-        for key, v in val.mapEntries:
-          if not first: s &= " "
-          s &= key & ": " & serialize(v)
-          first = false
-        s & "]"
-      of vkFunction, vkNative:
-        ""
-      else:
-        $val
+          let resolvedPath = if rawPath.isAbsolute: rawPath else: getCurrentDir() / rawPath
 
-    writeFile(path, serialize(args[1]))
-    ktgNone()
-  )
+          if "fresh" notin eval.currentRefinements and resolvedPath in eval.moduleCache:
+            return eval.moduleCache[resolvedPath]
 
-  # --- Import (module loading) ---
+          if resolvedPath in eval.moduleLoading:
+            raise KtgError(kind: "load",
+              msg: "circular dependency detected: " & resolvedPath,
+              data: nil)
 
-  block:
-    let importNative = KtgNative(
-      name: "import",
-      arity: 1,
-      refinements: @[RefinementSpec(name: "fresh", params: @[])],
-      fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-        let eval = cast[Evaluator](ep)
-        let rawPath = case args[0].kind
-          of vkString: args[0].strVal
-          of vkFile: args[0].filePath
-          else: raise KtgError(kind: "type", msg: "import expects string! or file!", data: nil)
+          eval.moduleLoading.incl(resolvedPath)
 
-        let resolvedPath = if rawPath.isAbsolute: rawPath else: getCurrentDir() / rawPath
+          try:
+            let content = readFile(resolvedPath)
+            var ast = parseSource(content)
 
-        if "fresh" notin eval.currentRefinements and resolvedPath in eval.moduleCache:
-          return eval.moduleCache[resolvedPath]
+            if ast.len >= 2 and ast[0].kind == vkWord and ast[0].wordKind == wkWord and
+               ast[0].wordName == "Kintsugi" and ast[1].kind == vkBlock:
+              ast = ast[2..^1]
 
-        if resolvedPath in eval.moduleLoading:
-          raise KtgError(kind: "load",
-            msg: "circular dependency detected: " & resolvedPath,
-            data: nil)
+            let isoCtx = newContext(eval.global)
+            isoCtx.localOnly = true
+            discard eval.evalBlock(ast, isoCtx)
 
-        eval.moduleLoading.incl(resolvedPath)
-
-        try:
-          let content = readFile(resolvedPath)
-          var ast = parseSource(content)
-
-          if ast.len >= 2 and ast[0].kind == vkWord and ast[0].wordKind == wkWord and
-             ast[0].wordName == "Kintsugi" and ast[1].kind == vkBlock:
-            ast = ast[2..^1]
-
-          let isoCtx = newContext(eval.global)
-          isoCtx.localOnly = true
-          discard eval.evalBlock(ast, isoCtx)
-
-          var resultCtx: KtgContext
-          if isoCtx.has("__exports"):
-            let exportsVal = isoCtx.get("__exports")
-            if exportsVal.kind == vkBlock:
-              resultCtx = newContext()
-              for v in exportsVal.blockVals:
-                if v.kind == vkWord:
-                  let name = v.wordName
-                  if isoCtx.has(name):
-                    resultCtx.set(name, isoCtx.get(name))
+            var resultCtx: KtgContext
+            if isoCtx.has("__exports"):
+              let exportsVal = isoCtx.get("__exports")
+              if exportsVal.kind == vkBlock:
+                resultCtx = newContext()
+                for v in exportsVal.blockVals:
+                  if v.kind == vkWord:
+                    let name = v.wordName
+                    if isoCtx.has(name):
+                      resultCtx.set(name, isoCtx.get(name))
+              else:
+                resultCtx = isoCtx
             else:
               resultCtx = isoCtx
-          else:
-            resultCtx = isoCtx
 
-          let res = KtgValue(kind: vkContext, ctx: resultCtx, line: 0)
+            let res = KtgValue(kind: vkContext, ctx: resultCtx, line: 0)
 
-          eval.moduleLoading.excl(resolvedPath)
-          eval.moduleCache[resolvedPath] = res
-          res
-        except KtgError:
-          eval.moduleLoading.excl(resolvedPath)
-          raise
-        except CatchableError:
-          eval.moduleLoading.excl(resolvedPath)
-          raise
-    )
-    ctx.set("import", KtgValue(kind: vkNative, nativeFn: importNative, line: 0))
+            eval.moduleLoading.excl(resolvedPath)
+            eval.moduleCache[resolvedPath] = res
+            res
+          except KtgError:
+            eval.moduleLoading.excl(resolvedPath)
+            raise
+          except CatchableError:
+            eval.moduleLoading.excl(resolvedPath)
+            raise
+      )
+      ctx.set("import", KtgValue(kind: vkNative, nativeFn: importNative, line: 0))
 
   # --- Exports ---
 
   ctx.native("exports", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let eval = cast[Evaluator](ep)
+    let eval = getEvaluator(ep)
     if args[0].kind != vkBlock:
       raise KtgError(kind: "type", msg: "exports expects block!", data: nil)
     eval.currentCtx.set("__exports", args[0])
@@ -380,7 +389,7 @@ proc registerIoNatives*(eval: Evaluator) =
   # --- Bindings (compile-time dialect for foreign API declarations) ---
 
   ctx.native("bindings", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let eval = cast[Evaluator](ep)
+    let eval = getEvaluator(ep)
     if args[0].kind != vkBlock:
       raise KtgError(kind: "type", msg: "bindings expects block!", data: nil)
 
@@ -452,8 +461,9 @@ proc registerIoNatives*(eval: Evaluator) =
   # --- system: platform, env ---
   block:
     let envCtx = newContext()
-    for key, value in envPairs():
-      envCtx.set(key, ktgString(value))
+    when not defined(js):
+      for key, value in envPairs():
+        envCtx.set(key, ktgString(value))
 
     let systemCtx = newContext()
     systemCtx.set("platform", ktgWord("script", wkLitWord))

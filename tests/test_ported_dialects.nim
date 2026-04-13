@@ -56,6 +56,15 @@ suite "Loop tests":
     check $eval.evalString("evens") == "[2 4 6 8]"
     check $eval.evalString("odds") == "[1 3 5 7]"
 
+  test "for-in iterates string characters":
+    let eval = makeEval()
+    discard eval.evalString("state: context [chars: []] loop [for [c] in \"abc\" do [append state/chars c]]")
+    check $eval.evalString("state/chars") == "[a b c]"
+
+  test "loop/collect over string":
+    let eval = makeEval()
+    check $eval.evalString("loop/collect [for [c] in \"abc\" do [c]]") == "[a b c]"
+
 # ============================================================
 # MATCH TESTS (from match.test.ts)
 # ============================================================

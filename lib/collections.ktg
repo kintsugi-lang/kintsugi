@@ -143,7 +143,7 @@ choice: function [items [block!] /weighted] [
     ]]
     return first last items
   ]
-  pick items ((random/int length items) + 1)
+  pick items (random/int length items)
 ]
 
 ; --- Repeat ---

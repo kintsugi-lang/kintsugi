@@ -19,7 +19,7 @@ let nativeArities*: seq[tuple[name: string, arity: int]] = @[
   # String ops
   ("join", 2), ("rejoin", 1), ("trim", 1),
   ("uppercase", 1), ("lowercase", 1),
-  ("split", 2), ("replace", 3), ("substring", 3),
+  ("split", 2), ("replace", 3), ("subset", 3),
   ("starts-with?", 2), ("ends-with?", 2),
   ("byte", 1), ("char", 1),
   # Math

@@ -43,22 +43,59 @@ suite "String as series — first/second/last":
     expect KtgError:
       discard eval.evalString("""first "" """)
 
-suite "substring":
-  test "basic substring":
+suite "subset":
+  test "basic subset":
     let eval = makeEval()
-    check $eval.evalString("""substring "hello world" 1 5""") == "hello"
+    check $eval.evalString("""subset "hello world" 1 5""") == "hello"
 
-  test "substring from middle":
+  test "subset from middle":
     let eval = makeEval()
-    check $eval.evalString("""substring "hello world" 7 5""") == "world"
+    check $eval.evalString("""subset "hello world" 7 5""") == "world"
 
-  test "substring past end truncates":
+  test "subset past end truncates":
     let eval = makeEval()
-    check $eval.evalString("""substring "hi" 1 100""") == "hi"
+    check $eval.evalString("""subset "hi" 1 100""") == "hi"
 
-  test "substring single char":
+  test "subset single char":
     let eval = makeEval()
-    check $eval.evalString("""substring "abc" 2 1""") == "b"
+    check $eval.evalString("""subset "abc" 2 1""") == "b"
+
+  test "subset on block":
+    let eval = makeEval()
+    check $eval.evalString("subset [1 2 3 4 5] 2 3") == "[2 3 4]"
+
+  test "subset block from start":
+    let eval = makeEval()
+    check $eval.evalString("subset [10 20 30 40] 1 2") == "[10 20]"
+
+  test "subset block past end truncates":
+    let eval = makeEval()
+    check $eval.evalString("subset [1 2 3] 2 100") == "[2 3]"
+
+suite "insert/remove on strings":
+  test "insert string at position":
+    let eval = makeEval()
+    check $eval.evalString("""insert "helo" "l" 4""") == "hello"
+
+  test "insert at start":
+    let eval = makeEval()
+    check $eval.evalString("""insert "world" "hello " 1""") == "hello world"
+
+  test "insert at end":
+    let eval = makeEval()
+    check $eval.evalString("""insert "hell" "o" 5""") == "hello"
+
+  test "remove char from string":
+    let eval = makeEval()
+    check $eval.evalString("""remove "hello" 2""") == "hllo"
+
+  test "remove first char":
+    let eval = makeEval()
+    check $eval.evalString("""remove "hello" 1""") == "ello"
+
+  test "remove last char":
+    let eval = makeEval()
+    check $eval.evalString("""remove "hello" 5""") == "hell"
 
 suite "read / write":
   let testFile = getTempDir() / "kintsugi_test_rw.txt"

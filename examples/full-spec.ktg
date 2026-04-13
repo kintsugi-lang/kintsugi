@@ -401,6 +401,13 @@ loop [
   do [print item]
 ]
 
+; --- Iterating strings ---
+; for/in works on strings too, yielding one character per iteration.
+loop [for [c] in "abc" do [print c]]
+; a
+; b
+; c
+
 ; --- Counting ---
 
 loop [for [n] from 1 to 5 do [print n]]
@@ -554,6 +561,13 @@ sort nums
 print first nums                        ; 1
 print last nums                         ; 9
 
+; Sort also works on strings (returns a new sorted string)
+print sort "hello"                      ; ehllo
+
+; insert and remove on strings return new strings (strings are immutable)
+print insert "helo" "l" 4               ; hello
+print remove "hello" 2                  ; hllo
+
 ; Multiple assignment (block destructuring)
 set [a b c] [1 2 3]
 print a                                 ; 1
@@ -688,8 +702,9 @@ spec-blk: [1 2]
 append spec-blk [3 4]                   ; splice: [1 2 3 4]
 append/only spec-blk [5 6]             ; single element: [1 2 3 4 [5 6]]
 
-; substring extracts a range (1-based start, length)
-print substring "hello world" 7 5       ; world
+; subset extracts a range (1-based start, length). Works on strings and blocks.
+print subset "hello world" 7 5          ; world
+probe subset [10 20 30 40 50] 2 3       ; [20 30 40]
 
 ; --- String predicates ---
 
@@ -917,7 +932,7 @@ print to-radians 180                    ; 3.141592653589793
 ; --- Random ---
 random/seed 42
 print random 1.0                        ; (float in [0, 1))
-print random/int 100                    ; (integer in [0, 100))
+print random/int 100                    ; (integer in [1, 100])
 print random/int/range 1 6              ; (integer in [1, 6])
 print random/choice [10 20 30]          ; (one of 10, 20, 30)
 
@@ -1025,6 +1040,14 @@ result: attempt [
   fallback ["fallback"]
 ]
 print result                            ; caught
+
+; Inside catch/fallback, 'error is bound to the message string
+result: attempt [
+  source [error 'parse "bad input" none]
+  catch 'parse [rejoin ["parse: " error]]
+  fallback [rejoin ["other: " error]]
+]
+print result                            ; parse: bad input
 
 ; Retries — retry source N times before giving up
 retry-count: 0

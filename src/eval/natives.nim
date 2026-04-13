@@ -79,12 +79,15 @@ proc registerNatives*(eval: Evaluator) =
       arity: 1,
       refinements: @[RefinementSpec(name: "no-newline", params: @[])],
       fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-        let eval = cast[Evaluator](ep)
+        let eval = getEvaluator(ep)
         let s = $args[0]
         eval.output.add(s)
         if "no-newline" in eval.currentRefinements:
-          stdout.write(s)
-          stdout.flushFile()
+          when not defined(js):
+            stdout.write(s)
+            stdout.flushFile()
+          else:
+            echo s
         else:
           echo s
         ktgNone()
@@ -92,7 +95,7 @@ proc registerNatives*(eval: Evaluator) =
     ctx.set("print", KtgValue(kind: vkNative, nativeFn: printNative, line: 0))
 
   ctx.native("probe", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let eval = cast[Evaluator](ep)
+    let eval = getEvaluator(ep)
     let s = $args[0]
     eval.output.add(s)
     echo s
@@ -102,7 +105,7 @@ proc registerNatives*(eval: Evaluator) =
   # --- Control flow ---
 
   ctx.native("if", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let eval = cast[Evaluator](ep)
+    let eval = getEvaluator(ep)
     if isTruthy(args[0]):
       if args[1].kind == vkBlock:
         return eval.evalBlock(args[1].blockVals, eval.currentCtx)
@@ -110,7 +113,7 @@ proc registerNatives*(eval: Evaluator) =
   )
 
   ctx.native("either", 3, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let eval = cast[Evaluator](ep)
+    let eval = getEvaluator(ep)
     if isTruthy(args[0]):
       if args[1].kind == vkBlock:
         return eval.evalBlock(args[1].blockVals, eval.currentCtx)
@@ -122,7 +125,7 @@ proc registerNatives*(eval: Evaluator) =
   )
 
   ctx.native("unless", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let eval = cast[Evaluator](ep)
+    let eval = getEvaluator(ep)
     if not isTruthy(args[0]):
       if args[1].kind == vkBlock:
         return eval.evalBlock(args[1].blockVals, eval.currentCtx)
@@ -176,7 +179,7 @@ proc registerNatives*(eval: Evaluator) =
     "lit-word!", "meta-word!", "op!"]
 
   ctx.native("is?", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let eval = cast[Evaluator](ep)
+    let eval = getEvaluator(ep)
     let typeArg = args[0]
     let value = args[1]
 
@@ -299,7 +302,7 @@ proc registerNatives*(eval: Evaluator) =
       arity: 2,
       refinements: @[RefinementSpec(name: "only", params: @[])],
       fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-        let eval = cast[Evaluator](ep)
+        let eval = getEvaluator(ep)
         let only = "only" in eval.currentRefinements
         if args[0].kind == vkBlock:
           if args[1].kind == vkBlock and not only:
@@ -322,7 +325,7 @@ proc registerNatives*(eval: Evaluator) =
       arity: 1,
       refinements: @[RefinementSpec(name: "deep", params: @[])],
       fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-        let eval = cast[Evaluator](ep)
+        let eval = getEvaluator(ep)
         let isDeep = "deep" in eval.currentRefinements
         case args[0].kind
         of vkBlock:
@@ -350,7 +353,15 @@ proc registerNatives*(eval: Evaluator) =
         raise KtgError(kind: "range", msg: "insert index out of range", data: args[2])
       args[0].blockVals.insert(args[1], idx)
       return args[0]
-    raise KtgError(kind: "type", msg: "insert expects block!, value, integer!", data: nil)
+    # String insert: immutable, returns new string
+    if args[0].kind == vkString and args[1].kind == vkString and args[2].kind == vkInteger:
+      let s = args[0].strVal
+      let ins = args[1].strVal
+      let idx = int(args[2].intVal) - 1
+      if idx < 0 or idx > s.len:
+        raise KtgError(kind: "range", msg: "insert index out of range", data: args[2])
+      return ktgString(s[0 ..< idx] & ins & s[idx .. ^1])
+    raise KtgError(kind: "type", msg: "insert expects block!/string!, value, integer!", data: nil)
   )
 
   ctx.native("remove", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
@@ -360,7 +371,14 @@ proc registerNatives*(eval: Evaluator) =
         raise KtgError(kind: "range", msg: "remove index out of range", data: args[1])
       args[0].blockVals.delete(idx)
       return args[0]
-    raise KtgError(kind: "type", msg: "remove expects block! and integer!", data: nil)
+    # String remove: immutable, returns new string
+    if args[0].kind == vkString and args[1].kind == vkInteger:
+      let s = args[0].strVal
+      let idx = int(args[1].intVal) - 1
+      if idx < 0 or idx >= s.len:
+        raise KtgError(kind: "range", msg: "remove index out of range", data: args[1])
+      return ktgString(s[0 ..< idx] & s[idx + 1 .. ^1])
+    raise KtgError(kind: "type", msg: "remove expects block!/string! and integer!", data: nil)
   )
 
   ctx.native("select", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
@@ -418,7 +436,7 @@ proc registerNatives*(eval: Evaluator) =
       arity: 2,
       refinements: @[RefinementSpec(name: "where", params: @[])],
       fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-        let eval = cast[Evaluator](ep)
+        let eval = getEvaluator(ep)
         if "where" in eval.currentRefinements:
           # find/where block predicate — first element matching predicate
           if args[0].kind != vkBlock:
@@ -476,7 +494,7 @@ proc registerNatives*(eval: Evaluator) =
       arity: 1,
       refinements: @[RefinementSpec(name: "with", params: @[ParamSpec(name: "delim")])],
       fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-        let eval = cast[Evaluator](ep)
+        let eval = getEvaluator(ep)
         let delim = if "with" in eval.currentRefinements and args.len > 1:
                       $args[1]
                     else: ""
@@ -535,7 +553,7 @@ proc registerNatives*(eval: Evaluator) =
       arity: 3,
       refinements: @[RefinementSpec(name: "right", params: @[])],
       fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-        let eval = cast[Evaluator](ep)
+        let eval = getEvaluator(ep)
         let isRight = "right" in eval.currentRefinements
         if args[0].kind == vkString:
           let fill = $args[2]
@@ -573,7 +591,7 @@ proc registerNatives*(eval: Evaluator) =
       arity: 3,
       refinements: @[RefinementSpec(name: "first", params: @[])],
       fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-        let eval = cast[Evaluator](ep)
+        let eval = getEvaluator(ep)
         let firstOnly = "first" in eval.currentRefinements
         if args[0].kind == vkString and args[1].kind == vkString and args[2].kind == vkString:
           if firstOnly:
@@ -599,26 +617,35 @@ proc registerNatives*(eval: Evaluator) =
     )
     ctx.set("replace", KtgValue(kind: vkNative, nativeFn: replaceNative, line: 0))
 
-  ctx.native("substring", 3, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    if args[0].kind != vkString:
-      raise KtgError(kind: "type", msg: "substring expects string!, got " & typeName(args[0]), data: nil)
+  ctx.native("subset", 3, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    if args[0].kind notin {vkString, vkBlock}:
+      raise KtgError(kind: "type", msg: "subset expects string! or block!, got " & typeName(args[0]), data: nil)
     if args[1].kind != vkInteger or args[2].kind != vkInteger:
-      raise KtgError(kind: "type", msg: "substring expects string! integer! integer!", data: nil)
+      raise KtgError(kind: "type", msg: "subset expects series integer! integer!", data: nil)
     let start = int(args[1].intVal) - 1  # 1-based
     let length = int(args[2].intVal)
-    let s = args[0].strVal
     if length < 0:
-      raise KtgError(kind: "range", msg: "substring length must be non-negative", data: args[2])
-    if start < 0 or start >= s.len:
-      raise KtgError(kind: "range", msg: "substring start out of range", data: args[1])
-    let endIdx = min(start + length, s.len)
-    ktgString(s[start ..< endIdx])
+      raise KtgError(kind: "range", msg: "subset length must be non-negative", data: args[2])
+    case args[0].kind
+    of vkString:
+      let s = args[0].strVal
+      if start < 0 or start >= s.len:
+        raise KtgError(kind: "range", msg: "subset start out of range", data: args[1])
+      let endIdx = min(start + length, s.len)
+      ktgString(s[start ..< endIdx])
+    of vkBlock:
+      let b = args[0].blockVals
+      if start < 0 or start >= b.len:
+        raise KtgError(kind: "range", msg: "subset start out of range", data: args[1])
+      let endIdx = min(start + length, b.len)
+      ktgBlock(b[start ..< endIdx])
+    else: ktgNone()
   )
 
   # --- Block evaluation ---
 
   ctx.native("scope", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let eval = cast[Evaluator](ep)
+    let eval = getEvaluator(ep)
     if args[0].kind != vkBlock:
       raise KtgError(kind: "type", msg: "scope expects block!", data: nil)
     let childCtx = eval.currentCtx.child
@@ -627,7 +654,7 @@ proc registerNatives*(eval: Evaluator) =
   )
 
   ctx.native("reduce", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let eval = cast[Evaluator](ep)
+    let eval = getEvaluator(ep)
     if args[0].kind == vkBlock:
       var results: seq[KtgValue] = @[]
       var pos = 0
@@ -640,7 +667,7 @@ proc registerNatives*(eval: Evaluator) =
   )
 
   ctx.native("all?", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let eval = cast[Evaluator](ep)
+    let eval = getEvaluator(ep)
     if args[0].kind == vkBlock:
       var pos = 0
       while pos < args[0].blockVals.len:
@@ -653,7 +680,7 @@ proc registerNatives*(eval: Evaluator) =
   )
 
   ctx.native("any?", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let eval = cast[Evaluator](ep)
+    let eval = getEvaluator(ep)
     if args[0].kind == vkBlock:
       var pos = 0
       while pos < args[0].blockVals.len:
@@ -688,7 +715,7 @@ proc registerNatives*(eval: Evaluator) =
         RefinementSpec(name: "freeze", params: @[])
       ],
       fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-        let eval = cast[Evaluator](ep)
+        let eval = getEvaluator(ep)
         let isDeep = "deep" in eval.currentRefinements
         let doFreeze = "freeze" in eval.currentRefinements
 
@@ -727,7 +754,7 @@ proc registerNatives*(eval: Evaluator) =
   # --- Context/Object ---
 
   ctx.native("context", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let eval = cast[Evaluator](ep)
+    let eval = getEvaluator(ep)
     if args[0].kind == vkBlock:
       let ctxInner = newContext(eval.currentCtx)
       ctxInner.localOnly = true
@@ -771,7 +798,7 @@ proc registerNatives*(eval: Evaluator) =
       arity: 1,
       refinements: @[RefinementSpec(name: "deep", params: @[])],
       fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-        let eval = cast[Evaluator](ep)
+        let eval = getEvaluator(ep)
         let deep = "deep" in eval.currentRefinements
         freezeValue(args[0], deep)
     )
@@ -784,7 +811,7 @@ proc registerNatives*(eval: Evaluator) =
   # --- Function creation ---
 
   ctx.native("function", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let eval = cast[Evaluator](ep)
+    let eval = getEvaluator(ep)
     if args[0].kind != vkBlock or args[1].kind != vkBlock:
       raise KtgError(kind: "type", msg: "function expects [spec] [body]", data: nil)
 
@@ -802,7 +829,7 @@ proc registerNatives*(eval: Evaluator) =
   # --- does: zero-arg function shorthand ---
 
   ctx.native("does", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let eval = cast[Evaluator](ep)
+    let eval = getEvaluator(ep)
     if args[0].kind != vkBlock:
       raise KtgError(kind: "type", msg: "does expects [body]", data: nil)
     let fn = KtgFunc(
@@ -831,7 +858,7 @@ proc registerNatives*(eval: Evaluator) =
         ParamSpec(name: "handler", typeName: "")
       ])],
       fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-        let eval = cast[Evaluator](ep)
+        let eval = getEvaluator(ep)
         if args[0].kind != vkBlock:
           raise KtgError(kind: "type", msg: "try expects block!", data: nil)
         let hasHandle = "handle" in eval.currentRefinements
@@ -901,7 +928,7 @@ proc registerNatives*(eval: Evaluator) =
   # --- Set (destructuring) ---
 
   ctx.native("set", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let eval = cast[Evaluator](ep)
+    let eval = getEvaluator(ep)
     if args[0].kind != vkBlock:
       raise KtgError(kind: "type", msg: "set expects [words] and value", data: nil)
 
@@ -940,7 +967,7 @@ proc registerNatives*(eval: Evaluator) =
   # --- Apply ---
 
   ctx.native("apply", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let eval = cast[Evaluator](ep)
+    let eval = getEvaluator(ep)
     let fn = args[0]
     if args[1].kind != vkBlock:
       raise KtgError(kind: "type", msg: "apply expects function and block of args", data: nil)
@@ -958,9 +985,18 @@ proc registerNatives*(eval: Evaluator) =
         ParamSpec(name: "key-fn", typeName: "")
       ])],
       fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-        let eval = cast[Evaluator](ep)
-        if args[0].kind != vkBlock:
-          raise KtgError(kind: "type", msg: "sort expects block!", data: nil)
+        let eval = getEvaluator(ep)
+        if args[0].kind notin {vkBlock, vkString}:
+          raise KtgError(kind: "type", msg: "sort expects block! or string!", data: nil)
+
+        # String: sort characters and return new string (immutable)
+        if args[0].kind == vkString:
+          var chars: seq[char] = @[]
+          for c in args[0].strVal: chars.add(c)
+          chars.sort()
+          var s = newString(chars.len)
+          for i, c in chars: s[i] = c
+          return ktgString(s)
 
         if "by" in eval.currentRefinements and args.len > 1:
           # sort/by block key-fn

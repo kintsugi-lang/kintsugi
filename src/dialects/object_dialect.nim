@@ -144,7 +144,7 @@ proc registerObjectDialect*(eval: Evaluator) =
   ctx.set("object", KtgValue(kind: vkNative,
     nativeFn: KtgNative(name: "object", arity: 1, fn: proc(
         args: seq[KtgValue], ep: pointer): KtgValue =
-      let eval = cast[Evaluator](ep)
+      let eval = getEvaluator(ep)
       let spec = args[0]
 
       if spec.kind != vkBlock:
@@ -189,7 +189,7 @@ proc registerObjectDialect*(eval: Evaluator) =
   ctx.set("make", KtgValue(kind: vkNative,
     nativeFn: KtgNative(name: "make", arity: 2, fn: proc(
         args: seq[KtgValue], ep: pointer): KtgValue =
-      let eval = cast[Evaluator](ep)
+      let eval = getEvaluator(ep)
       let source = args[0]
       let overrides = args[1]
 

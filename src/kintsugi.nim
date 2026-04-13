@@ -145,7 +145,7 @@ proc repl() =
   replCtx.set("words", KtgValue(kind: vkNative,
     nativeFn: KtgNative(name: "repl/words", arity: 0, fn: proc(
         args: seq[KtgValue], ep: pointer): KtgValue =
-      let eval = cast[Evaluator](ep)
+      let eval = getEvaluator(ep)
       var names: seq[KtgValue] = @[]
       for key in eval.global.entries.keys:
         names.add(ktgWord(key, wkWord))
@@ -154,7 +154,7 @@ proc repl() =
   replCtx.set("help", KtgValue(kind: vkNative,
     nativeFn: KtgNative(name: "repl/help", arity: 0, fn: proc(
         args: seq[KtgValue], ep: pointer): KtgValue =
-      let eval = cast[Evaluator](ep)
+      let eval = getEvaluator(ep)
       eval.output.add("repl/exit    - quit the REPL")
       eval.output.add("repl/clear   - clear the screen")
       eval.output.add("repl/version - show version")

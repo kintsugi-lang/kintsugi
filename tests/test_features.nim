@@ -96,6 +96,18 @@ suite "sort/by":
     check $eval.evalString("first items") == "1"
     check $eval.evalString("last items") == "3"
 
+  test "sort on string returns sorted string":
+    let eval = makeEval()
+    check $eval.evalString("""sort "hello" """) == "ehllo"
+
+  test "sort on empty string":
+    let eval = makeEval()
+    check $eval.evalString("""sort "" """) == ""
+
+  test "sort on single char string":
+    let eval = makeEval()
+    check $eval.evalString("""sort "a" """) == "a"
+
 suite "load and import":
   test "load returns parsed block":
     let tmpFile = getTempDir() / "test_load.ktg"

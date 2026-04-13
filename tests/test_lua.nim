@@ -17,12 +17,12 @@ suite "lua emitter":
 
   test "emit arithmetic":
     let code = emitLua(parseSource("x: 1 + 2"))
-    check "(1 + 2)" in code
+    check "1 + 2" in code
 
   test "emit function":
     let code = emitLua(parseSource("add: function [a b] [a + b]"))
     check "local function add(a, b)" in code
-    check "return (a + b)" in code
+    check "return a + b" in code
 
   test "emit if":
     let code = emitLua(parseSource("if true [print 42]"))
@@ -260,11 +260,15 @@ suite "series operation emission":
     """))
     check "_append(" in code
 
-  test "reverse emits IIFE":
+  test "reverse on block emits direct reversal":
     let code = emitLua(parseSource("x: reverse [1 2 3]"))
-    # reverse emits an IIFE that handles both strings and tables
+    # Type is known: block. Direct reversal, no runtime dispatch.
+    check "string.reverse" notin code
+    check "for i=#" in code
+
+  test "reverse on string emits string.reverse":
+    let code = emitLua(parseSource("""x: reverse "hello" """))
     check "string.reverse(" in code
-    check "end)()" in code
 
   test "select on context emits _select helper":
     let code = emitLua(parseSource("""
@@ -300,8 +304,8 @@ suite "string operation emission":
     check "string.sub(" in code
     check "== \"he\"" in code
 
-  test "substring emits string.sub":
-    let code = emitLua(parseSource("""x: substring "hello" 2 3"""))
+  test "subset emits string.sub":
+    let code = emitLua(parseSource("""x: subset "hello" 2 3"""))
     check "string.sub(" in code
 
   test "rejoin emits concatenation":

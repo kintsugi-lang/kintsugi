@@ -203,7 +203,7 @@ proc registerAttempt*(eval: Evaluator) =
   ctx.set("attempt", KtgValue(kind: vkNative,
     nativeFn: KtgNative(name: "attempt", arity: 1, fn: proc(
         args: seq[KtgValue], ep: pointer): KtgValue =
-      let eval = cast[Evaluator](ep)
+      let eval = getEvaluator(ep)
       let pipeline = args[0]
 
       if pipeline.kind != vkBlock:

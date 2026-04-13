@@ -335,8 +335,8 @@ suite "random":
     discard eval.evalString("random/seed 42")
     let r = eval.evalString("random/int 100")
     check r.kind == vkInteger
-    check r.intVal >= 0
-    check r.intVal < 100
+    check r.intVal >= 1
+    check r.intVal <= 100
 
   test "random/choice":
     let eval = makeEval()

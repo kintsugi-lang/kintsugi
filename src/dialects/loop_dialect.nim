@@ -159,9 +159,16 @@ method interpret*(d: LoopDialect, blk: seq[KtgValue],
         break
 
   of lmForIn:
-    if spec.series == nil or spec.series.kind != vkBlock:
-      raise KtgError(kind: "type", msg: "loop: 'in' expects a block!", data: nil)
-    for item in spec.series.blockVals:
+    if spec.series == nil or spec.series.kind notin {vkBlock, vkString}:
+      raise KtgError(kind: "type", msg: "loop: 'in' expects a block! or string!", data: nil)
+    # Build iteration items: block elements, or string characters
+    var items: seq[KtgValue] = @[]
+    if spec.series.kind == vkBlock:
+      items = spec.series.blockVals
+    else:
+      for c in spec.series.strVal:
+        items.add(ktgString($c))
+    for item in items:
       let loopCtx = ctx.child
       # guard
       if spec.vars.len > 0 and refinement notin ["fold"]:

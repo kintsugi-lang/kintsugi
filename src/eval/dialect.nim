@@ -35,3 +35,16 @@ proc isCallable*(val: KtgValue): bool =
 proc isInfix*(val: KtgValue): bool =
   val.kind == vkOp or
     (val.kind == vkWord and val.wordName in ["and", "or"])
+
+# Threaded evaluator handle for natives.
+# On C/native backends, natives cast `ep: pointer` back to Evaluator directly.
+# Nim's JS backend doesn't round-trip `cast[T](pointer)` reliably, so on JS
+# the evaluator is stashed in a module-level var before each native call and
+# read back from there. `getEvaluator` hides the difference.
+var currentEvaluator*: Evaluator
+
+proc getEvaluator*(ep: pointer): Evaluator {.inline.} =
+  when defined(js):
+    currentEvaluator
+  else:
+    cast[Evaluator](ep)

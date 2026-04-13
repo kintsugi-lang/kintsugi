@@ -131,7 +131,7 @@ proc registerMatch*(eval: Evaluator) =
   ctx.set("match", KtgValue(kind: vkNative,
     nativeFn: KtgNative(name: "match", arity: 2, fn: proc(
         args: seq[KtgValue], ep: pointer): KtgValue =
-      let eval = cast[Evaluator](ep)
+      let eval = getEvaluator(ep)
       let value = args[0]
       let rules = args[1]
 

@@ -931,6 +931,8 @@ proc callCallable*(eval: Evaluator, fn: KtgValue, vals: seq[KtgValue],
     eval.callStack.add(StackFrame(name: native.name, file: "", line: 0))
     let savedCtx = eval.currentCtx
     eval.currentCtx = ctx
+    when defined(js):
+      currentEvaluator = eval
     try:
       result = native.fn(args, cast[pointer](eval))
     finally:

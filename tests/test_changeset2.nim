@@ -127,9 +127,9 @@ suite "starts-with?/ends-with? compilation":
   test "ends-with? compiles":
     check "string.sub" in compileStr("""r: ends-with? "hello" "llo" """)
 
-suite "substring compilation":
-  test "substring compiles":
-    check "string.sub" in compileStr("""s: substring "hello" 2 3""")
+suite "subset compilation":
+  test "subset compiles":
+    check "string.sub" in compileStr("""s: subset "hello" 2 3""")
 
 suite "attempt compilation":
   test "basic attempt with source and then":
