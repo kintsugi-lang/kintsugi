@@ -91,3 +91,7 @@ suite "lean-lua metrics":
   test "loop/partition inner predicate has no IIFE":
     let stress = compileGolden("leanlua_stress")
     check countOccurrences(stress, "if (function()") == 0
+
+  test "set destructure with loop refinement has no IIFE":
+    let stress = compileGolden("leanlua_stress")
+    check countOccurrences(stress, "local _set_tmp = (function()") == 0

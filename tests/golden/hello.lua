@@ -16,18 +16,16 @@ local function qsort(blk)
   local pivot = blk[1]
   local rest = _copy(blk)
   table.remove(rest, 1)
-  local _set_tmp = (function()
-    local _part_true = {}
-    local _part_false = {}
-    for _, x in ipairs(rest) do
-      if x < pivot then
-        _part_true[#_part_true+1] = x
-      else
-        _part_false[#_part_false+1] = x
-      end
+  local _part_true = {}
+  local _part_false = {}
+  for _, x in ipairs(rest) do
+    if x < pivot then
+      _part_true[#_part_true+1] = x
+    else
+      _part_false[#_part_false+1] = x
     end
-    return {_part_true, _part_false}
-  end)()
+  end
+  local _set_tmp = {_part_true, _part_false}
   local lo, hi = _set_tmp[1], _set_tmp[2]
   local result = qsort(lo)
   _append(result, pivot)

@@ -2993,7 +2993,6 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
       if pos < vals.len and vals[pos].kind == vkBlock:
         let namesBlock = vals[pos].blockVals
         pos += 1
-        let valueExpr = e.emitExpr(vals, pos)
         var names: seq[string] = @[]
         var restName = ""
         var restAfter = 0  # how many positional names before @rest
@@ -3007,6 +3006,29 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
             names.add(n)
             e.locals.incl(n)
         let tmp = "_set_tmp"
+        # Detect RHS = loop/collect|fold|partition and emit the loop inline
+        # rather than letting emitExpr wrap it in an IIFE.
+        if pos < vals.len and vals[pos].kind == vkWord and
+           vals[pos].wordKind == wkWord and
+           vals[pos].wordName.startsWith("loop/"):
+          let refinement = vals[pos].wordName.split('/')[1]
+          if refinement in ["collect", "fold", "partition"]:
+            pos += 1
+            if pos < vals.len and vals[pos].kind == vkBlock:
+              let blk = vals[pos].blockVals
+              pos += 1
+              let resultVar = e.emitLoop(blk, refinement)
+              e.ln("local " & tmp & " = " & resultVar)
+              if names.len > 0:
+                var indices: seq[string] = @[]
+                for i in 1 .. names.len:
+                  indices.add(tmp & "[" & $i & "]")
+                e.ln("local " & names.join(", ") & " = " & indices.join(", "))
+              if restName.len > 0:
+                e.ln("local " & restName & " = {unpack(" & tmp & ", " & $(restAfter + 1) & ")}")
+              continue
+        # Fallback: generic expression RHS
+        let valueExpr = e.emitExpr(vals, pos)
         e.ln("local " & tmp & " = " & valueExpr)
         if names.len > 0:
           var indices: seq[string] = @[]
