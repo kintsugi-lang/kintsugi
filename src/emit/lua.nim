@@ -1236,12 +1236,18 @@ proc emitLoopBody(e: var LuaEmitter, bodyVals: seq[KtgValue], refinement: string
       e.indent -= 1
       e.ln("end)()")
   of "partition":
-    # Body is predicate — element goes to true or false bucket
-    e.ln("if (function()")
-    e.indent += 1
-    e.emitBlock(bodyVals, asReturn = true)
-    e.indent -= 1
-    e.ln("end)() then")
+    # Body is predicate - element goes to true or false bucket.
+    # Inline the predicate when it's a single expression; wrap otherwise.
+    if bodyVals.len <= 3:
+      var bpos = 0
+      let predExpr = e.emitExpr(bodyVals, bpos)
+      e.ln("if " & predExpr & " then")
+    else:
+      e.ln("if (function()")
+      e.indent += 1
+      e.emitBlock(bodyVals, asReturn = true)
+      e.indent -= 1
+      e.ln("end)() then")
     e.indent += 1
     e.ln("_part_true[#_part_true+1] = " & iterVar)
     e.indent -= 1

@@ -24,9 +24,7 @@ local function split_even_odd(blk)
     local _part_true = {}
     local _part_false = {}
     for _, x in ipairs(blk) do
-      if (function()
-        return (modulo) == 0
-      end)() then
+      if (modulo) == 0 then
         _part_true[#_part_true+1] = x
       else
         _part_false[#_part_false+1] = x

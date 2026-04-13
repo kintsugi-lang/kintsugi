@@ -87,3 +87,7 @@ suite "lean-lua metrics":
     check pong.len > 0
     let combat = compileGolden("combat")
     check combat.len > 0
+
+  test "loop/partition inner predicate has no IIFE":
+    let stress = compileGolden("leanlua_stress")
+    check countOccurrences(stress, "if (function()") == 0

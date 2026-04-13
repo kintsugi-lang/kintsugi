@@ -20,9 +20,7 @@ local function qsort(blk)
     local _part_true = {}
     local _part_false = {}
     for _, x in ipairs(rest) do
-      if (function()
-        return x < pivot
-      end)() then
+      if x < pivot then
         _part_true[#_part_true+1] = x
       else
         _part_false[#_part_false+1] = x
