@@ -121,3 +121,14 @@ suite "lean-lua metrics":
     let processed = eval.preprocess(ast, forCompilation = true)
     let lua = emitLua(processed, "")
     check countOccurrences(lua, "tostring(") == 0
+
+  test "loop over context emits pairs not ipairs":
+    let src = "Kintsugi [name: 'ctx-loop-test]\n" &
+              "c: context [a: 1  b: 2  c: 3]\n" &
+              "loop [for [v] in c do [print v]]\n"
+    let ast = parseSource(src)
+    let eval = setupEvalForTest()
+    let processed = eval.preprocess(ast, forCompilation = true)
+    let lua = emitLua(processed, "")
+    check countOccurrences(lua, "pairs(c)") >= 1
+    check countOccurrences(lua, "ipairs(c)") == 0

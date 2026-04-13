@@ -77,6 +77,8 @@ type
     ## Sequence type tracking: variable name -> stString/stBlock.
     ## Used to emit correct Lua for operations that differ between strings and blocks.
     varSeqTypes: Table[string, SeqType]
+    ## Variable names bound to a context literal; iterate with pairs() not ipairs().
+    contextVars: HashSet[string]
 
   SeqType* = enum
     stUnknown
@@ -1349,8 +1351,11 @@ proc emitLoop(e: var LuaEmitter, blk: seq[KtgValue], refinement: string = ""): s
               e.indent -= 1
               e.ln("end")
             else:
+              let iterFn =
+                if series in e.contextVars: "pairs"
+                else: "ipairs"
               let varStr = if vars.len > 0: "_, " & vars[0] else: "_"
-              e.ln("for " & varStr & " in ipairs(" & series & ") do")
+              e.ln("for " & varStr & " in " & iterFn & "(" & series & ") do")
               e.indent += 1
               if guard.len > 0:
                 e.ln("if " & guard & " then")
@@ -3332,6 +3337,11 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
       let rhsSeqType = e.inferSeqType(vals, pos)
       if rhsSeqType != stUnknown:
         e.varSeqTypes[name] = rhsSeqType
+      # Peek: if RHS is a context [...] literal, record the name so
+      # loops over it iterate with pairs() instead of ipairs().
+      if pos < vals.len and vals[pos].kind == vkWord and
+         vals[pos].wordKind == wkWord and vals[pos].wordName == "context":
+        e.contextVars.incl(name)
       # Peek ahead to infer if RHS is numeric — mark variable as concat-safe
       if isNumericExpr(vals, pos):
         e.concatSafeVars.incl(name)
