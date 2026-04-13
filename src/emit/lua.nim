@@ -1606,6 +1606,12 @@ proc emitMatchStmt(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValu
 # Emit match as expression (returns a value via IIFE)
 # ---------------------------------------------------------------------------
 
+# NOTE: emitMatchExpr is used for match-in-expression-context where the
+# caller can't restructure the surrounding expression (function arg
+# position, paren group, etc.). Set-word RHS and function-implicit-return
+# already route through emitMatchHoisted and avoid the IIFE. Hoisting
+# call-argument-position match would require statement/expression
+# restructuring in the caller - deferred to a follow-up spec.
 proc emitMatchExpr(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValue]): string =
   ## match value [...rules...] as an expression that produces a value.
   ## Emits as (function() if ... return ... elseif ... return ... end end)()
