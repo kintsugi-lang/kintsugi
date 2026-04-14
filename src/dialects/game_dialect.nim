@@ -160,23 +160,35 @@ proc expandEntityComponents(body: seq[KtgValue]): seq[KtgValue] =
 
 proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
                  backend: GameBackend): seq[KtgValue] =
+  var stateBlock: seq[KtgValue] = @[]
+  var entityEmits: seq[KtgValue] = @[]
   var entityNames: seq[string] = @[]
 
   var i = 0
   while i < sceneBody.len:
     let head = sceneBody[i]
-    if head.kind == vkWord and head.wordKind == wkWord and head.wordName == "entity" and
+    if head.kind == vkWord and head.wordKind == wkWord and head.wordName == "state" and
+       i + 1 < sceneBody.len and sceneBody[i + 1].kind == vkBlock:
+      for v in sceneBody[i + 1].blockVals:
+        stateBlock.add(v)
+      i += 2
+    elif head.kind == vkWord and head.wordKind == wkWord and head.wordName == "entity" and
        i + 2 < sceneBody.len and sceneBody[i + 1].kind == vkWord and
        sceneBody[i + 1].wordKind == wkWord and sceneBody[i + 2].kind == vkBlock:
       let entName = sceneBody[i + 1].wordName
       let components = expandEntityComponents(sceneBody[i + 2].blockVals)
-      result.add(ktgWord(entName, wkSetWord))
-      result.add(ktgWord("context", wkWord))
-      result.add(ktgBlock(components))
+      entityEmits.add(ktgWord(entName, wkSetWord))
+      entityEmits.add(ktgWord("context", wkWord))
+      entityEmits.add(ktgBlock(components))
       entityNames.add(entName)
       i += 3
     else:
       i += 1
+
+  for v in stateBlock:
+    result.add(v)
+  for v in entityEmits:
+    result.add(v)
 
   var drawStatements: seq[KtgValue] = @[]
   for name in entityNames:

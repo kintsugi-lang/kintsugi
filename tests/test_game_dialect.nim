@@ -139,6 +139,44 @@ suite "game dialect expansion":
     check sawPlayerCr
     check sawPlayerX
 
+  test "state lifts to top-level set-words":
+    let blk = @[
+      ktgWord("target", wkSetWord), ktgWord("love2d", wkLitWord),
+      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgBlock(@[
+        ktgWord("state", wkWord),
+        ktgBlock(@[
+          ktgWord("paused?", wkSetWord), ktgLogic(true),
+          ktgWord("score", wkSetWord), ktgInt(0),
+        ]),
+        ktgWord("entity", wkWord), ktgWord("player", wkWord),
+        ktgBlock(@[
+          ktgWord("pos", wkWord), ktgInt(0), ktgInt(0),
+          ktgWord("rect", wkWord), ktgInt(10), ktgInt(10),
+          ktgWord("color", wkWord), ktgInt(1), ktgInt(1), ktgInt(1),
+        ]),
+      ]),
+    ]
+    let output = expand(blk)
+    var sawPaused = false
+    var sawScore = false
+    var pausedIdx, scoreIdx, playerIdx = -1
+    for i in 0 ..< output.len:
+      let v = output[i]
+      if v.kind == vkWord and v.wordKind == wkSetWord:
+        if v.wordName == "paused?":
+          sawPaused = true
+          pausedIdx = i
+        if v.wordName == "score":
+          sawScore = true
+          scoreIdx = i
+        if v.wordName == "player":
+          playerIdx = i
+    check sawPaused
+    check sawScore
+    check pausedIdx < playerIdx
+    check scoreIdx < playerIdx
+
 suite "game dialect preprocess wiring":
   test "bare @game splices empty expansion":
     let src = "Kintsugi [name: 'test]\n@game [target: 'love2d]\nprint \"hi\"\n"
