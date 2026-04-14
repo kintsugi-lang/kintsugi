@@ -195,6 +195,24 @@ print(dt)}
     check not ("return \"" in code)
     check not ("\\n" in code)
 
+  test "multi-line raw string inherits indent on every line":
+    let code = emitLua(parseSource("""
+      f: function [] [
+        raw {local a = 1
+local b = 2
+local c = 3}
+      ]
+    """))
+    ## Every line of the raw payload should be indented inside the function body.
+    ## Function bodies use 2-space indent in this emitter.
+    check "  local a = 1" in code
+    check "  local b = 2" in code
+    check "  local c = 3" in code
+    ## None of the lines should be at column 0 (flush-left).
+    check not ("\nlocal a = 1" in code)
+    check not ("\nlocal b = 2" in code)
+    check not ("\nlocal c = 3" in code)
+
 # --- import (renamed from require) ---
 
 suite "import":

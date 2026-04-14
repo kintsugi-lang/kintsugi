@@ -3014,11 +3014,13 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
   while pos < vals.len:
     let val = vals[pos]
 
-    # --- raw: write string verbatim as statement ---
+    # --- raw: write string verbatim as statement, one line at a time so
+    #     embedded newlines inherit the surrounding indent pad ---
     if val.kind == vkWord and val.wordKind == wkWord and val.wordName == "raw":
       pos += 1
       if pos < vals.len and vals[pos].kind == vkString:
-        e.ln(vals[pos].strVal)
+        for line in vals[pos].strVal.split('\n'):
+          e.ln(line)
         pos += 1
       continue
 

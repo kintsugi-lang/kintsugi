@@ -27,7 +27,7 @@ local ball = {
 }
 playdate.update = function()
   local dt = 1/30
-playdate.graphics.clear()
+  playdate.graphics.clear()
   if playdate.buttonJustPressed(playdate.kButtonA) then
     is_paused = not (is_paused)
   end
