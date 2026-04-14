@@ -103,3 +103,44 @@ suite "substituteSelf nested shapes":
     let copy = original
     discard substituteSelf(original, "player")
     check original[0].wordName == copy[0].wordName
+
+suite "substituteIt":
+  test "simple it/field rewritten":
+    let body = @[ktgWord("it/x", wkWord)]
+    let output = substituteIt(body, "ball")
+    check output[0].kind == vkWord and output[0].wordKind == wkWord
+    check output[0].wordName == "ball/x"
+
+  test "set-word kind preserved":
+    let body = @[ktgWord("it/y", wkSetWord), ktgInt(0)]
+    let output = substituteIt(body, "paddle")
+    check output[0].wordKind == wkSetWord
+    check output[0].wordName == "paddle/y"
+
+  test "bare it raises":
+    expect(ValueError):
+      discard substituteIt(@[ktgWord("it", wkWord)], "ball")
+
+  test "recurses into blocks":
+    let body = @[
+      ktgWord("if", wkWord),
+      ktgBlock(@[ktgWord("it/x", wkSetWord), ktgInt(1)]),
+    ]
+    let output = substituteIt(body, "ball")
+    check output[1].blockVals[0].wordName == "ball/x"
+
+  test "recurses into parens":
+    let body = @[
+      ktgParen(@[ktgWord("it/x", wkWord), ktgWord("+", wkWord), ktgInt(1)]),
+    ]
+    let output = substituteIt(body, "ball")
+    check output[0].parenVals[0].wordName == "ball/x"
+
+suite "assertNoIt":
+  test "bare it raises in assertNoIt":
+    expect(ValueError):
+      assertNoIt(@[ktgWord("it", wkWord)], "draw block")
+
+  test "it/field raises in assertNoIt":
+    expect(ValueError):
+      assertNoIt(@[ktgWord("it/x", wkWord)], "draw block")

@@ -176,6 +176,38 @@ proc assertNoSelf*(vals: seq[KtgValue], contextLabel: string) =
     of vkParen: assertNoSelf(v.parenVals, contextLabel)
     else: discard
 
+proc substituteIt*(vals: seq[KtgValue], otherName: string): seq[KtgValue] =
+  result = newSeq[KtgValue](vals.len)
+  for idx, v in vals:
+    case v.kind
+    of vkWord:
+      if v.wordName == "it":
+        raise newException(ValueError,
+          "bare `it` is not valid; use `it/<field>`")
+      elif v.wordName.startsWith("it/"):
+        let suffix = v.wordName["it/".len .. ^1]
+        let newName = otherName & "/" & suffix
+        result[idx] = ktgWord(newName, v.wordKind)
+      else:
+        result[idx] = v
+    of vkBlock:
+      result[idx] = ktgBlock(substituteIt(v.blockVals, otherName))
+    of vkParen:
+      result[idx] = ktgParen(substituteIt(v.parenVals, otherName))
+    else:
+      result[idx] = v
+
+proc assertNoIt*(vals: seq[KtgValue], contextLabel: string) =
+  for v in vals:
+    case v.kind
+    of vkWord:
+      if v.wordName == "it" or v.wordName.startsWith("it/"):
+        raise newException(ValueError,
+          "`it` has no binding inside " & contextLabel)
+    of vkBlock: assertNoIt(v.blockVals, contextLabel)
+    of vkParen: assertNoIt(v.parenVals, contextLabel)
+    else: discard
+
 type
   Entity = object
     name: string
