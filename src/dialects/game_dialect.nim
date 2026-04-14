@@ -1,18 +1,8 @@
 import std/[tables, strutils]
 import ../core/types
-
-type
-  GameBackend* = object
-    name*: string
-    bindings*: seq[KtgValue]
-    loadShell*: proc(body: seq[KtgValue]): seq[KtgValue]
-    updateShell*: proc(body: seq[KtgValue]): seq[KtgValue]
-    drawShell*: proc(body: seq[KtgValue]): seq[KtgValue]
-    keypressedShell*: proc(body: seq[KtgValue]): seq[KtgValue]
-    setColorCall*: proc(r, g, b: KtgValue): seq[KtgValue]
-    drawRectCall*: proc(x, y, w, h: KtgValue): seq[KtgValue]
-    quitCall*: proc(): seq[KtgValue]
-    isKeyDown*: proc(key: KtgValue): seq[KtgValue]
+import game_backend
+export game_backend
+import game_playdate
 
 proc love2dLoadShell(body: seq[KtgValue]): seq[KtgValue] =
   @[
@@ -58,13 +48,6 @@ proc love2dQuitCall(): seq[KtgValue] =
 proc love2dIsKeyDown(key: KtgValue): seq[KtgValue] =
   @[ktgWord("love/keyboard/isDown", wkWord), key]
 
-proc bindingEntry(name, luaPath, kind: string, arity: int = -1): seq[KtgValue] =
-  result.add(ktgWord(name, wkWord))
-  result.add(ktgString(luaPath))
-  result.add(ktgWord(kind, wkLitWord))
-  if arity >= 0:
-    result.add(ktgInt(arity))
-
 proc love2dBindings(): seq[KtgValue] =
   var entries: seq[KtgValue]
   for v in bindingEntry("love/graphics/setColor",  "love.graphics.setColor",  "call", 4): entries.add(v)
@@ -91,7 +74,10 @@ let love2dBackend* = GameBackend(
   isKeyDown: love2dIsKeyDown,
 )
 
-var backends* = {"love2d": love2dBackend}.toTable
+var backends* = {
+  "love2d": love2dBackend,
+  "playdate": playdateBackend,
+}.toTable
 
 proc findTarget(blk: seq[KtgValue]): string =
   var i = 0

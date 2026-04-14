@@ -11,6 +11,10 @@ suite "game dialect skeleton":
     check backends.hasKey("love2d")
     check backends["love2d"].name == "love2d"
 
+  test "playdate backend is registered":
+    check backends.hasKey("playdate")
+    check backends["playdate"].name == "playdate"
+
   test "unknown target raises compile error":
     let blk = @[
       ktgWord("target", wkSetWord),
