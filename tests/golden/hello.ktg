@@ -1,3 +1,5 @@
+Kintsugi [name: 'hello]
+
 print "Hello, Kintsugi!"
 
 add: function [a b] [a + b]

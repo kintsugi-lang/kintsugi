@@ -33,13 +33,15 @@ local function split_even_odd(blk)
   local evens, odds = _set_tmp[1], _set_tmp[2]
   return {evens, odds}
 end
+local function is_negative(n)
+  return n < 0
+end
 local function classify(n)
   if n == 0 then
     return "zero"
   elseif n == 1 then
     return "one"
-  else
-    local is_negative = n
+  elseif is_negative(n) then
     return "negative"
   else
     return "other"

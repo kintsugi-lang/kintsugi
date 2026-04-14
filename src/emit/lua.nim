@@ -1503,6 +1503,9 @@ proc buildPatternMatch(e: var LuaEmitter, pattern: seq[KtgValue], valueExpr: str
         discard  # wildcard — always matches
       elif p.wordKind == wkWord and p.wordName in BuiltinTypePredicates:
         conditions.add(inlineTypePredicate(p.wordName, valueExpr))
+      elif p.wordKind == wkWord and p.wordName.endsWith("?"):
+        # User predicate: call it with the match value.
+        conditions.add(luaName(p.wordName) & "(" & valueExpr & ")")
       elif p.wordKind == wkWord:
         bindings.add((luaName(p.wordName), valueExpr))
       elif p.wordKind == wkLitWord:

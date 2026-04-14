@@ -1,3 +1,18 @@
+-- Kintsugi runtime support
+local function _copy(t)
+  local r = {}
+  for k, v in pairs(t) do r[k] = v end
+  return r
+end
+local function _append(t, v)
+  if type(v) == "table" then
+    for i = 1, #v do t[#t+1] = v[i] end
+  else
+    t[#t+1] = v
+  end
+  return t
+end
+
 print("Hello, Kintsugi!")
 local function add(a, b)
   return a + b

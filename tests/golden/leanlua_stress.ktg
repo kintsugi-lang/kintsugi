@@ -24,6 +24,7 @@ split-even-odd: function [blk [block!]] [
 ]
 
 ; --- match as expression ---
+negative?: function [n [integer!]] [n < 0]
 classify: function [n [integer!]] [
   match n [
     [0]            ["zero"]

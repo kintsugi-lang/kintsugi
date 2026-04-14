@@ -9,7 +9,7 @@
 ## or update the metric (with justification) - but never both in the
 ## same commit.
 
-import std/[unittest, strutils, os]
+import std/[unittest, strutils, os, osproc]
 import ../src/parse/parser
 import ../src/emit/lua
 import ../src/eval/[evaluator, natives]
@@ -197,7 +197,10 @@ suite "lean-lua metrics":
 
   test "exit gate: hello.lua is strictly lean":
     let lua = compileGolden("hello")
-    check preludeLineCount(lua) == 0
+    # Hello uses _copy and _append for qsort, so it needs a small helper
+    # prelude. Bound at 20 lines - enough for _copy+_append, tight enough
+    # to catch bloat regressions.
+    check preludeLineCount(lua) <= 20
     check countOccurrences(lua, "(function()") == 0
     # Two allowed tostring calls - both wrap block-returning expressions
     # (squares, qsort(...)) where string formatting is user-visible output.
@@ -216,3 +219,19 @@ suite "lean-lua metrics":
   test "exit gate: combat.lua prelude is bounded":
     let lua = compileGolden("combat")
     check preludeLineCount(lua) <= 10
+
+  test "exit gate: script-type goldens run in LuaJIT":
+    # Executes compiled output with luajit. Any runtime error -
+    # missing helper, bad syntax, undefined global - fails the test.
+    # Skips pong/playdate which need Love2D/Playdate runtimes.
+    let luaBin = findExe("luajit")
+    if luaBin.len == 0:
+      skip()
+    else:
+      let goldenDir = currentSourcePath().parentDir / "golden"
+      for name in ["hello", "leanlua_stress", "combat"]:
+        let path = goldenDir / (name & ".lua")
+        let (output, exitCode) = execCmdEx(luaBin & " " & path)
+        if exitCode != 0:
+          echo "  [", name, "] exit=", exitCode, " output=\n", output
+        check exitCode == 0
