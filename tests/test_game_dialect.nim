@@ -241,6 +241,45 @@ suite "game dialect expansion":
     check pausedIdx < playerIdx
     check scoreIdx < playerIdx
 
+  test "on-key lifts to match in love/keypressed":
+    let blk = @[
+      ktgWord("target", wkSetWord), ktgWord("love2d", wkLitWord),
+      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgBlock(@[
+        ktgWord("on-key", wkWord), ktgString("space"),
+        ktgBlock(@[ktgWord("paused?", wkSetWord), ktgLogic(true)]),
+        ktgWord("on-key", wkWord), ktgString("escape"),
+        ktgBlock(@[ktgWord("stop", wkWord)]),
+      ]),
+    ]
+    let output = expand(blk)
+    ## love/keypressed body should contain `match key [...]` with arms for each key.
+    var found = false
+    for i in 0 ..< output.len - 3:
+      if output[i].kind == vkWord and output[i].wordKind == wkSetWord and
+         output[i].wordName == "love/keypressed" and output[i + 3].kind == vkBlock:
+        let body = output[i + 3].blockVals
+        ## body should start with: match key [arms block]
+        check body.len == 3
+        check body[0].kind == vkWord and body[0].wordName == "match"
+        check body[1].kind == vkWord and body[1].wordName == "key"
+        check body[2].kind == vkBlock
+        let arms = body[2].blockVals
+        ## arms should be: [["space"] [paused?: true] ["escape"] [stop] default []]
+        ## 2 key arms * 2 tokens each = 4 tokens, plus default + [] = 6 tokens total
+        check arms.len == 6
+        check arms[0].kind == vkBlock  ## ["space"]
+        check arms[0].blockVals.len == 1
+        check arms[0].blockVals[0].kind == vkString and arms[0].blockVals[0].strVal == "space"
+        check arms[1].kind == vkBlock  ## [paused?: true]
+        check arms[2].kind == vkBlock
+        check arms[2].blockVals[0].kind == vkString and arms[2].blockVals[0].strVal == "escape"
+        check arms[3].kind == vkBlock  ## [stop]
+        check arms[4].kind == vkWord and arms[4].wordName == "default"
+        check arms[5].kind == vkBlock and arms[5].blockVals.len == 0
+        found = true
+    check found
+
 suite "game dialect preprocess wiring":
   test "bare @game splices empty expansion":
     let src = "Kintsugi [name: 'test]\n@game [target: 'love2d]\nprint \"hi\"\n"

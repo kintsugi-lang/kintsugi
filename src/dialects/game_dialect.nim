@@ -199,6 +199,7 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
                  backend: GameBackend): seq[KtgValue] =
   var stateBlock: seq[KtgValue] = @[]
   var entities: seq[Entity] = @[]
+  var onKeys: seq[(KtgValue, seq[KtgValue])] = @[]
 
   var i = 0
   while i < sceneBody.len:
@@ -213,6 +214,11 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
        sceneBody[i + 1].wordKind == wkWord and sceneBody[i + 2].kind == vkBlock:
       let ent = parseEntity(sceneBody[i + 1].wordName, sceneBody[i + 2].blockVals)
       entities.add(ent)
+      i += 3
+    elif head.kind == vkWord and head.wordKind == wkWord and head.wordName == "on-key" and
+         i + 2 < sceneBody.len and sceneBody[i + 1].kind == vkString and
+         sceneBody[i + 2].kind == vkBlock:
+      onKeys.add((sceneBody[i + 1], sceneBody[i + 2].blockVals))
       i += 3
     else:
       i += 1
@@ -243,10 +249,22 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
     for v in backend.drawRectCall(x, y, w, h):
       drawStatements.add(v)
 
+  var keyBody: seq[KtgValue] = @[]
+  if onKeys.len > 0:
+    var matchArms: seq[KtgValue] = @[]
+    for (keyStr, armBody) in onKeys:
+      matchArms.add(ktgBlock(@[keyStr]))
+      matchArms.add(ktgBlock(armBody))
+    matchArms.add(ktgWord("default", wkWord))
+    matchArms.add(ktgBlock(@[]))
+    keyBody.add(ktgWord("match", wkWord))
+    keyBody.add(ktgWord("key", wkWord))
+    keyBody.add(ktgBlock(matchArms))
+
   for v in backend.loadShell(@[]): result.add(v)
   for v in backend.updateShell(updateStatements): result.add(v)
   for v in backend.drawShell(drawStatements): result.add(v)
-  for v in backend.keypressedShell(@[]): result.add(v)
+  for v in backend.keypressedShell(keyBody): result.add(v)
 
 proc expand*(blk: seq[KtgValue]): seq[KtgValue] =
   let targetName = findTarget(blk)
