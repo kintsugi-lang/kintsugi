@@ -19,8 +19,8 @@ Kintsugi [name: 'pong]
       pos 20 260  rect 12 80  color 0.9 0.9 1
       tags [paddle]
       update [
-        if key-down? "w" [self/y: self/y - (PADDLE-SPEED * dt)]
-        if key-down? "s" [self/y: self/y + (PADDLE-SPEED * dt)]
+        if key-down? "up" [self/y: self/y - (PADDLE-SPEED * dt)]
+        if key-down? "down" [self/y: self/y + (PADDLE-SPEED * dt)]
       ]
     ]
     entity cpu [
@@ -66,8 +66,8 @@ Kintsugi [name: 'pong]
     draw [
       text-print rejoin [player-score "   " cpu-score] 380 20
     ]
-    on-key "space"  [paused?: not paused?]
-    on-key "escape" [quit]
+    on-key "a"  [paused?: not paused?]
+    on-key "b" []
   ]
   go 'main
 ]

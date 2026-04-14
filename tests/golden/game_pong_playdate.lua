@@ -35,10 +35,10 @@ playdate.update = function()
   if is_paused then
     return nil
   end
-  if playdate.buttonIsDown("w") then
+  if playdate.buttonIsPressed("up") then
     player.y = player.y - (420 * dt)
   end
-  if playdate.buttonIsDown("s") then
+  if playdate.buttonIsPressed("down") then
     player.y = player.y + (420 * dt)
   end
   cpu.y = ball.y - 40
@@ -78,18 +78,13 @@ playdate.update = function()
     ball.dy = (ball.y - cpu.y) / 40
     ball.speed = ball.speed + 20
   end
-end
-playdate.draw = function()
   playdate.graphics.fillRect(player.x, player.y, player.w, player.h)
   playdate.graphics.fillRect(cpu.x, cpu.y, cpu.w, cpu.h)
   playdate.graphics.fillRect(ball.x, ball.y, ball.w, ball.h)
   playdate.graphics.drawText(player_score .. "   " .. cpu_score, 380, 20)
-end
-playdate.keypressed = function(key)
-  if key == "space" then
+  if playdate.buttonJustPressed("a") then
     is_paused = not (is_paused)
-  elseif key == "escape" then
-    playdate.system.exit()
-  else
+  end
+  if playdate.buttonJustPressed("b") then
   end
 end

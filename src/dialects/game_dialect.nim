@@ -4,37 +4,39 @@ import game_backend
 export game_backend
 import game_playdate
 
-proc love2dLoadShell(body: seq[KtgValue]): seq[KtgValue] =
-  @[
-    ktgWord("love/load", wkSetWord),
-    ktgWord("function", wkWord),
-    ktgBlock(@[]),
-    ktgBlock(body),
-  ]
+proc love2dEmitCallbacks(updateBody, drawBody: seq[KtgValue],
+                         onKeys: seq[OnKeyForm]): seq[KtgValue] =
+  result.add(ktgWord("love/load", wkSetWord))
+  result.add(ktgWord("function", wkWord))
+  result.add(ktgBlock(@[]))
+  result.add(ktgBlock(@[]))
 
-proc love2dUpdateShell(body: seq[KtgValue]): seq[KtgValue] =
-  @[
-    ktgWord("love/update", wkSetWord),
-    ktgWord("function", wkWord),
-    ktgBlock(@[ktgWord("dt", wkWord)]),
-    ktgBlock(body),
-  ]
+  result.add(ktgWord("love/update", wkSetWord))
+  result.add(ktgWord("function", wkWord))
+  result.add(ktgBlock(@[ktgWord("dt", wkWord)]))
+  result.add(ktgBlock(updateBody))
 
-proc love2dDrawShell(body: seq[KtgValue]): seq[KtgValue] =
-  @[
-    ktgWord("love/draw", wkSetWord),
-    ktgWord("function", wkWord),
-    ktgBlock(@[]),
-    ktgBlock(body),
-  ]
+  result.add(ktgWord("love/draw", wkSetWord))
+  result.add(ktgWord("function", wkWord))
+  result.add(ktgBlock(@[]))
+  result.add(ktgBlock(drawBody))
 
-proc love2dKeypressedShell(body: seq[KtgValue]): seq[KtgValue] =
-  @[
-    ktgWord("love/keypressed", wkSetWord),
-    ktgWord("function", wkWord),
-    ktgBlock(@[ktgWord("key", wkWord)]),
-    ktgBlock(body),
-  ]
+  var keyBody: seq[KtgValue] = @[]
+  if onKeys.len > 0:
+    var matchArms: seq[KtgValue] = @[]
+    for form in onKeys:
+      matchArms.add(ktgBlock(@[form.key]))
+      matchArms.add(ktgBlock(form.body))
+    matchArms.add(ktgWord("default", wkWord))
+    matchArms.add(ktgBlock(@[]))
+    keyBody.add(ktgWord("match", wkWord))
+    keyBody.add(ktgWord("key", wkWord))
+    keyBody.add(ktgBlock(matchArms))
+
+  result.add(ktgWord("love/keypressed", wkSetWord))
+  result.add(ktgWord("function", wkWord))
+  result.add(ktgBlock(@[ktgWord("key", wkWord)]))
+  result.add(ktgBlock(keyBody))
 
 proc love2dSetColorCall(r, g, b: KtgValue): seq[KtgValue] =
   @[ktgWord("love/graphics/setColor", wkWord), r, g, b, ktgInt(1)]
@@ -44,9 +46,6 @@ proc love2dDrawRectCall(x, y, w, h: KtgValue): seq[KtgValue] =
 
 proc love2dPrintCall(text, x, y: KtgValue): seq[KtgValue] =
   @[ktgWord("love/graphics/print", wkWord), text, x, y]
-
-proc love2dQuitCall(): seq[KtgValue] =
-  @[ktgWord("love/event/quit", wkWord)]
 
 proc love2dIsKeyDown(key: KtgValue): seq[KtgValue] =
   @[ktgWord("love/keyboard/isDown", wkWord), key]
@@ -67,14 +66,10 @@ proc love2dBindings(): seq[KtgValue] =
 let love2dBackend* = GameBackend(
   name: "love2d",
   bindings: love2dBindings(),
-  loadShell: love2dLoadShell,
-  updateShell: love2dUpdateShell,
-  drawShell: love2dDrawShell,
-  keypressedShell: love2dKeypressedShell,
+  emitCallbacks: love2dEmitCallbacks,
   setColorCall: love2dSetColorCall,
   drawRectCall: love2dDrawRectCall,
   printCall: love2dPrintCall,
-  quitCall: love2dQuitCall,
   isKeyDown: love2dIsKeyDown,
 )
 
@@ -143,22 +138,6 @@ proc substituteCalls*(vals: seq[KtgValue], backend: GameBackend): seq[KtgValue] 
     else:
       result.add(v)
       i += 1
-
-proc substituteQuit*(vals: seq[KtgValue], backend: GameBackend): seq[KtgValue] =
-  for v in vals:
-    case v.kind
-    of vkWord:
-      if v.wordKind == wkWord and v.wordName == "quit":
-        for q in backend.quitCall():
-          result.add(q)
-      else:
-        result.add(v)
-    of vkBlock:
-      result.add(ktgBlock(substituteQuit(v.blockVals, backend)))
-    of vkParen:
-      result.add(ktgParen(substituteQuit(v.parenVals, backend)))
-    else:
-      result.add(v)
 
 proc substituteSelf*(vals: seq[KtgValue], entityName: string): seq[KtgValue] =
   result = newSeq[KtgValue](vals.len)
@@ -429,23 +408,13 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
   for v in userDrawBody:
     drawStatements.add(v)
 
-  var keyBody: seq[KtgValue] = @[]
-  if onKeys.len > 0:
-    var matchArms: seq[KtgValue] = @[]
-    for (keyStr, armBody) in onKeys:
-      assertNoSelf(armBody, "on-key handler")
-      matchArms.add(ktgBlock(@[keyStr]))
-      matchArms.add(ktgBlock(substituteQuit(armBody, backend)))
-    matchArms.add(ktgWord("default", wkWord))
-    matchArms.add(ktgBlock(@[]))
-    keyBody.add(ktgWord("match", wkWord))
-    keyBody.add(ktgWord("key", wkWord))
-    keyBody.add(ktgBlock(matchArms))
+  var onKeyForms: seq[OnKeyForm] = @[]
+  for (keyStr, armBody) in onKeys:
+    assertNoSelf(armBody, "on-key handler")
+    onKeyForms.add(OnKeyForm(key: keyStr, body: armBody))
 
-  for v in backend.loadShell(@[]): result.add(v)
-  for v in backend.updateShell(updateStatements): result.add(v)
-  for v in backend.drawShell(drawStatements): result.add(v)
-  for v in backend.keypressedShell(keyBody): result.add(v)
+  for v in backend.emitCallbacks(updateStatements, drawStatements, onKeyForms):
+    result.add(v)
 
 proc expand*(blk: seq[KtgValue]): seq[KtgValue] =
   let targetName = findTarget(blk)
@@ -456,6 +425,7 @@ proc expand*(blk: seq[KtgValue]): seq[KtgValue] =
 
   var consts: Table[string, KtgValue] = initTable[string, KtgValue]()
   var body: seq[KtgValue] = @[]
+  var userBindings: seq[KtgValue] = @[]
 
   var i = 0
   while i < blk.len:
@@ -466,6 +436,11 @@ proc expand*(blk: seq[KtgValue]): seq[KtgValue] =
          i + 1 < blk.len and blk[i + 1].kind == vkBlock:
       for k, val in collectConstants(blk[i + 1].blockVals):
         consts[k] = val
+      i += 2
+    elif v.kind == vkWord and v.wordKind == wkWord and v.wordName == "bindings" and
+         i + 1 < blk.len and blk[i + 1].kind == vkBlock:
+      for entry in blk[i + 1].blockVals:
+        userBindings.add(entry)
       i += 2
     elif v.kind == vkWord and v.wordKind == wkWord and v.wordName == "scene" and
          i + 2 < blk.len and blk[i + 1].kind == vkWord and
@@ -478,8 +453,25 @@ proc expand*(blk: seq[KtgValue]): seq[KtgValue] =
     else:
       i += 1
 
-  for v in backend.bindings:
-    result.add(v)
+  if userBindings.len > 0:
+    ## Splice user entries into the backend's bindings block (second element).
+    if backend.bindings.len >= 2 and backend.bindings[1].kind == vkBlock:
+      var mergedEntries: seq[KtgValue] = @[]
+      for e in backend.bindings[1].blockVals:
+        mergedEntries.add(e)
+      for e in userBindings:
+        mergedEntries.add(e)
+      result.add(backend.bindings[0])
+      result.add(ktgBlock(mergedEntries))
+    else:
+      for v in backend.bindings:
+        result.add(v)
+      result.add(ktgWord("bindings", wkWord))
+      result.add(ktgBlock(userBindings))
+  else:
+    for v in backend.bindings:
+      result.add(v)
+
   let inlined = inlineConstants(body, consts)
   for v in substituteCalls(inlined, backend):
     result.add(v)

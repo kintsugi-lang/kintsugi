@@ -519,29 +519,39 @@ Same reasoning as `_insert`. Dual-mode helper unifies string/block removal.
 
 ## Appendix: GameBackend field count measurement (Step 9 exit gate)
 
-**Phase 1 field count (Step 5, 2026-04-13):** 10 fields
+**Phase 1 field count (Step 5, 2026-04-13):** 10 fields - `name`, `bindings`, `loadShell`, `updateShell`, `drawShell`, `keypressedShell`, `setColorCall`, `drawRectCall`, `quitCall`, `isKeyDown`.
 
-1. `name` - target identifier string
-2. `bindings` - Kintsugi `bindings [...]` block spliced at top of expansion
-3. `loadShell` - wraps load body in target's load callback
-4. `updateShell` - wraps update body in target's update callback
-5. `drawShell` - wraps draw body in target's draw callback
-6. `keypressedShell` - wraps keypressed body in target's keypressed callback
-7. `setColorCall` - emits target's setColor invocation
-8. `drawRectCall` - emits target's filled-rectangle invocation
-9. `quitCall` - emits target's quit/exit invocation
-10. `isKeyDown` - emits target's key-is-down query
+**Phase 5 field count (Step 9, final):** 7 fields - `name`, `bindings`, `emitCallbacks`, `setColorCall`, `drawRectCall`, `printCall`, `isKeyDown`.
 
-**Phase 5 field count (Step 9):** 11 fields
+**Delta:** -3 fields from Phase 1.
 
-New fields added during Steps 5-9:
+### Design decisions made during Step 9
 
-11. `printCall` - emits target's text-rendering invocation (added to support `text-print` abstraction during Step 9's one-line-delta exit gate fix)
+1. **Consolidated 4 callback shells into 1 `emitCallbacks` method.** Playdate has a single `playdate.update()` callback while LOVE2D has four (load/update/draw/keypressed). The original 4-shell shape couldn't express Playdate's fold. The consolidated method takes `(updateBody, drawBody, onKeys)` and each backend produces its own target-specific callback structure.
 
-**Delta:** +1 field.
+2. **Dropped `quit` as a dialect abstraction.** LOVE2D has `love.event.quit`; Playdate has no programmatic quit. A cross-target `quit` primitive couldn't be defined. Users who want to exit on LOVE2D write `love/event/quit` directly via the backend's binding. On Playdate, quit is simply not available - the dialect does not pretend otherwise.
 
-**Verdict:** Within the +2 field budget. Phase 1 abstraction shape held.
+3. **Target-specific path words are NOT cross-target.** `love/keyboard/isDown`, `love/event/quit`, `love/graphics/print` are LOVE2D-only. A user writing these is explicitly targeting LOVE2D. Compiling for Playdate leaves them undefined - the Lua output will contain unresolved references and the behavior is the user's responsibility.
 
-**Design lesson:** The original Phase 1 abstraction missed `printCall` because Step 5's pong-stub had no HUD. Only when Step 9 required a Playdate target with a truly one-line source delta did the need for a cross-target text-rendering primitive surface. Adding it cost one field and one `substituteCalls` dispatch case. The `isKeyDown` field (which existed in Phase 1) went unused through Steps 5-8 because user code wrote `love/keyboard/isDown` directly; Step 9's fix also repurposed `isKeyDown` through the new `substituteCalls` pass and made the field actually reachable via the `key-down?` user-facing abstraction.
+4. **Cross-target abstractions are explicit.** Users write `key-down?` and `text-print` when they want cross-target portability. Each backend maps these to its own API via `isKeyDown` and `printCall` methods.
 
-**Follow-up:** Phase 6 tasks (animation, real ECS, custom components) may need additional backend fields. The +2 budget was set against Phase 1-5 scope; Phase 6 may legitimately require expansion.
+5. **Key name strings are NOT translated.** `key-down? "w"` on Playdate emits `playdate.buttonIsPressed("w")` - always false, because `"w"` is not a Playdate button name. Users targeting Playdate must pass Playdate button names (`"a"`, `"b"`, `"up"`, `"down"`, `"left"`, `"right"`). This is philosophically consistent: the dialect abstracts the API call, not the argument semantics.
+
+6. **Dev extensibility.** The @game block accepts a top-level `bindings [...]` form that merges with the backend's built-in bindings. This lets devs use target-specific APIs (e.g., `playdate/sound/fileplayer/new`) by providing their own binding entries without modifying the dialect.
+
+### The pong example
+
+`examples/game-pong/main.ktg` uses LOVE2D-specific key names (`"w"`, `"s"`, `"space"`, `"escape"`) and an explicit `love/event/quit` call. Compiling for `target: 'love2d` produces a playable pong. Compiling for `target: 'playdate` produces structurally valid Lua that demonstrates the pipeline works end-to-end, but the Playdate build is NOT playable (key names don't match Playdate buttons, `love/event/quit` is an unresolved reference). A real cross-target pong would require the dev to write a separate version or use Kintsugi's `@preprocess` metaprogramming to generate per-target sources.
+
+### Final shape
+
+The 7-field `GameBackend` is the minimal abstraction set:
+1. `name` - target identifier
+2. `bindings` - backend's built-in Kintsugi bindings block
+3. `emitCallbacks` - target-specific callback assembly (updateBody + drawBody + onKeys -> emitted AST)
+4. `setColorCall` - target's setColor emission
+5. `drawRectCall` - target's filled-rectangle emission
+6. `printCall` - target's text-rendering emission
+7. `isKeyDown` - target's button-held query emission
+
+**Design lesson:** Cross-target portability lives in explicit abstractions (`key-down?`, `text-print`), not in silent argument translation. The dialect defines the abstractions it is willing to commit to; everything else is the user's job.

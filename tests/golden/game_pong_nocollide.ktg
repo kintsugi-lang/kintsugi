@@ -32,7 +32,7 @@ Kintsugi [name: 'pong-nocollide]
       ]
     ]
     on-key "space"  [paused?: not paused?]
-    on-key "escape" [quit]
+    on-key "escape" [love/event/quit]
   ]
   go 'main
 ]

@@ -284,36 +284,25 @@ suite "game dialect expansion":
         found = true
     check found
 
-  test "quit in on-key body becomes backend.quitCall()":
+  test "user-supplied bindings merge with backend bindings":
     let blk = @[
       ktgWord("target", wkSetWord), ktgWord("love2d", wkLitWord),
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("bindings", wkWord),
       ktgBlock(@[
-        ktgWord("on-key", wkWord), ktgString("escape"),
-        ktgBlock(@[ktgWord("quit", wkWord)]),
+        ktgWord("my/custom/call", wkWord),
+        ktgString("my.custom.call"),
+        ktgWord("call", wkLitWord),
+        ktgInt(2),
       ]),
     ]
     let output = expand(blk)
-    ## Find love/keypressed body and drill into the first arm body (should contain love/event/quit, not bare quit).
-    var sawQuit = false
-    for i in 0 ..< output.len - 3:
-      if output[i].kind == vkWord and output[i].wordKind == wkSetWord and
-         output[i].wordName == "love/keypressed":
-        let body = output[i + 3].blockVals
-        ## body is: match key [[<"escape">] [<quit-body>] default []]
-        ## arms = body[2].blockVals
-        if body.len >= 3 and body[2].kind == vkBlock:
-          let arms = body[2].blockVals
-          for arm in arms:
-            if arm.kind == vkBlock:
-              for v in arm.blockVals:
-                if v.kind == vkWord and v.wordKind == wkWord and
-                   v.wordName == "love/event/quit":
-                  sawQuit = true
-                if v.kind == vkWord and v.wordKind == wkWord and v.wordName == "quit":
-                  ## bare `quit` should NOT appear in the output
-                  check false
-    check sawQuit
+    check output[0].kind == vkWord and output[0].wordKind == wkWord and output[0].wordName == "bindings"
+    check output[1].kind == vkBlock
+    var sawCustom = false
+    for entry in output[1].blockVals:
+      if entry.kind == vkWord and entry.wordName == "my/custom/call":
+        sawCustom = true
+    check sawCustom
 
   test "tags are collected per entity":
     let blk = @[
