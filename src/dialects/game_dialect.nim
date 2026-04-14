@@ -304,6 +304,7 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
   var onKeys: seq[(KtgValue, seq[KtgValue])] = @[]
   var collides: seq[CollideForm] = @[]
   var userDrawBody: seq[KtgValue] = @[]
+  var userUpdatePre: seq[KtgValue] = @[]
 
   var i = 0
   while i < sceneBody.len:
@@ -343,6 +344,12 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
       for v in sceneBody[i + 1].blockVals:
         userDrawBody.add(v)
       i += 2
+    elif head.kind == vkWord and head.wordKind == wkWord and head.wordName == "on-update" and
+         i + 1 < sceneBody.len and sceneBody[i + 1].kind == vkBlock:
+      assertNoSelf(sceneBody[i + 1].blockVals, "scene on-update block")
+      for v in sceneBody[i + 1].blockVals:
+        userUpdatePre.add(v)
+      i += 2
     else:
       i += 1
 
@@ -361,6 +368,8 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
       tagMap[tag].add(ent.name)
 
   var updateStatements: seq[KtgValue] = @[]
+  for v in userUpdatePre:
+    updateStatements.add(v)
   for ent in entities:
     for v in ent.updateBody:
       updateStatements.add(v)

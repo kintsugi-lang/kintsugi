@@ -432,6 +432,53 @@ suite "game dialect expansion":
     expect(ValueError):
       discard expand(blk)
 
+  test "scene-level on-update body appears first in love/update":
+    let blk = @[
+      ktgWord("target", wkSetWord), ktgWord("love2d", wkLitWord),
+      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgBlock(@[
+        ktgWord("on-update", wkWord),
+        ktgBlock(@[
+          ktgWord("if", wkWord),
+          ktgWord("paused?", wkWord),
+          ktgBlock(@[ktgWord("return", wkWord)]),
+        ]),
+        ktgWord("entity", wkWord), ktgWord("player", wkWord),
+        ktgBlock(@[
+          ktgWord("pos", wkWord), ktgInt(0), ktgInt(0),
+          ktgWord("rect", wkWord), ktgInt(10), ktgInt(10),
+          ktgWord("color", wkWord), ktgInt(1), ktgInt(1), ktgInt(1),
+          ktgWord("update", wkWord),
+          ktgBlock(@[ktgWord("self/y", wkSetWord), ktgInt(1)]),
+        ]),
+      ]),
+    ]
+    let output = expand(blk)
+    var found = false
+    for i in 0 ..< output.len - 3:
+      if output[i].kind == vkWord and output[i].wordKind == wkSetWord and
+         output[i].wordName == "love/update" and output[i + 3].kind == vkBlock:
+        let body = output[i + 3].blockVals
+        check body.len >= 3
+        check body[0].kind == vkWord and body[0].wordName == "if"
+        check body[1].kind == vkWord and body[1].wordName == "paused?"
+        check body[2].kind == vkBlock
+        check body[2].blockVals[0].wordName == "return"
+        found = true
+    check found
+
+  test "self in scene on-update block raises":
+    let blk = @[
+      ktgWord("target", wkSetWord), ktgWord("love2d", wkLitWord),
+      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgBlock(@[
+        ktgWord("on-update", wkWord),
+        ktgBlock(@[ktgWord("self/x", wkWord)]),
+      ]),
+    ]
+    expect(ValueError):
+      discard expand(blk)
+
 suite "game dialect preprocess wiring":
   test "bare @game splices empty expansion":
     let src = "Kintsugi [name: 'test]\n@game [target: 'love2d]\nprint \"hi\"\n"

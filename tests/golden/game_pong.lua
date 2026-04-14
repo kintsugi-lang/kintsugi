@@ -34,44 +34,41 @@ local ball = {
 love.load = function()
 end
 love.update = function(dt)
-  if not (is_paused) then
-    if love.keyboard.isDown("w") then
-      player.y = player.y - (420 * dt)
-    end
-    if love.keyboard.isDown("s") then
-      player.y = player.y + (420 * dt)
-    end
+  if is_paused then
+    return nil
   end
-  if not (is_paused) then
-    cpu.y = ball.y - 40
+  if love.keyboard.isDown("w") then
+    player.y = player.y - (420 * dt)
   end
-  if not (is_paused) then
-    ball.x = ball.x + (ball.dx * ball.speed * dt)
-    ball.y = ball.y + (ball.dy * ball.speed * dt)
-    if ball.y < 0 then
-      ball.y = 0
-      ball.dy = -(ball.dy)
-    end
-    if ball.y > (600 - 8) then
-      ball.y = 600 - 8
-      ball.dy = -(ball.dy)
-    end
-    if ball.x < 0 then
-      cpu_score = cpu_score + 1
-      ball.x = 396
-      ball.y = 296
-      ball.dx = 1
-      ball.dy = 0
-      ball.speed = 350
-    end
-    if ball.x > 800 then
-      player_score = player_score + 1
-      ball.x = 396
-      ball.y = 296
-      ball.dx = -1
-      ball.dy = 0
-      ball.speed = 350
-    end
+  if love.keyboard.isDown("s") then
+    player.y = player.y + (420 * dt)
+  end
+  cpu.y = ball.y - 40
+  ball.x = ball.x + (ball.dx * ball.speed * dt)
+  ball.y = ball.y + (ball.dy * ball.speed * dt)
+  if ball.y < 0 then
+    ball.y = 0
+    ball.dy = -(ball.dy)
+  end
+  if ball.y > (600 - 8) then
+    ball.y = 600 - 8
+    ball.dy = -(ball.dy)
+  end
+  if ball.x < 0 then
+    cpu_score = cpu_score + 1
+    ball.x = 396
+    ball.y = 296
+    ball.dx = 1
+    ball.dy = 0
+    ball.speed = 350
+  end
+  if ball.x > 800 then
+    player_score = player_score + 1
+    ball.x = 396
+    ball.y = 296
+    ball.dx = -1
+    ball.dy = 0
+    ball.speed = 350
   end
   if (ball.x < (player.x + player.w) and player.x < (ball.x + ball.w) and ball.y < (player.y + player.h) and player.y < (ball.y + ball.h)) then
     ball.dx = -(ball.dx)

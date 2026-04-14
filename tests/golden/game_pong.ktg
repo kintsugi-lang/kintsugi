@@ -14,52 +14,47 @@ Kintsugi [name: 'pong]
       player-score: 0
       cpu-score: 0
     ]
+    on-update [if paused? [return]]
     entity player [
       pos 20 260  rect 12 80  color 0.9 0.9 1
       tags [paddle]
       update [
-        if not paused? [
-          if love/keyboard/isDown "w" [self/y: self/y - (PADDLE-SPEED * dt)]
-          if love/keyboard/isDown "s" [self/y: self/y + (PADDLE-SPEED * dt)]
-        ]
+        if love/keyboard/isDown "w" [self/y: self/y - (PADDLE-SPEED * dt)]
+        if love/keyboard/isDown "s" [self/y: self/y + (PADDLE-SPEED * dt)]
       ]
     ]
     entity cpu [
       pos 768 260 rect 12 80  color 0.9 0.9 1
       tags [paddle]
       update [
-        if not paused? [
-          self/y: ball/y - 40
-        ]
+        self/y: ball/y - 40
       ]
     ]
     entity ball [
-      pos 396 296 rect 8 8  color 1 0.8 0.2
+      pos 396 296 rect 8 8 color 1 0.8 0.2
       field dx 1
       field dy 0
       field speed 350
       update [
-        if not paused? [
-          self/x: self/x + (self/dx * self/speed * dt)
-          self/y: self/y + (self/dy * self/speed * dt)
-          if self/y < 0 [self/y: 0  self/dy: negate self/dy]
-          if self/y > (SCREEN-H - 8) [self/y: SCREEN-H - 8  self/dy: negate self/dy]
-          if self/x < 0 [
-            cpu-score: cpu-score + 1
-            self/x: 396
-            self/y: 296
-            self/dx: 1
-            self/dy: 0
-            self/speed: 350
-          ]
-          if self/x > SCREEN-W [
-            player-score: player-score + 1
-            self/x: 396
-            self/y: 296
-            self/dx: -1
-            self/dy: 0
-            self/speed: 350
-          ]
+        self/x: self/x + (self/dx * self/speed * dt)
+        self/y: self/y + (self/dy * self/speed * dt)
+        if self/y < 0 [self/y: 0  self/dy: negate self/dy]
+        if self/y > (SCREEN-H - 8) [self/y: SCREEN-H - 8  self/dy: negate self/dy]
+        if self/x < 0 [
+          cpu-score: cpu-score + 1
+          self/x: 396
+          self/y: 296
+          self/dx: 1
+          self/dy: 0
+          self/speed: 350
+        ]
+        if self/x > SCREEN-W [
+          player-score: player-score + 1
+          self/x: 396
+          self/y: 296
+          self/dx: -1
+          self/dy: 0
+          self/speed: 350
         ]
       ]
     ]
