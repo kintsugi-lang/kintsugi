@@ -443,7 +443,7 @@ let gameGoldenDir = currentSourcePath().parentDir / "golden"
 let updateGameGoldens = getEnv("KINTSUGI_UPDATE_GOLDENS") == "1"
 
 suite "game dialect goldens (three layer)":
-  for name in ["game_pong_stub", "game_pong_nocollide"]:
+  for name in ["game_pong_stub", "game_pong_nocollide", "game_pong"]:
     test name:
       let ktgPath = gameGoldenDir / (name & ".ktg")
       let expPath = gameGoldenDir / (name & "_expanded.ktg")

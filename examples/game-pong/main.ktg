@@ -1,0 +1,50 @@
+Kintsugi [name: 'pong]
+
+@game [
+  target: 'love2d
+  constants [
+    SCREEN-W: 800
+    SCREEN-H: 600
+    PADDLE-SPEED: 420
+    BALL-ACCEL: 20
+  ]
+  scene 'main [
+    state [
+      paused?: false
+      player-score: 0
+      cpu-score: 0
+    ]
+    entity player [
+      pos 20 260  rect 12 80  color 0.9 0.9 1
+      tags [paddle]
+      update [
+        if love/keyboard/isDown "w" [self/y: self/y - (PADDLE-SPEED * dt)]
+        if love/keyboard/isDown "s" [self/y: self/y + (PADDLE-SPEED * dt)]
+      ]
+    ]
+    entity cpu [
+      pos 768 260 rect 12 80  color 0.9 0.9 1
+      tags [paddle]
+      update [
+        self/y: ball/y - 40
+      ]
+    ]
+    entity ball [
+      pos 396 296 rect 8 8  color 1 0.8 0.2
+      field dx 1
+      field dy 0
+      field speed 350
+      update [
+        self/x: self/x + (self/dx * self/speed * dt)
+        self/y: self/y + (self/dy * self/speed * dt)
+      ]
+    ]
+    collide ball 'paddle [
+      ball/dx: negate ball/dx
+      ball/speed: ball/speed + BALL-ACCEL
+    ]
+    on-key "space"  [paused?: not paused?]
+    on-key "escape" [quit]
+  ]
+  go 'main
+]
