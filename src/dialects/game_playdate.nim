@@ -34,6 +34,9 @@ proc playdateSetColorCall(r, g, b: KtgValue): seq[KtgValue] =
 proc playdateDrawRectCall(x, y, w, h: KtgValue): seq[KtgValue] =
   @[ktgWord("playdate/graphics/fillRect", wkWord), x, y, w, h]
 
+proc playdatePrintCall(text, x, y: KtgValue): seq[KtgValue] =
+  @[ktgWord("playdate/graphics/drawText", wkWord), text, x, y]
+
 proc playdateQuitCall(): seq[KtgValue] =
   @[ktgWord("playdate/system/exit", wkWord)]
 
@@ -60,6 +63,7 @@ let playdateBackend* = GameBackend(
   keypressedShell: playdateKeypressedShell,
   setColorCall: playdateSetColorCall,
   drawRectCall: playdateDrawRectCall,
+  printCall: playdatePrintCall,
   quitCall: playdateQuitCall,
   isKeyDown: playdateIsKeyDown,
 )

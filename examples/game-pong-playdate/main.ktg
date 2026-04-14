@@ -1,7 +1,7 @@
 Kintsugi [name: 'pong]
 
 @game [
-  target: 'love2d
+  target: 'playdate
   constants [
     SCREEN-W: 800
     SCREEN-H: 600

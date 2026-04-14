@@ -42,6 +42,9 @@ proc love2dSetColorCall(r, g, b: KtgValue): seq[KtgValue] =
 proc love2dDrawRectCall(x, y, w, h: KtgValue): seq[KtgValue] =
   @[ktgWord("love/graphics/rectangle", wkWord), ktgWord("fill", wkLitWord), x, y, w, h]
 
+proc love2dPrintCall(text, x, y: KtgValue): seq[KtgValue] =
+  @[ktgWord("love/graphics/print", wkWord), text, x, y]
+
 proc love2dQuitCall(): seq[KtgValue] =
   @[ktgWord("love/event/quit", wkWord)]
 
@@ -70,6 +73,7 @@ let love2dBackend* = GameBackend(
   keypressedShell: love2dKeypressedShell,
   setColorCall: love2dSetColorCall,
   drawRectCall: love2dDrawRectCall,
+  printCall: love2dPrintCall,
   quitCall: love2dQuitCall,
   isKeyDown: love2dIsKeyDown,
 )
@@ -115,6 +119,30 @@ proc inlineConstants(vals: seq[KtgValue],
       result[idx] = ktgParen(inlineConstants(v.parenVals, consts))
     else:
       result[idx] = v
+
+proc substituteCalls*(vals: seq[KtgValue], backend: GameBackend): seq[KtgValue] =
+  var i = 0
+  while i < vals.len:
+    let v = vals[i]
+    if v.kind == vkWord and v.wordKind == wkWord and
+       v.wordName == "key-down?" and i + 1 < vals.len:
+      for c in backend.isKeyDown(vals[i + 1]):
+        result.add(c)
+      i += 2
+    elif v.kind == vkWord and v.wordKind == wkWord and
+         v.wordName == "text-print" and i + 3 < vals.len:
+      for c in backend.printCall(vals[i + 1], vals[i + 2], vals[i + 3]):
+        result.add(c)
+      i += 4
+    elif v.kind == vkBlock:
+      result.add(ktgBlock(substituteCalls(v.blockVals, backend)))
+      i += 1
+    elif v.kind == vkParen:
+      result.add(ktgParen(substituteCalls(v.parenVals, backend)))
+      i += 1
+    else:
+      result.add(v)
+      i += 1
 
 proc substituteQuit*(vals: seq[KtgValue], backend: GameBackend): seq[KtgValue] =
   for v in vals:
@@ -452,5 +480,6 @@ proc expand*(blk: seq[KtgValue]): seq[KtgValue] =
 
   for v in backend.bindings:
     result.add(v)
-  for v in inlineConstants(body, consts):
+  let inlined = inlineConstants(body, consts)
+  for v in substituteCalls(inlined, backend):
     result.add(v)

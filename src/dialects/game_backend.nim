@@ -10,6 +10,7 @@ type
     keypressedShell*: proc(body: seq[KtgValue]): seq[KtgValue]
     setColorCall*: proc(r, g, b: KtgValue): seq[KtgValue]
     drawRectCall*: proc(x, y, w, h: KtgValue): seq[KtgValue]
+    printCall*: proc(text, x, y: KtgValue): seq[KtgValue]
     quitCall*: proc(): seq[KtgValue]
     isKeyDown*: proc(key: KtgValue): seq[KtgValue]
 
