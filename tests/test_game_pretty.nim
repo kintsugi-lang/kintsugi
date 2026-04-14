@@ -1,13 +1,14 @@
 import std/unittest
-import ../src/core/[types, pretty]
+import ../src/core/[types, pretty, equality]
 import ../src/parse/parser
 
 proc roundTrip(src: string) =
   let ast = parseSource(src)
   let pretty = prettyPrintBlock(ast)
   let ast2 = parseSource(pretty)
-  check $ast == $ast2  ## uses $, but we compare printed forms as sanity
   check ast.len == ast2.len
+  for i in 0 ..< ast.len:
+    check valuesEqual(ast[i], ast2[i])
 
 suite "pretty print round trip":
   test "empty block": roundTrip("[]")

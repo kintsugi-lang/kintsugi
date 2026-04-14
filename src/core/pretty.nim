@@ -57,7 +57,10 @@ proc prettyPrintValue*(v: KtgValue): string =
     of wkMetaWord: "@" & v.wordName
   of vkOp:   v.opSymbol
   of vkType: v.typeName
-  else: "<" & $v.kind & ">"  ## unreached for @game expansion
+  else:
+    raise newException(ValueError,
+      "prettyPrintValue: unsupported value kind " & $v.kind &
+      " (pretty printer is for preprocess-time AST only)")
 
 proc prettyPrintBlock*(vals: seq[KtgValue]): string =
   var parts: seq[string] = @[]
