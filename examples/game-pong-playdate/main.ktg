@@ -1,7 +1,6 @@
 Kintsugi [name: 'pong]
 
 @game [
-  target: 'playdate
   constants [
     SCREEN-W: 800
     SCREEN-H: 600
@@ -14,24 +13,27 @@ Kintsugi [name: 'pong]
       player-score: 0
       cpu-score: 0
     ]
-    on-update [if paused? [return]]
+    on-update [
+      if playdate/buttonJustPressed playdate/kButtonA [paused?: not paused?]
+      if paused? [return]
+    ]
     entity player [
-      pos 20 260  rect 12 80  color 0.9 0.9 1
+      pos 20 260  rect 12 80
       tags [paddle]
       update [
-        if key-down? "up" [self/y: self/y - (PADDLE-SPEED * dt)]
-        if key-down? "down" [self/y: self/y + (PADDLE-SPEED * dt)]
+        if playdate/buttonIsPressed playdate/kButtonUp   [self/y: self/y - (PADDLE-SPEED * dt)]
+        if playdate/buttonIsPressed playdate/kButtonDown [self/y: self/y + (PADDLE-SPEED * dt)]
       ]
     ]
     entity cpu [
-      pos 768 260 rect 12 80  color 0.9 0.9 1
+      pos 768 260 rect 12 80
       tags [paddle]
       update [
         self/y: ball/y - 40
       ]
     ]
     entity ball [
-      pos 396 296 rect 8 8 color 1 0.8 0.2
+      pos 396 296 rect 8 8
       field dx 1
       field dy 0
       field speed 350
@@ -64,10 +66,8 @@ Kintsugi [name: 'pong]
       ball/speed: ball/speed + BALL-ACCEL
     ]
     draw [
-      text-print rejoin [player-score "   " cpu-score] 380 20
+      playdate/graphics/drawText rejoin [player-score "   " cpu-score] 380 20
     ]
-    on-key "a"  [paused?: not paused?]
-    on-key "b" []
   ]
   go 'main
 ]

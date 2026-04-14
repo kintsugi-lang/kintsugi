@@ -185,21 +185,36 @@ A dialect is a block where words change meaning. `loop [for [x] in series do [bo
 
 **Why:** Dialects and macros are complementary. Macros (`@macro`, `@compose`) generate code — they produce blocks that get evaluated. Dialects interpret data — they receive blocks and walk them with custom rules. Dialects are not "more powerful" than macros; they solve a different problem. Use macros when you need code generation. Use dialects when you need a custom vocabulary for a domain.
 
-### Five System Dialects
+### Six System Dialects
 
 1. **Loop** — `for/in`, `from/to/by`, with `/collect`, `/fold`, `/partition` and `when` guards
 2. **Match** — Pattern matching with type checks, captures, destructuring, guards
 3. **Parse** — PEG-style parsing with backtracking (interpreter-only)
 4. **Object** — Frozen objects with typed fields, auto-constructors, `make`
 5. **Attempt** — Resilient pipelines with `source`, `then`, `when`, `catch`, `fallback`, `retries`
+6. **Game** — Scene/entity/state structure, update/draw/frame loop wiring, collision, `self/` substitution. Compile-time only.
 
-**Why:** These are the essential abstractions. Loops, pattern matching, parsing, objects, and error handling. Everything else is built from these.
+**Why:** These are the essential abstractions. Loops, pattern matching, parsing, objects, error handling, and games. Everything else is built from these.
 
 ### Dialects Return Values, Not Side Effects
 
 `loop/collect` returns a block. `parse` returns a context. Dialects don't silently mutate the caller's scope. The caller assigns: `result: parse data [...]`.
 
 **Why:** Explicit data flow. Visible, testable, composable.
+
+### `@game` Is Pure Structure, Not Cross-Platform API
+
+`@game` is the dialect for writing games. It handles scenes, entities, state, collision, the update/draw/frame loop, and `self/<field>` substitution inside entity update bodies. It does not provide a cross-platform input API. It does not abstract target-specific graphics primitives beyond the auto-rect default for an entity.
+
+**Target is a compile flag, not a source field.** `kintsugi -c pong.ktg --target=love2d`. The source contains `@game [...]` with no target declaration. A missing `--target` is a compile error; the REPL and interpret mode also error on `@game`, because `@game` is a compile-time-only dialect.
+
+**Input is the concession.** LOVE accepts arbitrary keyboard keys as strings. Playdate has a fixed set of integer button bitmasks. These surfaces have no honest intersection, so the dialect does not try to unify them. Inside an `update` or `on-update` block, the dev writes target-native input directly: `if love/keyboard/isDown "w" [...]` on LOVE, `if playdate/buttonIsPressed playdate/kButtonUp [...]` on Playdate. The kButton constants are regular bindings on the Playdate backend; the dev references them like any other name. A file that mentions `playdate/kButtonUp` is implicitly a Playdate file, and compiling it with `--target=love2d` fails with an unbound-name error. Honest failure beats fake portability.
+
+**Backends are data, mostly.** A `@game` backend is a record of `bindings` (a bindings block), `prelude` (top-of-file raw Lua), `framePrelude` (top-of-update raw Lua for things like `dt` and screen clear), `emitCallbacks` (how user update/draw bodies wrap into target-required callback shapes), `drawEntity` (target-optimal auto-rect emission for a standard entity), and `storesColor` (whether to extract `cr/cg/cb` fields at all — monochrome targets drop them). Adding a new target means writing a new backend record.
+
+**Clean Lua out.** Generated Lua calls target SDK functions directly. No shim helpers, no dead state, no indirection. When the dev opens `pong.lua` to hand-extend it, they see `love.graphics.rectangle("fill", player.x, player.y, player.w, player.h)` or `playdate.graphics.fillRect(player.x, player.y, player.w, player.h)` — the same function they would have written by hand. `@game` gives you plumbing; what it outputs is yours.
+
+**Why:** A game dialect that pretends to hide the target makes every game worse on every target. `@game` only hides what's the same across targets — structure — and leaves surface concerns alone. Most game code is structure, so most game code is portable. The parts that are not portable are where the dev would have made a platform-specific decision anyway. The dialect respects that by not lying.
 
 ---
 

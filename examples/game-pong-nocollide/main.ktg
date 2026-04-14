@@ -1,7 +1,6 @@
 Kintsugi [name: 'pong-nocollide]
 
 @game [
-  target: 'love2d
   constants [
     SCREEN-W: 800
     SCREEN-H: 600
@@ -31,8 +30,14 @@ Kintsugi [name: 'pong-nocollide]
         self/x: self/x + (BALL-SPEED * dt)
       ]
     ]
-    on-key "space"  [paused?: not paused?]
-    on-key "escape" [quit]
   ]
   go 'main
+]
+
+love/keypressed: function [key] [
+  match key [
+    ["space"]  [paused?: not paused?]
+    ["escape"] [love/event/quit]
+    default    []
+  ]
 ]

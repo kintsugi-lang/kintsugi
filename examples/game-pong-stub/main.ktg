@@ -1,7 +1,6 @@
 Kintsugi [name: 'pong-stub]
 
 @game [
-  target: 'love2d
   constants [
     SCREEN-W: 800
     SCREEN-H: 600

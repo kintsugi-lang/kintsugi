@@ -1464,6 +1464,113 @@ if @parse/ok? "12345" [some digit] [print "all digits"]
 
 
 ; ============================================================
+; GAME DIALECT
+; ============================================================
+; @game is the structural dialect for writing games.
+; It handles scenes, entities, state, collision, and the
+; update/draw/frame loop. It does not provide a cross-platform
+; input or graphics API beyond the auto-rect entity draw.
+;
+; Target is a compile flag, not a source field:
+;   kintsugi -c game.ktg --target=love2d
+;   kintsugi -c game.ktg --target=playdate
+;
+; @game is compile-time only. Using it in the REPL or
+; interpret mode is a hard error.
+;
+; The snippet below does not execute in this full-spec run
+; (there is no --target), so it is wrapped in a comment.
+; Uncomment and compile with --target=love2d to try it.
+
+_game-demo: [
+@game [
+  constants [
+    SCREEN-W: 800
+    SCREEN-H: 600
+    PADDLE-SPEED: 420
+  ]
+
+  scene 'main [
+    ; state block lifts to top-level locals in the output
+    state [
+      paused?: false
+      score: 0
+    ]
+
+    ; scene-level tick runs before entity updates
+    on-update [if paused? [return]]
+
+    ; entities are contexts with auto-extracted pos/rect/color fields
+    entity player [
+      pos 20 260         ; -> x: 20  y: 260
+      rect 12 80         ; -> w: 12  h: 80
+      color 0.9 0.9 1    ; -> cr cg cb (dropped on monochrome targets)
+      tags [paddle]
+
+      ; update body has self/<field> substitution
+      update [
+        if love/keyboard/isDown "w" [self/y: self/y - (PADDLE-SPEED * dt)]
+        if love/keyboard/isDown "s" [self/y: self/y + (PADDLE-SPEED * dt)]
+      ]
+    ]
+
+    entity ball [
+      pos 396 296
+      rect 8 8
+      color 1 0.8 0.2
+      field dx 1                         ; arbitrary extra field
+      field dy 0
+      update [
+        self/x: self/x + (self/dx * 350 * dt)
+        self/y: self/y + (self/dy * 350 * dt)
+      ]
+    ]
+
+    ; collide expands to AABB checks over tagged entities.
+    ; `it/<field>` refers to the other entity in the pair.
+    collide ball 'paddle [
+      ball/dx: negate ball/dx
+      ball/dy: (ball/y - it/y) / 40
+    ]
+
+    ; scene-level draw runs after per-entity auto-rects
+    draw [
+      love/graphics/print score 380 20
+    ]
+  ]
+
+  go 'main
+]
+
+; Platform-specific wiring lives OUTSIDE @game. The dev writes
+; target-native callback handlers directly. They see the state
+; variables that the scene lifted to top level.
+love/keypressed: function [key] [
+  match key [
+    ["space"]  [paused?: not paused?]
+    ["escape"] [love/event/quit]
+    default    []
+  ]
+]
+]
+
+; Custom entity draw override (replaces the auto-rect for that entity):
+;
+;   entity player [
+;     pos 20 260  rect 12 80  color 0.9 0.9 1
+;     draw [
+;       love/graphics/setColor 1 0 0 1
+;       love/graphics/rectangle 'line self/x self/y self/w self/h
+;       love/graphics/print "P1" self/x (self/y - 12)
+;     ]
+;   ]
+;
+; Any draw block that references target-native words (love/... or
+; playdate/...) implicitly locks the file to that target. Compile
+; with the wrong --target and you get a clean unbound-name error.
+
+
+; ============================================================
 ; BLOCKS & HOMOICONICITY
 ; ============================================================
 ; Code is data. Data is code. Blocks hold code or data
