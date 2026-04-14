@@ -83,6 +83,9 @@ type
     usedRandom: bool
     ## Set when the program uses variadic unpack (set destructure rest, apply, etc.)
     usedVariadicUnpack: bool
+    ## Set if the program contains any `none?` usage; when false, `none`
+    ## emits as `nil` and the _NONE sentinel helper is skipped.
+    programUsesNoneCheck: bool
 
   SeqType* = enum
     stUnknown
@@ -1123,13 +1126,13 @@ proc emitLiteral(val: KtgValue): string =
 proc emitBlockLiteral(e: var LuaEmitter, vals: seq[KtgValue]): string =
   ## Emit a block's contents as a Lua table.
   ## Each element is emitted as a literal or word reference.
-  ## Uses _NONE instead of nil to preserve array indices.
+  ## Uses _NONE instead of nil to preserve array indices only when the
+  ## program uses `none?` (and therefore needs the sentinel to distinguish).
   var parts: seq[string] = @[]
   var pos = 0
   while pos < vals.len:
     let expr = e.emitExpr(vals, pos)
-    # Replace nil with _NONE in array contexts so Lua preserves the element
-    if expr == "nil":
+    if expr == "nil" and e.programUsesNoneCheck:
       e.useHelper("_NONE")
       parts.add("_NONE")
     else:
@@ -4263,6 +4266,21 @@ proc scanTypeChecks(e: var LuaEmitter, vals: seq[KtgValue]) =
         let kebab = raw.replace("_", "-")
         e.usedTypeChecks.incl(kebab)
 
+proc scanNoneUsage(e: var LuaEmitter, vals: seq[KtgValue]) =
+  ## Recursively scan the AST for any `none?` word; set programUsesNoneCheck.
+  for i in 0 ..< vals.len:
+    case vals[i].kind
+    of vkBlock:
+      e.scanNoneUsage(vals[i].blockVals)
+    of vkParen:
+      e.scanNoneUsage(vals[i].parenVals)
+    of vkWord:
+      if vals[i].wordKind == wkWord and vals[i].wordName == "none?":
+        e.programUsesNoneCheck = true
+        return
+    else:
+      discard
+
 proc emitLua*(ast: seq[KtgValue], sourceDir: string = ""): string =
   ## Walk the AST and produce Lua source code.
   var e = LuaEmitter(
@@ -4277,5 +4295,6 @@ proc emitLua*(ast: seq[KtgValue], sourceDir: string = ""): string =
   e.prescanBlock(ast)
   e.inferBindings(ast)
   e.scanTypeChecks(ast)
+  e.scanNoneUsage(ast)
   e.emitBlock(ast)
   e.buildPrelude() & e.output

@@ -170,3 +170,20 @@ suite "lean-lua metrics":
     check not lua.startsWith("-- Kintsugi")
     check not lua.contains("math.randomseed")
     check not lua.contains("local unpack")
+
+  test "program without none? emits nil not _NONE":
+    let src = "Kintsugi [name: 'nil-test]\nx: none\nprint x\n"
+    let ast = parseSource(src)
+    let eval = setupEvalForTest()
+    let processed = eval.preprocess(ast, forCompilation = true)
+    let lua = emitLua(processed, "")
+    check countOccurrences(lua, "_NONE") == 0
+
+  test "program with none? emits _NONE sentinel":
+    let src = "Kintsugi [name: 'sentinel-test]\n" &
+              "items: [1 none 3]\nif none? items/2 [print \"empty\"]\n"
+    let ast = parseSource(src)
+    let eval = setupEvalForTest()
+    let processed = eval.preprocess(ast, forCompilation = true)
+    let lua = emitLua(processed, "")
+    check countOccurrences(lua, "_NONE") >= 1
