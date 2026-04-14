@@ -192,3 +192,27 @@ suite "lean-lua metrics":
     for name in ["hello", "pong", "combat", "playdate", "leanlua_stress"]:
       let lua = compileGolden(name)
       check countOccurrences(lua, "_make(") == 0
+
+  # --- end-of-plan exit gates ---
+
+  test "exit gate: hello.lua is strictly lean":
+    let lua = compileGolden("hello")
+    check preludeLineCount(lua) == 0
+    check countOccurrences(lua, "(function()") == 0
+    # Two allowed tostring calls - both wrap block-returning expressions
+    # (squares, qsort(...)) where string formatting is user-visible output.
+    # Dropping them would require block __tostring metatables, out of scope.
+    check countOccurrences(lua, "tostring(") <= 2
+
+  test "exit gate: pong.lua is lean":
+    let lua = compileGolden("pong")
+    # pong uses random, so it retains math.randomseed (2-line prelude).
+    # Cap at a small upper bound to catch regression bloat.
+    check preludeLineCount(lua) <= 3
+    check countOccurrences(lua, "_make(") == 0
+    check countOccurrences(lua, "_NONE") == 0
+    check countOccurrences(lua, "(function()") == 0
+
+  test "exit gate: combat.lua prelude is bounded":
+    let lua = compileGolden("combat")
+    check preludeLineCount(lua) <= 10

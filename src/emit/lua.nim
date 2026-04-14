@@ -3923,28 +3923,31 @@ proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
           if spec.returnType.len > 0:
             e.funcReturnTypes[name] = spec.returnType
           else:
-            # Narrow heuristic: if every param is integer! and the body's
-            # tail contains an arithmetic op, infer integer! return.
+            # Heuristic: a single-expression body that is pure arithmetic
+            # on params/numeric-literals returns a number. Lua's `+ - * /`
+            # only accept numbers, so the return type is numeric regardless
+            # of whether the params are type-annotated.
             if i + 3 < vals.len and vals[i + 3].kind == vkBlock:
               let body = vals[i + 3].blockVals
-              if body.len >= 1:
-                let j = body.len - 1
-                var hasArith = false
-                for k in max(0, j - 2) .. j:
-                  let v = body[k]
-                  if v.kind == vkOp or
-                     (v.kind == vkWord and v.wordKind == wkWord and
-                      v.wordName in ["+", "-", "*", "/"]):
-                    hasArith = true
-                    break
-                if hasArith:
-                  var allIntParams = spec.params.len > 0
-                  for ps in spec.params:
-                    if ps.typeName != "integer!":
-                      allIntParams = false
-                      break
-                  if allIntParams:
-                    e.funcReturnTypes[name] = "integer!"
+              var paramNames: HashSet[string]
+              for ps in spec.params: paramNames.incl(ps.name)
+              var pureArith = body.len > 0
+              var hasArithOp = false
+              for v in body:
+                case v.kind
+                of vkInteger, vkFloat: discard
+                of vkOp:
+                  if v.opSymbol in ["+", "-", "*", "/"]: hasArithOp = true
+                  else: pureArith = false
+                of vkWord:
+                  if v.wordKind == wkWord and v.wordName in paramNames: discard
+                  elif v.wordKind == wkWord and v.wordName in ["+", "-", "*", "/"]:
+                    hasArithOp = true
+                  else: pureArith = false
+                else: pureArith = false
+                if not pureArith: break
+              if pureArith and hasArithOp:
+                e.funcReturnTypes[name] = "integer!"
           # Recurse into function body
           if i + 3 < vals.len and vals[i + 3].kind == vkBlock:
             e.prescanBlock(vals[i + 3].blockVals)

@@ -2,7 +2,7 @@ print("Hello, Kintsugi!")
 local function add(a, b)
   return a + b
 end
-print("2 + 3 = " .. tostring(add(2, 3)))
+print("2 + 3 = " .. add(2, 3))
 local _collect_r = {}
 for n = 1, 5 do
   _collect_r[#_collect_r+1] = n * n
