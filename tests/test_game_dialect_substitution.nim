@@ -144,3 +144,30 @@ suite "assertNoIt":
   test "it/field raises in assertNoIt":
     expect(ValueError):
       assertNoIt(@[ktgWord("it/x", wkWord)], "draw block")
+
+suite "substitution result independence":
+  test "substituteSelf: mutating result does not affect input":
+    let original = @[ktgBlock(@[ktgWord("self/x", wkSetWord), ktgInt(1)])]
+    let output = substituteSelf(original, "player")
+    ## Mutate the returned seq by replacing an element.
+    var mut = output
+    mut[0] = ktgInt(999)
+    ## Original must be unchanged.
+    check original[0].kind == vkBlock
+    check original[0].blockVals[0].wordName == "self/x"
+
+  test "substituteIt: mutating result does not affect input":
+    let original = @[ktgBlock(@[ktgWord("it/y", wkSetWord), ktgInt(2)])]
+    let output = substituteIt(original, "ball")
+    var mut = output
+    mut[0] = ktgInt(999)
+    check original[0].kind == vkBlock
+    check original[0].blockVals[0].wordName == "it/y"
+
+  test "substituteSelf: input's nested block is not aliased":
+    let innerBlock = ktgBlock(@[ktgWord("self/a", wkWord)])
+    let original = @[ktgWord("wrap", wkWord), innerBlock]
+    let output = substituteSelf(original, "p")
+    ## output's nested block should have "p/a", original should still have "self/a".
+    check output[1].blockVals[0].wordName == "p/a"
+    check original[1].blockVals[0].wordName == "self/a"
