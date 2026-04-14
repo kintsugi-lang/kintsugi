@@ -139,6 +139,36 @@ suite "game dialect expansion":
     check sawPlayerCr
     check sawPlayerX
 
+  test "field inside entity adds to context":
+    let blk = @[
+      ktgWord("target", wkSetWord), ktgWord("love2d", wkLitWord),
+      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgBlock(@[
+        ktgWord("entity", wkWord), ktgWord("player", wkWord),
+        ktgBlock(@[
+          ktgWord("pos", wkWord), ktgInt(0), ktgInt(0),
+          ktgWord("rect", wkWord), ktgInt(10), ktgInt(10),
+          ktgWord("color", wkWord), ktgInt(1), ktgInt(1), ktgInt(1),
+          ktgWord("field", wkWord), ktgWord("score", wkWord), ktgInt(0),
+        ]),
+      ]),
+    ]
+    let output = expand(blk)
+    var found = false
+    for i in 0 ..< output.len - 2:
+      if output[i].kind == vkWord and output[i].wordKind == wkSetWord and
+         output[i].wordName == "player" and output[i + 2].kind == vkBlock:
+        let ctx = output[i + 2].blockVals
+        var sawScore = false
+        for j in 0 ..< ctx.len - 1:
+          if ctx[j].kind == vkWord and ctx[j].wordKind == wkSetWord and
+             ctx[j].wordName == "score":
+            check ctx[j + 1].kind == vkInteger and ctx[j + 1].intVal == 0
+            sawScore = true
+        check sawScore
+        found = true
+    check found
+
   test "state lifts to top-level set-words":
     let blk = @[
       ktgWord("target", wkSetWord), ktgWord("love2d", wkLitWord),

@@ -154,6 +154,13 @@ proc expandEntityComponents(body: seq[KtgValue]): seq[KtgValue] =
           result.add(ktgWord("cb", wkSetWord)); result.add(body[i + 3])
           i += 4
           continue
+      of "field":
+        if i + 2 < body.len and body[i + 1].kind == vkWord and
+           body[i + 1].wordKind == wkWord:
+          result.add(ktgWord(body[i + 1].wordName, wkSetWord))
+          result.add(body[i + 2])
+          i += 3
+          continue
       else:
         discard
     i += 1
