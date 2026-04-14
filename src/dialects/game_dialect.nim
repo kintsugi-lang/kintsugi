@@ -129,6 +129,22 @@ proc inlineConstants(vals: seq[KtgValue],
     else:
       result[idx] = v
 
+proc substituteQuit*(vals: seq[KtgValue], backend: GameBackend): seq[KtgValue] =
+  for v in vals:
+    case v.kind
+    of vkWord:
+      if v.wordKind == wkWord and v.wordName == "quit":
+        for q in backend.quitCall():
+          result.add(q)
+      else:
+        result.add(v)
+    of vkBlock:
+      result.add(ktgBlock(substituteQuit(v.blockVals, backend)))
+    of vkParen:
+      result.add(ktgParen(substituteQuit(v.parenVals, backend)))
+    else:
+      result.add(v)
+
 proc substituteSelf*(vals: seq[KtgValue], entityName: string): seq[KtgValue] =
   result = newSeq[KtgValue](vals.len)
   for idx, v in vals:
@@ -254,7 +270,7 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
     var matchArms: seq[KtgValue] = @[]
     for (keyStr, armBody) in onKeys:
       matchArms.add(ktgBlock(@[keyStr]))
-      matchArms.add(ktgBlock(armBody))
+      matchArms.add(ktgBlock(substituteQuit(armBody, backend)))
     matchArms.add(ktgWord("default", wkWord))
     matchArms.add(ktgBlock(@[]))
     keyBody.add(ktgWord("match", wkWord))

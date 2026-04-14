@@ -280,6 +280,37 @@ suite "game dialect expansion":
         found = true
     check found
 
+  test "quit in on-key body becomes backend.quitCall()":
+    let blk = @[
+      ktgWord("target", wkSetWord), ktgWord("love2d", wkLitWord),
+      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgBlock(@[
+        ktgWord("on-key", wkWord), ktgString("escape"),
+        ktgBlock(@[ktgWord("quit", wkWord)]),
+      ]),
+    ]
+    let output = expand(blk)
+    ## Find love/keypressed body and drill into the first arm body (should contain love/event/quit, not bare quit).
+    var sawQuit = false
+    for i in 0 ..< output.len - 3:
+      if output[i].kind == vkWord and output[i].wordKind == wkSetWord and
+         output[i].wordName == "love/keypressed":
+        let body = output[i + 3].blockVals
+        ## body is: match key [[<"escape">] [<quit-body>] default []]
+        ## arms = body[2].blockVals
+        if body.len >= 3 and body[2].kind == vkBlock:
+          let arms = body[2].blockVals
+          for arm in arms:
+            if arm.kind == vkBlock:
+              for v in arm.blockVals:
+                if v.kind == vkWord and v.wordKind == wkWord and
+                   v.wordName == "love/event/quit":
+                  sawQuit = true
+                if v.kind == vkWord and v.wordKind == wkWord and v.wordName == "quit":
+                  ## bare `quit` should NOT appear in the output
+                  check false
+    check sawQuit
+
 suite "game dialect preprocess wiring":
   test "bare @game splices empty expansion":
     let src = "Kintsugi [name: 'test]\n@game [target: 'love2d]\nprint \"hi\"\n"
@@ -335,7 +366,7 @@ let gameGoldenDir = currentSourcePath().parentDir / "golden"
 let updateGameGoldens = getEnv("KINTSUGI_UPDATE_GOLDENS") == "1"
 
 suite "game dialect goldens (three layer)":
-  for name in ["game_pong_stub"]:
+  for name in ["game_pong_stub", "game_pong_nocollide"]:
     test name:
       let ktgPath = gameGoldenDir / (name & ".ktg")
       let expPath = gameGoldenDir / (name & "_expanded.ktg")
