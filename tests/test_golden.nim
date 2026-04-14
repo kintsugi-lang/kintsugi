@@ -53,9 +53,11 @@ proc normalize(s: string): string =
 
 proc listKtgFiles(): seq[string] =
   ## Returns absolute paths to every .ktg file in tests/golden/, sorted.
+  ## Excludes *_expanded.ktg files - those are game-dialect intermediate
+  ## expansions tested by test_game_dialect.nim, not lean-lua goldens.
   let dir = currentSourcePath().parentDir / "golden"
   for path in walkDir(dir):
-    if path.path.endsWith(".ktg"):
+    if path.path.endsWith(".ktg") and not path.path.endsWith("_expanded.ktg"):
       result.add(path.path)
   result.sort()
 

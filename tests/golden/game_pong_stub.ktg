@@ -1,0 +1,15 @@
+Kintsugi [name: 'pong-stub]
+
+@game [
+  target: 'love2d
+  constants [
+    SCREEN-W: 800
+    SCREEN-H: 600
+  ]
+  scene 'main [
+    entity player [pos 20 260  rect 12 80  color 0.9 0.9 1]
+    entity cpu    [pos 768 260 rect 12 80  color 0.9 0.9 1]
+    entity ball   [pos 396 296 rect 8 8    color 1 0.8 0.2]
+  ]
+  go 'main
+]

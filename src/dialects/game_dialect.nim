@@ -47,7 +47,7 @@ proc love2dKeypressedShell(body: seq[KtgValue]): seq[KtgValue] =
   ]
 
 proc love2dSetColorCall(r, g, b: KtgValue): seq[KtgValue] =
-  @[ktgWord("love/graphics/setColor", wkWord), r, g, b]
+  @[ktgWord("love/graphics/setColor", wkWord), r, g, b, ktgInt(1)]
 
 proc love2dDrawRectCall(x, y, w, h: KtgValue): seq[KtgValue] =
   @[ktgWord("love/graphics/rectangle", wkWord), ktgWord("fill", wkLitWord), x, y, w, h]
@@ -58,9 +58,28 @@ proc love2dQuitCall(): seq[KtgValue] =
 proc love2dIsKeyDown(key: KtgValue): seq[KtgValue] =
   @[ktgWord("love/keyboard/isDown", wkWord), key]
 
+proc bindingEntry(name, luaPath, kind: string, arity: int = -1): seq[KtgValue] =
+  result.add(ktgWord(name, wkWord))
+  result.add(ktgString(luaPath))
+  result.add(ktgWord(kind, wkLitWord))
+  if arity >= 0:
+    result.add(ktgInt(arity))
+
+proc love2dBindings(): seq[KtgValue] =
+  var entries: seq[KtgValue]
+  for v in bindingEntry("love/graphics/setColor",  "love.graphics.setColor",  "call", 4): entries.add(v)
+  for v in bindingEntry("love/graphics/rectangle", "love.graphics.rectangle", "call", 5): entries.add(v)
+  for v in bindingEntry("love/event/quit",          "love.event.quit",          "call", 0): entries.add(v)
+  for v in bindingEntry("love/keyboard/isDown",     "love.keyboard.isDown",     "call", 1): entries.add(v)
+  for v in bindingEntry("love/load",       "love.load",       "assign"): entries.add(v)
+  for v in bindingEntry("love/update",     "love.update",     "assign"): entries.add(v)
+  for v in bindingEntry("love/draw",       "love.draw",       "assign"): entries.add(v)
+  for v in bindingEntry("love/keypressed", "love.keypressed", "assign"): entries.add(v)
+  @[ktgWord("bindings", wkWord), ktgBlock(entries)]
+
 let love2dBackend* = GameBackend(
   name: "love2d",
-  bindings: @[],
+  bindings: love2dBindings(),
   loadShell: love2dLoadShell,
   updateShell: love2dUpdateShell,
   drawShell: love2dDrawShell,

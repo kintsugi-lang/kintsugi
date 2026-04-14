@@ -1,8 +1,10 @@
-import std/unittest, std/tables
+import std/[unittest, tables, os, strutils]
 import ../src/core/types
+import ../src/core/pretty
 import ../src/dialects/game_dialect
 import ../src/parse/parser
 import ../src/eval/[evaluator, natives]
+import ../src/emit/lua
 
 suite "game dialect skeleton":
   test "love2d backend is registered":
@@ -32,13 +34,16 @@ suite "game dialect expansion":
       ]),
     ]
     let output = expand(blk)
-    check output.len == 6
-    check output[0].kind == vkWord and output[0].wordKind == wkMetaWord and output[0].wordName == "const"
-    check output[1].kind == vkWord and output[1].wordKind == wkSetWord and output[1].wordName == "SCREEN-W"
-    check output[2].kind == vkInteger and output[2].intVal == 800
-    check output[3].kind == vkWord and output[3].wordKind == wkMetaWord and output[3].wordName == "const"
-    check output[4].kind == vkWord and output[4].wordKind == wkSetWord and output[4].wordName == "SCREEN-H"
-    check output[5].kind == vkInteger and output[5].intVal == 600
+    # output[0..1] = bindings [...] block, constants follow at [2..]
+    check output.len == 8
+    check output[0].kind == vkWord and output[0].wordKind == wkWord and output[0].wordName == "bindings"
+    check output[1].kind == vkBlock
+    check output[2].kind == vkWord and output[2].wordKind == wkMetaWord and output[2].wordName == "const"
+    check output[3].kind == vkWord and output[3].wordKind == wkSetWord and output[3].wordName == "SCREEN-W"
+    check output[4].kind == vkInteger and output[4].intVal == 800
+    check output[5].kind == vkWord and output[5].wordKind == wkMetaWord and output[5].wordName == "const"
+    check output[6].kind == vkWord and output[6].wordKind == wkSetWord and output[6].wordName == "SCREEN-H"
+    check output[7].kind == vkInteger and output[7].intVal == 600
 
   test "entity expands to set-word context":
     let blk = @[
@@ -142,3 +147,59 @@ suite "game dialect preprocess wiring":
       if v.kind == vkWord and v.wordKind == wkWord and v.wordName == "print":
         sawPrint = true
     check sawPrint
+
+# ---------------------------------------------------------------------------
+# Three-layer golden runner for @game dialect files
+# Layer 1: .ktg  -> _expanded.ktg  (dialect expansion, pretty-printed)
+# Layer 2: .ktg  -> .lua            (full compile, handled by test_golden.nim)
+# Layer 3: _expanded.ktg -> .lua   (expanded source compiles identically)
+#
+# Update goldens: KINTSUGI_UPDATE_GOLDENS=1 nim c -r tests/test_game_dialect.nim
+# ---------------------------------------------------------------------------
+
+proc gameSetupEval(): Evaluator =
+  result = newEvaluator()
+  result.registerNatives()
+
+proc dryExpand(src: string): string =
+  let source = applyUsingHeader(src)
+  let ast = parseSource(source)
+  let eval = gameSetupEval()
+  let expanded = eval.preprocess(ast, forCompilation = true)
+  prettyPrintBlock(expanded)
+
+proc compileGameKtg(src, sourceDir: string): string =
+  let source = applyUsingHeader(src)
+  let ast = parseSource(source)
+  let eval = gameSetupEval()
+  let processed = eval.preprocess(ast, forCompilation = true)
+  emitLua(processed, sourceDir)
+
+proc normLF(s: string): string =
+  s.replace("\r\n", "\n").replace("\r", "\n")
+
+let gameGoldenDir = currentSourcePath().parentDir / "golden"
+let updateGameGoldens = getEnv("KINTSUGI_UPDATE_GOLDENS") == "1"
+
+suite "game dialect goldens (three layer)":
+  for name in ["game_pong_stub"]:
+    test name:
+      let ktgPath = gameGoldenDir / (name & ".ktg")
+      let expPath = gameGoldenDir / (name & "_expanded.ktg")
+      let luaPath = gameGoldenDir / (name & ".lua")
+
+      let src = readFile(ktgPath)
+      let actualExpanded = normLF(dryExpand(src)) & "\n"
+      let actualLua = normLF(compileGameKtg(src, gameGoldenDir))
+
+      if updateGameGoldens:
+        writeFile(expPath, actualExpanded)
+        writeFile(luaPath, actualLua)
+        echo "  [updated] ", name, "_expanded.ktg"
+        echo "  [updated] ", name, ".lua"
+        check true
+      else:
+        check fileExists(expPath)
+        check fileExists(luaPath)
+        check normLF(readFile(expPath)) == actualExpanded
+        check normLF(readFile(luaPath)) == actualLua
