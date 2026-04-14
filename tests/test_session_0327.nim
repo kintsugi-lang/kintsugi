@@ -182,6 +182,19 @@ suite "raw":
     """))
     check "-- this is a lua comment" in code
 
+  test "raw inside function body emits verbatim, not as return value":
+    let code = emitLua(parseSource("""
+      f: function [] [
+        raw {local dt = 1/30
+print(dt)}
+      ]
+    """))
+    check "local dt = 1/30" in code
+    check "print(dt)" in code
+    ## Must NOT be wrapped as a return value or string-escaped.
+    check not ("return \"" in code)
+    check not ("\\n" in code)
+
 # --- import (renamed from require) ---
 
 suite "import":

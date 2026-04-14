@@ -437,11 +437,13 @@ proc wrapIfTableCtor(expr: string): string =
 # Simple native expression handlers
 # ---------------------------------------------------------------------------
 
-# --- raw: write string verbatim to Lua output ---
+# --- raw: splice string contents verbatim as a Lua expression fragment ---
 exprHandlers["raw"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  let arg = e.emitExpr(vals, pos)
-  if arg.startsWith("\"") and arg.endsWith("\""): arg[1..^2]
-  else: arg
+  if pos < vals.len and vals[pos].kind == vkString:
+    let s = vals[pos].strVal
+    pos += 1
+    return s
+  ""
 
 # --- Refinement natives ---
 exprHandlers["round/down"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
@@ -2893,9 +2895,9 @@ proc emitLastWithReturn(e: var LuaEmitter, vals: seq[KtgValue]) =
 
   let lastVal = vals[0]
 
-  # return/break already emit themselves
+  # return/break/raw already emit themselves as statements, never as return values
   if lastVal.kind == vkWord and lastVal.wordKind == wkWord and
-     lastVal.wordName in ["return", "break"]:
+     lastVal.wordName in ["return", "break", "raw"]:
     e.emitBlock(vals)
     return
 
