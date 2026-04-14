@@ -169,6 +169,40 @@ suite "game dialect expansion":
         found = true
     check found
 
+  test "update body self substitution":
+    let blk = @[
+      ktgWord("target", wkSetWord), ktgWord("love2d", wkLitWord),
+      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgBlock(@[
+        ktgWord("entity", wkWord), ktgWord("player", wkWord),
+        ktgBlock(@[
+          ktgWord("pos", wkWord), ktgInt(0), ktgInt(0),
+          ktgWord("rect", wkWord), ktgInt(10), ktgInt(10),
+          ktgWord("color", wkWord), ktgInt(1), ktgInt(1), ktgInt(1),
+          ktgWord("update", wkWord),
+          ktgBlock(@[
+            ktgWord("self/y", wkSetWord),
+            ktgWord("self/y", wkWord),
+            ktgInt(5),
+          ]),
+        ]),
+      ]),
+    ]
+    let output = expand(blk)
+    var found = false
+    for i in 0 ..< output.len - 3:
+      if output[i].kind == vkWord and output[i].wordKind == wkSetWord and
+         output[i].wordName == "love/update" and output[i + 3].kind == vkBlock:
+        let body = output[i + 3].blockVals
+        check body.len == 3
+        check body[0].kind == vkWord and body[0].wordKind == wkSetWord and
+              body[0].wordName == "player/y"
+        check body[1].kind == vkWord and body[1].wordKind == wkWord and
+              body[1].wordName == "player/y"
+        check body[2].kind == vkInteger and body[2].intVal == 5
+        found = true
+    check found
+
   test "state lifts to top-level set-words":
     let blk = @[
       ktgWord("target", wkSetWord), ktgWord("love2d", wkLitWord),

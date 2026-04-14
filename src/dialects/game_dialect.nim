@@ -1,4 +1,4 @@
-import std/tables
+import std/[tables, strutils]
 import ../core/types
 
 type
@@ -129,7 +129,31 @@ proc inlineConstants(vals: seq[KtgValue],
     else:
       result[idx] = v
 
-proc expandEntityComponents(body: seq[KtgValue]): seq[KtgValue] =
+proc substituteSelf*(vals: seq[KtgValue], entityName: string): seq[KtgValue] =
+  result = newSeq[KtgValue](vals.len)
+  for idx, v in vals:
+    case v.kind
+    of vkWord:
+      if v.wordName.startsWith("self/"):
+        let suffix = v.wordName["self/".len .. ^1]
+        result[idx] = ktgWord(entityName & "/" & suffix, v.wordKind)
+      else:
+        result[idx] = v
+    of vkBlock:
+      result[idx] = ktgBlock(substituteSelf(v.blockVals, entityName))
+    of vkParen:
+      result[idx] = ktgParen(substituteSelf(v.parenVals, entityName))
+    else:
+      result[idx] = v
+
+type
+  Entity = object
+    name: string
+    ctxBlock: seq[KtgValue]
+    updateBody: seq[KtgValue]
+
+proc parseEntity(name: string, body: seq[KtgValue]): Entity =
+  result.name = name
   var i = 0
   while i < body.len:
     let head = body[i]
@@ -137,29 +161,35 @@ proc expandEntityComponents(body: seq[KtgValue]): seq[KtgValue] =
       case head.wordName
       of "pos":
         if i + 2 < body.len:
-          result.add(ktgWord("x", wkSetWord)); result.add(body[i + 1])
-          result.add(ktgWord("y", wkSetWord)); result.add(body[i + 2])
+          result.ctxBlock.add(ktgWord("x", wkSetWord)); result.ctxBlock.add(body[i + 1])
+          result.ctxBlock.add(ktgWord("y", wkSetWord)); result.ctxBlock.add(body[i + 2])
           i += 3
           continue
       of "rect":
         if i + 2 < body.len:
-          result.add(ktgWord("w", wkSetWord)); result.add(body[i + 1])
-          result.add(ktgWord("h", wkSetWord)); result.add(body[i + 2])
+          result.ctxBlock.add(ktgWord("w", wkSetWord)); result.ctxBlock.add(body[i + 1])
+          result.ctxBlock.add(ktgWord("h", wkSetWord)); result.ctxBlock.add(body[i + 2])
           i += 3
           continue
       of "color":
         if i + 3 < body.len:
-          result.add(ktgWord("cr", wkSetWord)); result.add(body[i + 1])
-          result.add(ktgWord("cg", wkSetWord)); result.add(body[i + 2])
-          result.add(ktgWord("cb", wkSetWord)); result.add(body[i + 3])
+          result.ctxBlock.add(ktgWord("cr", wkSetWord)); result.ctxBlock.add(body[i + 1])
+          result.ctxBlock.add(ktgWord("cg", wkSetWord)); result.ctxBlock.add(body[i + 2])
+          result.ctxBlock.add(ktgWord("cb", wkSetWord)); result.ctxBlock.add(body[i + 3])
           i += 4
           continue
       of "field":
         if i + 2 < body.len and body[i + 1].kind == vkWord and
            body[i + 1].wordKind == wkWord:
-          result.add(ktgWord(body[i + 1].wordName, wkSetWord))
-          result.add(body[i + 2])
+          result.ctxBlock.add(ktgWord(body[i + 1].wordName, wkSetWord))
+          result.ctxBlock.add(body[i + 2])
           i += 3
+          continue
+      of "update":
+        if i + 1 < body.len and body[i + 1].kind == vkBlock:
+          for v in substituteSelf(body[i + 1].blockVals, name):
+            result.updateBody.add(v)
+          i += 2
           continue
       else:
         discard
@@ -168,8 +198,7 @@ proc expandEntityComponents(body: seq[KtgValue]): seq[KtgValue] =
 proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
                  backend: GameBackend): seq[KtgValue] =
   var stateBlock: seq[KtgValue] = @[]
-  var entityEmits: seq[KtgValue] = @[]
-  var entityNames: seq[string] = @[]
+  var entities: seq[Entity] = @[]
 
   var i = 0
   while i < sceneBody.len:
@@ -182,37 +211,40 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
     elif head.kind == vkWord and head.wordKind == wkWord and head.wordName == "entity" and
        i + 2 < sceneBody.len and sceneBody[i + 1].kind == vkWord and
        sceneBody[i + 1].wordKind == wkWord and sceneBody[i + 2].kind == vkBlock:
-      let entName = sceneBody[i + 1].wordName
-      let components = expandEntityComponents(sceneBody[i + 2].blockVals)
-      entityEmits.add(ktgWord(entName, wkSetWord))
-      entityEmits.add(ktgWord("context", wkWord))
-      entityEmits.add(ktgBlock(components))
-      entityNames.add(entName)
+      let ent = parseEntity(sceneBody[i + 1].wordName, sceneBody[i + 2].blockVals)
+      entities.add(ent)
       i += 3
     else:
       i += 1
 
   for v in stateBlock:
     result.add(v)
-  for v in entityEmits:
-    result.add(v)
+  for ent in entities:
+    result.add(ktgWord(ent.name, wkSetWord))
+    result.add(ktgWord("context", wkWord))
+    result.add(ktgBlock(ent.ctxBlock))
+
+  var updateStatements: seq[KtgValue] = @[]
+  for ent in entities:
+    for v in ent.updateBody:
+      updateStatements.add(v)
 
   var drawStatements: seq[KtgValue] = @[]
-  for name in entityNames:
-    let cr = ktgWord(name & "/cr", wkWord)
-    let cg = ktgWord(name & "/cg", wkWord)
-    let cb = ktgWord(name & "/cb", wkWord)
+  for ent in entities:
+    let cr = ktgWord(ent.name & "/cr", wkWord)
+    let cg = ktgWord(ent.name & "/cg", wkWord)
+    let cb = ktgWord(ent.name & "/cb", wkWord)
     for v in backend.setColorCall(cr, cg, cb):
       drawStatements.add(v)
-    let x = ktgWord(name & "/x", wkWord)
-    let y = ktgWord(name & "/y", wkWord)
-    let w = ktgWord(name & "/w", wkWord)
-    let h = ktgWord(name & "/h", wkWord)
+    let x = ktgWord(ent.name & "/x", wkWord)
+    let y = ktgWord(ent.name & "/y", wkWord)
+    let w = ktgWord(ent.name & "/w", wkWord)
+    let h = ktgWord(ent.name & "/h", wkWord)
     for v in backend.drawRectCall(x, y, w, h):
       drawStatements.add(v)
 
   for v in backend.loadShell(@[]): result.add(v)
-  for v in backend.updateShell(@[]): result.add(v)
+  for v in backend.updateShell(updateStatements): result.add(v)
   for v in backend.drawShell(drawStatements): result.add(v)
   for v in backend.keypressedShell(@[]): result.add(v)
 
