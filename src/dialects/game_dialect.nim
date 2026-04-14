@@ -102,17 +102,32 @@ proc findTarget(blk: seq[KtgValue]): string =
     i += 1
   raise newException(ValueError, "@game: missing `target: 'name` field")
 
-proc expandConstants(constantsBlock: seq[KtgValue]): seq[KtgValue] =
+proc collectConstants(constantsBlock: seq[KtgValue]): Table[string, KtgValue] =
   var i = 0
   while i < constantsBlock.len - 1:
     if constantsBlock[i].kind == vkWord and
        constantsBlock[i].wordKind == wkSetWord:
-      result.add(ktgWord("const", wkMetaWord))
-      result.add(constantsBlock[i])
-      result.add(constantsBlock[i + 1])
+      result[constantsBlock[i].wordName] = constantsBlock[i + 1]
       i += 2
     else:
       i += 1
+
+proc inlineConstants(vals: seq[KtgValue],
+                     consts: Table[string, KtgValue]): seq[KtgValue] =
+  result = newSeq[KtgValue](vals.len)
+  for idx, v in vals:
+    case v.kind
+    of vkWord:
+      if v.wordKind == wkWord and consts.hasKey(v.wordName):
+        result[idx] = consts[v.wordName]
+      else:
+        result[idx] = v
+    of vkBlock:
+      result[idx] = ktgBlock(inlineConstants(v.blockVals, consts))
+    of vkParen:
+      result[idx] = ktgParen(inlineConstants(v.parenVals, consts))
+    else:
+      result[idx] = v
 
 proc expandEntityComponents(body: seq[KtgValue]): seq[KtgValue] =
   var i = 0
@@ -189,8 +204,8 @@ proc expand*(blk: seq[KtgValue]): seq[KtgValue] =
       "@game: unknown target '" & targetName & "'")
   let backend = backends[targetName]
 
-  for v in backend.bindings:
-    result.add(v)
+  var consts: Table[string, KtgValue] = initTable[string, KtgValue]()
+  var body: seq[KtgValue] = @[]
 
   var i = 0
   while i < blk.len:
@@ -199,16 +214,21 @@ proc expand*(blk: seq[KtgValue]): seq[KtgValue] =
       i += 2
     elif v.kind == vkWord and v.wordKind == wkWord and v.wordName == "constants" and
          i + 1 < blk.len and blk[i + 1].kind == vkBlock:
-      for c in expandConstants(blk[i + 1].blockVals):
-        result.add(c)
+      for k, val in collectConstants(blk[i + 1].blockVals):
+        consts[k] = val
       i += 2
     elif v.kind == vkWord and v.wordKind == wkWord and v.wordName == "scene" and
          i + 2 < blk.len and blk[i + 1].kind == vkWord and
          blk[i + 1].wordKind == wkLitWord and blk[i + 2].kind == vkBlock:
       for s in expandScene(blk[i + 1].wordName, blk[i + 2].blockVals, backend):
-        result.add(s)
+        body.add(s)
       i += 3
     elif v.kind == vkWord and v.wordKind == wkWord and v.wordName == "go":
       i += 2
     else:
       i += 1
+
+  for v in backend.bindings:
+    result.add(v)
+  for v in inlineConstants(body, consts):
+    result.add(v)

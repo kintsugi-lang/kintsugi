@@ -24,7 +24,7 @@ proc setupEvaluator(): Evaluator =
   result.registerNatives()
 
 suite "game dialect expansion":
-  test "constants become @const entries":
+  test "constants inline at references, no @const emitted":
     let blk = @[
       ktgWord("target", wkSetWord), ktgWord("love2d", wkLitWord),
       ktgWord("constants", wkWord),
@@ -32,18 +32,30 @@ suite "game dialect expansion":
         ktgWord("SCREEN-W", wkSetWord), ktgInt(800),
         ktgWord("SCREEN-H", wkSetWord), ktgInt(600),
       ]),
+      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgBlock(@[
+        ktgWord("entity", wkWord), ktgWord("player", wkWord),
+        ktgBlock(@[
+          ktgWord("pos", wkWord), ktgWord("SCREEN-W", wkWord), ktgWord("SCREEN-H", wkWord),
+          ktgWord("rect", wkWord), ktgInt(10), ktgInt(10),
+          ktgWord("color", wkWord), ktgInt(1), ktgInt(1), ktgInt(1),
+        ]),
+      ]),
     ]
     let output = expand(blk)
-    # output[0..1] = bindings [...] block, constants follow at [2..]
-    check output.len == 8
-    check output[0].kind == vkWord and output[0].wordKind == wkWord and output[0].wordName == "bindings"
-    check output[1].kind == vkBlock
-    check output[2].kind == vkWord and output[2].wordKind == wkMetaWord and output[2].wordName == "const"
-    check output[3].kind == vkWord and output[3].wordKind == wkSetWord and output[3].wordName == "SCREEN-W"
-    check output[4].kind == vkInteger and output[4].intVal == 800
-    check output[5].kind == vkWord and output[5].wordKind == wkMetaWord and output[5].wordName == "const"
-    check output[6].kind == vkWord and output[6].wordKind == wkSetWord and output[6].wordName == "SCREEN-H"
-    check output[7].kind == vkInteger and output[7].intVal == 600
+    # No @const metaword anywhere in the output.
+    for v in output:
+      check not (v.kind == vkWord and v.wordKind == wkMetaWord and v.wordName == "const")
+    # Player context's x and y should be the literal 800 and 600, not word refs.
+    var foundPlayer = false
+    for i in 0 ..< output.len - 2:
+      if output[i].kind == vkWord and output[i].wordKind == wkSetWord and
+         output[i].wordName == "player" and output[i + 2].kind == vkBlock:
+        let ctx = output[i + 2].blockVals
+        check ctx[0].wordName == "x" and ctx[1].kind == vkInteger and ctx[1].intVal == 800
+        check ctx[2].wordName == "y" and ctx[3].kind == vkInteger and ctx[3].intVal == 600
+        foundPlayer = true
+    check foundPlayer
 
   test "entity expands to set-word context":
     let blk = @[

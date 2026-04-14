@@ -1,5 +1,3 @@
-local SCREEN_W <const> = 800
-local SCREEN_H <const> = 600
 local player = {
   x = 20,
   y = 260,
