@@ -1,3 +1,6 @@
+-- Kintsugi runtime support
+math.randomseed(os.time())
+
 local lg = love.graphics
 local le = love.event
 local lw = love.window

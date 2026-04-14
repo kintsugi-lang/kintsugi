@@ -79,6 +79,10 @@ type
     varSeqTypes: Table[string, SeqType]
     ## Variable names bound to a context literal; iterate with pairs() not ipairs().
     contextVars: HashSet[string]
+    ## Set when the program uses any random-returning native or math.randomseed.
+    usedRandom: bool
+    ## Set when the program uses variadic unpack (set destructure rest, apply, etc.)
+    usedVariadicUnpack: bool
 
   SeqType* = enum
     stUnknown
@@ -671,22 +675,27 @@ exprHandlers["subset"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var i
 
 # --- random ---
 exprHandlers["random"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  e.usedRandom = true
   "math.random() * " & e.emitExpr(vals, pos)
 
 exprHandlers["random/int"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  e.usedRandom = true
   let n = e.emitExpr(vals, pos)
   "math.random(" & n & ")"
 
 exprHandlers["random/int/range"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  e.usedRandom = true
   let lo = e.emitExpr(vals, pos)
   let hi = e.emitExpr(vals, pos)
   "math.random(" & lo & ", " & hi & ")"
 
 exprHandlers["random/choice"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  e.usedRandom = true
   let blk = e.emitExpr(vals, pos)
   "(function() local _t = " & blk & "; return _t[math.random(#_t)] end)()"
 
 exprHandlers["random/seed"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  e.usedRandom = true
   "math.randomseed(" & e.emitExpr(vals, pos) & ")"
 
 # --- Type conversion ---
@@ -726,7 +735,7 @@ exprHandlers["sort"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int
 exprHandlers["apply"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   let fn = e.emitExpr(vals, pos)
   let args_expr = e.emitExpr(vals, pos)
-  e.useHelper("_unpack")
+  e.usedVariadicUnpack = true
   fn & "(unpack(" & args_expr & "))"
 
 # --- reduce (passthrough) ---
@@ -3088,6 +3097,7 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
                   indices.add(tmp & "[" & $i & "]")
                 e.ln("local " & names.join(", ") & " = " & indices.join(", "))
               if restName.len > 0:
+                e.usedVariadicUnpack = true
                 e.ln("local " & restName & " = {unpack(" & tmp & ", " & $(restAfter + 1) & ")}")
               continue
         # Fallback: generic expression RHS
@@ -3100,6 +3110,7 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
           e.ln("local " & names.join(", ") & " = " & indices.join(", "))
         if restName.len > 0:
           # Collect remaining elements: {unpack(tmp, N+1)}
+          e.usedVariadicUnpack = true
           e.ln("local " & restName & " = {unpack(" & tmp & ", " & $(restAfter + 1) & ")}")
         continue
 
@@ -3762,40 +3773,44 @@ end
 """
 
 proc buildPrelude(e: LuaEmitter): string =
-  if e.usedHelpers.len == 0: return ""
-  result = "-- Kintsugi runtime support\n"
-  result &= "math.randomseed(os.time())\n"
-  result &= PreludeUnpack
+  if e.usedHelpers.len == 0 and not e.usedRandom and not e.usedVariadicUnpack:
+    return ""
+  var parts: seq[string] = @["-- Kintsugi runtime support"]
+  if e.usedRandom:
+    parts.add("math.randomseed(os.time())")
+  if e.usedVariadicUnpack:
+    parts.add(PreludeUnpack.strip)
   if "_NONE" in e.usedHelpers or "_is_none" in e.usedHelpers:
-    result &= PreludeNone
+    parts.add(PreludeNone.strip)
   if "_deep_copy" in e.usedHelpers:
-    result &= PreludeDeepCopy
+    parts.add(PreludeDeepCopy.strip)
   if "_capture" in e.usedHelpers:
-    result &= PreludeCapture
+    parts.add(PreludeCapture.strip)
   if "_equals" in e.usedHelpers:
-    result &= PreludeEquals
+    parts.add(PreludeEquals.strip)
   if "_has" in e.usedHelpers:
-    result &= PreludeHas
+    parts.add(PreludeHas.strip)
   if "_replace" in e.usedHelpers:
-    result &= PreludeReplace
+    parts.add(PreludeReplace.strip)
   if "_select" in e.usedHelpers:
-    result &= PreludeSelect
+    parts.add(PreludeSelect.strip)
   if "_copy" in e.usedHelpers:
-    result &= PreludeCopy
+    parts.add(PreludeCopy.strip)
   if "_append" in e.usedHelpers:
-    result &= PreludeAppend
+    parts.add(PreludeAppend.strip)
   if "_split" in e.usedHelpers:
-    result &= PreludeSplit
+    parts.add(PreludeSplit.strip)
   if "_subset" in e.usedHelpers:
-    result &= PreludeSubset
+    parts.add(PreludeSubset.strip)
   if "_sort" in e.usedHelpers:
-    result &= PreludeSort
+    parts.add(PreludeSort.strip)
   if "_insert" in e.usedHelpers:
-    result &= PreludeInsert
+    parts.add(PreludeInsert.strip)
   if "_remove" in e.usedHelpers:
-    result &= PreludeRemove
+    parts.add(PreludeRemove.strip)
   if "_make" in e.usedHelpers:
-    result &= PreludeMake
+    parts.add(PreludeMake.strip)
+  parts.join("\n") & "\n\n"
 
 proc prescanBindings(e: var LuaEmitter, blk: seq[KtgValue]) =
   ## Parse a bindings block and populate nameMap, arities, and bindingKinds.

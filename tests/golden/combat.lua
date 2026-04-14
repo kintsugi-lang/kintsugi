@@ -1,3 +1,6 @@
+-- Kintsugi runtime support
+math.randomseed(os.time())
+
 local slash = {
   name = "Slash",
   power = 25,

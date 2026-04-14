@@ -159,3 +159,14 @@ suite "lean-lua metrics":
     let lua = emitLua(processed, "")
     check countOccurrences(lua, "string.sub(") >= 1
     check countOccurrences(lua, "_subset(") == 0
+
+  test "program with no helpers emits zero prelude lines":
+    let src = "Kintsugi [name: 'bare-test]\nprint \"hi\"\n"
+    let ast = parseSource(src)
+    let eval = setupEvalForTest()
+    let processed = eval.preprocess(ast, forCompilation = true)
+    let lua = emitLua(processed, "")
+    check preludeLineCount(lua) == 0
+    check not lua.startsWith("-- Kintsugi")
+    check not lua.contains("math.randomseed")
+    check not lua.contains("local unpack")
