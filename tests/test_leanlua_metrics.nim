@@ -187,3 +187,8 @@ suite "lean-lua metrics":
     let processed = eval.preprocess(ast, forCompilation = true)
     let lua = emitLua(processed, "")
     check countOccurrences(lua, "_NONE") >= 1
+
+  test "goldens never hit the _make fallback":
+    for name in ["hello", "pong", "combat", "playdate", "leanlua_stress"]:
+      let lua = compileGolden(name)
+      check countOccurrences(lua, "_make(") == 0
