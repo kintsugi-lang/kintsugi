@@ -37,5 +37,3 @@ love.draw = function()
   love.graphics.setColor(ball.cr, ball.cg, ball.cb, 1)
   love.graphics.rectangle("fill", ball.x, ball.y, ball.w, ball.h)
 end
-love.keypressed = function(key)
-end

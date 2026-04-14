@@ -4,8 +4,7 @@ import game_backend
 export game_backend
 import game_playdate
 
-proc love2dEmitCallbacks(updateBody, drawBody: seq[KtgValue],
-                         onKeys: seq[OnKeyForm]): seq[KtgValue] =
+proc love2dEmitCallbacks(updateBody, drawBody: seq[KtgValue]): seq[KtgValue] =
   result.add(ktgWord("love/load", wkSetWord))
   result.add(ktgWord("function", wkWord))
   result.add(ktgBlock(@[]))
@@ -21,35 +20,6 @@ proc love2dEmitCallbacks(updateBody, drawBody: seq[KtgValue],
   result.add(ktgBlock(@[]))
   result.add(ktgBlock(drawBody))
 
-  var keyBody: seq[KtgValue] = @[]
-  if onKeys.len > 0:
-    var matchArms: seq[KtgValue] = @[]
-    for form in onKeys:
-      matchArms.add(ktgBlock(@[form.key]))
-      matchArms.add(ktgBlock(form.body))
-    matchArms.add(ktgWord("default", wkWord))
-    matchArms.add(ktgBlock(@[]))
-    keyBody.add(ktgWord("match", wkWord))
-    keyBody.add(ktgWord("key", wkWord))
-    keyBody.add(ktgBlock(matchArms))
-
-  result.add(ktgWord("love/keypressed", wkSetWord))
-  result.add(ktgWord("function", wkWord))
-  result.add(ktgBlock(@[ktgWord("key", wkWord)]))
-  result.add(ktgBlock(keyBody))
-
-proc love2dSetColorCall(r, g, b: KtgValue): seq[KtgValue] =
-  @[ktgWord("love/graphics/setColor", wkWord), r, g, b, ktgInt(1)]
-
-proc love2dDrawRectCall(x, y, w, h: KtgValue): seq[KtgValue] =
-  @[ktgWord("love/graphics/rectangle", wkWord), ktgWord("fill", wkLitWord), x, y, w, h]
-
-proc love2dPrintCall(text, x, y: KtgValue): seq[KtgValue] =
-  @[ktgWord("love/graphics/print", wkWord), text, x, y]
-
-proc love2dIsKeyDown(key: KtgValue): seq[KtgValue] =
-  @[ktgWord("love/keyboard/isDown", wkWord), key]
-
 proc love2dBindings(): seq[KtgValue] =
   var entries: seq[KtgValue]
   for v in bindingEntry("love/graphics/setColor",  "love.graphics.setColor",  "call", 4): entries.add(v)
@@ -63,14 +33,29 @@ proc love2dBindings(): seq[KtgValue] =
   for v in bindingEntry("love/keypressed", "love.keypressed", "assign"): entries.add(v)
   @[ktgWord("bindings", wkWord), ktgBlock(entries)]
 
+proc love2dDrawEntity(name: string): seq[KtgValue] =
+  ## Emits: love.graphics.setColor(n.cr, n.cg, n.cb, 1)
+  ##        love.graphics.rectangle("fill", n.x, n.y, n.w, n.h)
+  @[
+    ktgWord("love/graphics/setColor", wkWord),
+    ktgWord(name & "/cr", wkWord),
+    ktgWord(name & "/cg", wkWord),
+    ktgWord(name & "/cb", wkWord),
+    ktgInt(1),
+    ktgWord("love/graphics/rectangle", wkWord),
+    ktgWord("fill", wkLitWord),
+    ktgWord(name & "/x", wkWord),
+    ktgWord(name & "/y", wkWord),
+    ktgWord(name & "/w", wkWord),
+    ktgWord(name & "/h", wkWord),
+  ]
+
 let love2dBackend* = GameBackend(
   name: "love2d",
   bindings: love2dBindings(),
+  storesColor: true,
   emitCallbacks: love2dEmitCallbacks,
-  setColorCall: love2dSetColorCall,
-  drawRectCall: love2dDrawRectCall,
-  printCall: love2dPrintCall,
-  isKeyDown: love2dIsKeyDown,
+  drawEntity: love2dDrawEntity,
 )
 
 var backends* = {
@@ -78,15 +63,6 @@ var backends* = {
   "playdate": playdateBackend,
 }.toTable
 
-proc findTarget(blk: seq[KtgValue]): string =
-  var i = 0
-  while i < blk.len - 1:
-    if blk[i].kind == vkWord and blk[i].wordKind == wkSetWord and
-       blk[i].wordName == "target" and blk[i + 1].kind == vkWord and
-       blk[i + 1].wordKind == wkLitWord:
-      return blk[i + 1].wordName
-    i += 1
-  raise newException(ValueError, "@game: missing `target: 'name` field")
 
 proc collectConstants(constantsBlock: seq[KtgValue]): Table[string, KtgValue] =
   var i = 0
@@ -114,30 +90,6 @@ proc inlineConstants(vals: seq[KtgValue],
       result[idx] = ktgParen(inlineConstants(v.parenVals, consts))
     else:
       result[idx] = v
-
-proc substituteCalls*(vals: seq[KtgValue], backend: GameBackend): seq[KtgValue] =
-  var i = 0
-  while i < vals.len:
-    let v = vals[i]
-    if v.kind == vkWord and v.wordKind == wkWord and
-       v.wordName == "key-down?" and i + 1 < vals.len:
-      for c in backend.isKeyDown(vals[i + 1]):
-        result.add(c)
-      i += 2
-    elif v.kind == vkWord and v.wordKind == wkWord and
-         v.wordName == "text-print" and i + 3 < vals.len:
-      for c in backend.printCall(vals[i + 1], vals[i + 2], vals[i + 3]):
-        result.add(c)
-      i += 4
-    elif v.kind == vkBlock:
-      result.add(ktgBlock(substituteCalls(v.blockVals, backend)))
-      i += 1
-    elif v.kind == vkParen:
-      result.add(ktgParen(substituteCalls(v.parenVals, backend)))
-      i += 1
-    else:
-      result.add(v)
-      i += 1
 
 proc substituteSelf*(vals: seq[KtgValue], entityName: string): seq[KtgValue] =
   result = newSeq[KtgValue](vals.len)
@@ -207,6 +159,8 @@ type
     name: string
     ctxBlock: seq[KtgValue]
     updateBody: seq[KtgValue]
+    drawBody: seq[KtgValue]      ## non-empty = custom draw; empty = auto-rect
+    hasCustomDraw: bool
     tags: seq[string]
 
   CollideForm = object
@@ -215,7 +169,17 @@ type
     isTag: bool
     body: seq[KtgValue]
 
-proc parseEntity(name: string, body: seq[KtgValue]): Entity =
+proc takeTwoNums(body: seq[KtgValue], i: int): (KtgValue, KtgValue, int) =
+  ## Two-number dialect args accept either two scalars or a single pair literal.
+  if i + 1 < body.len and body[i + 1].kind == vkPair:
+    let p = body[i + 1]
+    return (ktgInt(p.px.int64), ktgInt(p.py.int64), 2)
+  if i + 2 < body.len:
+    return (body[i + 1], body[i + 2], 3)
+  return (nil, nil, 0)
+
+proc parseEntity(name: string, body: seq[KtgValue],
+                 storesColor: bool = true): Entity =
   result.name = name
   var i = 0
   while i < body.len:
@@ -223,22 +187,25 @@ proc parseEntity(name: string, body: seq[KtgValue]): Entity =
     if head.kind == vkWord and head.wordKind == wkWord:
       case head.wordName
       of "pos":
-        if i + 2 < body.len:
-          result.ctxBlock.add(ktgWord("x", wkSetWord)); result.ctxBlock.add(body[i + 1])
-          result.ctxBlock.add(ktgWord("y", wkSetWord)); result.ctxBlock.add(body[i + 2])
-          i += 3
+        let (a, b, step) = takeTwoNums(body, i)
+        if step > 0:
+          result.ctxBlock.add(ktgWord("x", wkSetWord)); result.ctxBlock.add(a)
+          result.ctxBlock.add(ktgWord("y", wkSetWord)); result.ctxBlock.add(b)
+          i += step
           continue
       of "rect":
-        if i + 2 < body.len:
-          result.ctxBlock.add(ktgWord("w", wkSetWord)); result.ctxBlock.add(body[i + 1])
-          result.ctxBlock.add(ktgWord("h", wkSetWord)); result.ctxBlock.add(body[i + 2])
-          i += 3
+        let (a, b, step) = takeTwoNums(body, i)
+        if step > 0:
+          result.ctxBlock.add(ktgWord("w", wkSetWord)); result.ctxBlock.add(a)
+          result.ctxBlock.add(ktgWord("h", wkSetWord)); result.ctxBlock.add(b)
+          i += step
           continue
       of "color":
         if i + 3 < body.len:
-          result.ctxBlock.add(ktgWord("cr", wkSetWord)); result.ctxBlock.add(body[i + 1])
-          result.ctxBlock.add(ktgWord("cg", wkSetWord)); result.ctxBlock.add(body[i + 2])
-          result.ctxBlock.add(ktgWord("cb", wkSetWord)); result.ctxBlock.add(body[i + 3])
+          if storesColor:
+            result.ctxBlock.add(ktgWord("cr", wkSetWord)); result.ctxBlock.add(body[i + 1])
+            result.ctxBlock.add(ktgWord("cg", wkSetWord)); result.ctxBlock.add(body[i + 2])
+            result.ctxBlock.add(ktgWord("cb", wkSetWord)); result.ctxBlock.add(body[i + 3])
           i += 4
           continue
       of "field":
@@ -252,6 +219,13 @@ proc parseEntity(name: string, body: seq[KtgValue]): Entity =
         if i + 1 < body.len and body[i + 1].kind == vkBlock:
           for v in substituteSelf(body[i + 1].blockVals, name):
             result.updateBody.add(v)
+          i += 2
+          continue
+      of "draw":
+        if i + 1 < body.len and body[i + 1].kind == vkBlock:
+          for v in substituteSelf(body[i + 1].blockVals, name):
+            result.drawBody.add(v)
+          result.hasCustomDraw = true
           i += 2
           continue
       of "tags":
@@ -294,7 +268,6 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
                  backend: GameBackend): seq[KtgValue] =
   var stateBlock: seq[KtgValue] = @[]
   var entities: seq[Entity] = @[]
-  var onKeys: seq[(KtgValue, seq[KtgValue])] = @[]
   var collides: seq[CollideForm] = @[]
   var userDrawBody: seq[KtgValue] = @[]
   var userUpdatePre: seq[KtgValue] = @[]
@@ -310,13 +283,9 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
     elif head.kind == vkWord and head.wordKind == wkWord and head.wordName == "entity" and
        i + 2 < sceneBody.len and sceneBody[i + 1].kind == vkWord and
        sceneBody[i + 1].wordKind == wkWord and sceneBody[i + 2].kind == vkBlock:
-      let ent = parseEntity(sceneBody[i + 1].wordName, sceneBody[i + 2].blockVals)
+      let ent = parseEntity(sceneBody[i + 1].wordName, sceneBody[i + 2].blockVals,
+                            backend.storesColor)
       entities.add(ent)
-      i += 3
-    elif head.kind == vkWord and head.wordKind == wkWord and head.wordName == "on-key" and
-         i + 2 < sceneBody.len and sceneBody[i + 1].kind == vkString and
-         sceneBody[i + 2].kind == vkBlock:
-      onKeys.add((sceneBody[i + 1], sceneBody[i + 2].blockVals))
       i += 3
     elif head.kind == vkWord and head.wordKind == wkWord and head.wordName == "collide" and
          i + 3 < sceneBody.len and sceneBody[i + 1].kind == vkWord and
@@ -361,6 +330,8 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
       tagMap[tag].add(ent.name)
 
   var updateStatements: seq[KtgValue] = @[]
+  for v in backend.framePrelude:
+    updateStatements.add(v)
   for v in userUpdatePre:
     updateStatements.add(v)
   for ent in entities:
@@ -394,30 +365,26 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
 
   var drawStatements: seq[KtgValue] = @[]
   for ent in entities:
-    let cr = ktgWord(ent.name & "/cr", wkWord)
-    let cg = ktgWord(ent.name & "/cg", wkWord)
-    let cb = ktgWord(ent.name & "/cb", wkWord)
-    for v in backend.setColorCall(cr, cg, cb):
-      drawStatements.add(v)
-    let x = ktgWord(ent.name & "/x", wkWord)
-    let y = ktgWord(ent.name & "/y", wkWord)
-    let w = ktgWord(ent.name & "/w", wkWord)
-    let h = ktgWord(ent.name & "/h", wkWord)
-    for v in backend.drawRectCall(x, y, w, h):
-      drawStatements.add(v)
+    if ent.hasCustomDraw:
+      ## User-supplied draw block for this entity - already self/-substituted.
+      for v in ent.drawBody:
+        drawStatements.add(v)
+    else:
+      ## Target-optimal auto-rect for this entity.
+      for v in backend.drawEntity(ent.name):
+        drawStatements.add(v)
   for v in userDrawBody:
     drawStatements.add(v)
 
-  var onKeyForms: seq[OnKeyForm] = @[]
-  for (keyStr, armBody) in onKeys:
-    assertNoSelf(armBody, "on-key handler")
-    onKeyForms.add(OnKeyForm(key: keyStr, body: armBody))
-
-  for v in backend.emitCallbacks(updateStatements, drawStatements, onKeyForms):
+  for v in backend.emitCallbacks(updateStatements, drawStatements):
     result.add(v)
 
-proc expand*(blk: seq[KtgValue]): seq[KtgValue] =
-  let targetName = findTarget(blk)
+proc expand*(blk: seq[KtgValue], targetName: string): seq[KtgValue] =
+  if targetName.len == 0:
+    raise newException(ValueError,
+      "@game requires a compile target; pass --target=<name> " &
+      "(available: love2d, playdate). @game cannot be used in the REPL " &
+      "or interpret mode.")
   if not backends.hasKey(targetName):
     raise newException(ValueError,
       "@game: unknown target '" & targetName & "'")
@@ -472,6 +439,8 @@ proc expand*(blk: seq[KtgValue]): seq[KtgValue] =
     for v in backend.bindings:
       result.add(v)
 
-  let inlined = inlineConstants(body, consts)
-  for v in substituteCalls(inlined, backend):
+  for v in backend.prelude:
+    result.add(v)
+
+  for v in inlineConstants(body, consts):
     result.add(v)

@@ -1031,7 +1031,8 @@ proc callCallable*(eval: Evaluator, fn: KtgValue, vals: seq[KtgValue],
 # --- Preprocessing (#preprocess) ---
 
 proc preprocess*(eval: Evaluator, ast: seq[KtgValue],
-                 forCompilation: bool = false): seq[KtgValue] =
+                 forCompilation: bool = false,
+                 target: string = ""): seq[KtgValue] =
   ## Walk the AST looking for:
   ##   @preprocess [block]  - evaluate block, splice emitted values
   ##   @inline [expr]       - evaluate expr, splice result
@@ -1135,7 +1136,7 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue],
     elif ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
        ast[i].wordName == "game" and i + 1 < ast.len and
        ast[i + 1].kind == vkBlock:
-      let expanded = game_dialect.expand(ast[i + 1].blockVals)
+      let expanded = game_dialect.expand(ast[i + 1].blockVals, target)
       for v in expanded:
         result.add(v)
       i += 2

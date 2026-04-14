@@ -1,3 +1,6 @@
+import "CoreLibs/graphics"
+import "CoreLibs/sprites"
+import "CoreLibs/timer"
 local is_paused = false
 local player_score = 0
 local cpu_score = 0
@@ -5,40 +8,36 @@ local player = {
   x = 20,
   y = 260,
   w = 12,
-  h = 80,
-  cr = 0.9,
-  cg = 0.9,
-  cb = 1
+  h = 80
 }
 local cpu = {
   x = 768,
   y = 260,
   w = 12,
-  h = 80,
-  cr = 0.9,
-  cg = 0.9,
-  cb = 1
+  h = 80
 }
 local ball = {
   x = 396,
   y = 296,
   w = 8,
   h = 8,
-  cr = 1,
-  cg = 0.8,
-  cb = 0.2,
   dx = 1,
   dy = 0,
   speed = 350
 }
 playdate.update = function()
+  local dt = 1/30
+playdate.graphics.clear()
+  if playdate.buttonJustPressed(playdate.kButtonA) then
+    is_paused = not (is_paused)
+  end
   if is_paused then
     return nil
   end
-  if playdate.buttonIsPressed("up") then
+  if playdate.buttonIsPressed(playdate.kButtonUp) then
     player.y = player.y - (420 * dt)
   end
-  if playdate.buttonIsPressed("down") then
+  if playdate.buttonIsPressed(playdate.kButtonDown) then
     player.y = player.y + (420 * dt)
   end
   cpu.y = ball.y - 40
@@ -82,9 +81,4 @@ playdate.update = function()
   playdate.graphics.fillRect(cpu.x, cpu.y, cpu.w, cpu.h)
   playdate.graphics.fillRect(ball.x, ball.y, ball.w, ball.h)
   playdate.graphics.drawText(player_score .. "   " .. cpu_score, 380, 20)
-  if playdate.buttonJustPressed("a") then
-    is_paused = not (is_paused)
-  end
-  if playdate.buttonJustPressed("b") then
-  end
 end

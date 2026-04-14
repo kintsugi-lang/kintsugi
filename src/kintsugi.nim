@@ -249,7 +249,7 @@ proc runFile(path: string) =
 
 # --- Compiler ---
 
-proc compileOne(path: string, outPath: string = "") =
+proc compileOne(path: string, outPath: string = "", target: string = "") =
   ## Compile a single .ktg file. Header presence determines prelude.
   if not fileExists(path):
     echo "Error: file not found: " & path
@@ -260,7 +260,7 @@ proc compileOne(path: string, outPath: string = "") =
   let source = applyUsingHeader(content)
   let ast = parseSource(source)
   let eval = setupEval()
-  let processed = eval.preprocess(ast, forCompilation = true)
+  let processed = eval.preprocess(ast, forCompilation = true, target = target)
   let sourceDir = parentDir(absolutePath(path))
 
   let luaCode = if isEntrypoint:
@@ -276,21 +276,21 @@ proc compileOne(path: string, outPath: string = "") =
     writeFile(defaultOut, luaCode)
     echo "Compiled: " & path & " -> " & defaultOut
 
-proc compilePath(path: string, outPath: string = "") =
+proc compilePath(path: string, outPath: string = "", target: string = "") =
   if dirExists(path):
     if outPath.len > 0:
       echo "Error: -o cannot be used with directory compilation"
       quit(1)
     var count = 0
     for f in collectKtgFiles(path):
-      compileOne(f)
+      compileOne(f, target = target)
       count += 1
     if count == 0:
       echo "No .ktg files found in: " & path
   else:
-    compileOne(path, outPath)
+    compileOne(path, outPath, target)
 
-proc dryRunPath(path: string) =
+proc dryRunPath(path: string, target: string = "") =
   if dirExists(path):
     for f in collectKtgFiles(path):
       let content = readFile(f)
@@ -298,7 +298,7 @@ proc dryRunPath(path: string) =
       let source = applyUsingHeader(content)
       let ast = parseSource(source)
       let eval = setupEval()
-      let processed = eval.preprocess(ast, forCompilation = true)
+      let processed = eval.preprocess(ast, forCompilation = true, target = target)
       let sourceDir = parentDir(absolutePath(f))
       echo ";; " & f
       if isEntrypoint:
@@ -311,7 +311,7 @@ proc dryRunPath(path: string) =
     let source = applyUsingHeader(content)
     let ast = parseSource(source)
     let eval = setupEval()
-    let processed = eval.preprocess(ast, forCompilation = true)
+    let processed = eval.preprocess(ast, forCompilation = true, target = target)
     let sourceDir = parentDir(absolutePath(path))
     if isEntrypoint:
       echo emitLua(processed, sourceDir)
@@ -333,29 +333,41 @@ proc main() =
   var evalExpr = ""
   var outPath = ""
   var filePath = ""
+  var target = ""
 
   while i < args.len:
-    case args[i]
-    of "-e", "--eval":
-      if i + 1 < args.len:
-        i += 1
-        evalExpr = args[i]
-      else:
-        echo "Error: -e requires an expression"
-        quit(1)
-    of "-c", "--compile":
-      compile = true
-    of "-o", "--output":
-      if i + 1 < args.len:
-        i += 1
-        outPath = args[i]
-      else:
-        echo "Error: -o requires a path"
-        quit(1)
-    of "--dry-run":
-      dryRun = true
+    let a = args[i]
+    if a.startsWith("--target="):
+      target = a["--target=".len .. ^1]
     else:
-      filePath = args[i]
+      case a
+      of "-e", "--eval":
+        if i + 1 < args.len:
+          i += 1
+          evalExpr = args[i]
+        else:
+          echo "Error: -e requires an expression"
+          quit(1)
+      of "-c", "--compile":
+        compile = true
+      of "-o", "--output":
+        if i + 1 < args.len:
+          i += 1
+          outPath = args[i]
+        else:
+          echo "Error: -o requires a path"
+          quit(1)
+      of "--target":
+        if i + 1 < args.len:
+          i += 1
+          target = args[i]
+        else:
+          echo "Error: --target requires a name (love2d | playdate)"
+          quit(1)
+      of "--dry-run":
+        dryRun = true
+      else:
+        filePath = a
     i += 1
 
   if evalExpr.len > 0:
@@ -387,13 +399,25 @@ proc main() =
     echo "  -c, --compile <file|dir>     Compile to Lua (.ktg -> .lua)"
     echo "  -c <file> -o <out>           Compile to specific output file"
     echo "  -c <file|dir> --dry-run      Print compiled Lua to stdout"
+    echo "  --target <name>              Compile target (love2d | playdate)"
+    echo "                               Required when source uses @game"
     quit(1)
 
   if compile:
-    if dryRun:
-      dryRunPath(filePath)
-    else:
-      compilePath(filePath, outPath)
+    try:
+      if dryRun:
+        dryRunPath(filePath, target)
+      else:
+        compilePath(filePath, outPath, target)
+    except KtgError as e:
+      echo "Error [" & e.kind & "]: " & e.msg
+      quit(1)
+    except ValueError as e:
+      echo "Error: " & e.msg
+      quit(1)
+    except CatchableError as e:
+      echo "Error: " & e.msg
+      quit(1)
     return
 
   # Default: interpret
