@@ -213,6 +213,7 @@ type
     name: string
     ctxBlock: seq[KtgValue]
     updateBody: seq[KtgValue]
+    tags: seq[string]
 
 proc parseEntity(name: string, body: seq[KtgValue]): Entity =
   result.name = name
@@ -253,8 +254,40 @@ proc parseEntity(name: string, body: seq[KtgValue]): Entity =
             result.updateBody.add(v)
           i += 2
           continue
+      of "tags":
+        if i + 1 < body.len and body[i + 1].kind == vkBlock:
+          for t in body[i + 1].blockVals:
+            if t.kind == vkWord and t.wordKind == wkWord:
+              result.tags.add(t.wordName)
+          i += 2
+          continue
       else:
         discard
+    i += 1
+
+proc collectTagMap*(gameBlock: seq[KtgValue]): Table[string, seq[string]] =
+  result = initTable[string, seq[string]]()
+  var i = 0
+  while i < gameBlock.len:
+    let v = gameBlock[i]
+    if v.kind == vkWord and v.wordKind == wkWord and v.wordName == "scene" and
+       i + 2 < gameBlock.len and gameBlock[i + 2].kind == vkBlock:
+      let sceneBody = gameBlock[i + 2].blockVals
+      var j = 0
+      while j < sceneBody.len:
+        let h = sceneBody[j]
+        if h.kind == vkWord and h.wordKind == wkWord and h.wordName == "entity" and
+           j + 2 < sceneBody.len and sceneBody[j + 1].kind == vkWord and
+           sceneBody[j + 2].kind == vkBlock:
+          let ent = parseEntity(sceneBody[j + 1].wordName, sceneBody[j + 2].blockVals)
+          for tag in ent.tags:
+            if not result.hasKey(tag):
+              result[tag] = @[]
+            result[tag].add(ent.name)
+          j += 3
+        else:
+          j += 1
+      break
     i += 1
 
 proc expandScene(sceneName: string, sceneBody: seq[KtgValue],

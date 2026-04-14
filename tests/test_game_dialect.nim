@@ -311,6 +311,43 @@ suite "game dialect expansion":
                   check false
     check sawQuit
 
+  test "tags are collected per entity":
+    let blk = @[
+      ktgWord("target", wkSetWord), ktgWord("love2d", wkLitWord),
+      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgBlock(@[
+        ktgWord("entity", wkWord), ktgWord("player", wkWord),
+        ktgBlock(@[
+          ktgWord("pos", wkWord), ktgInt(0), ktgInt(0),
+          ktgWord("rect", wkWord), ktgInt(10), ktgInt(10),
+          ktgWord("color", wkWord), ktgInt(1), ktgInt(1), ktgInt(1),
+          ktgWord("tags", wkWord), ktgBlock(@[ktgWord("paddle", wkWord)]),
+        ]),
+        ktgWord("entity", wkWord), ktgWord("cpu", wkWord),
+        ktgBlock(@[
+          ktgWord("pos", wkWord), ktgInt(0), ktgInt(0),
+          ktgWord("rect", wkWord), ktgInt(10), ktgInt(10),
+          ktgWord("color", wkWord), ktgInt(1), ktgInt(1), ktgInt(1),
+          ktgWord("tags", wkWord), ktgBlock(@[ktgWord("paddle", wkWord)]),
+        ]),
+        ktgWord("entity", wkWord), ktgWord("ball", wkWord),
+        ktgBlock(@[
+          ktgWord("pos", wkWord), ktgInt(0), ktgInt(0),
+          ktgWord("rect", wkWord), ktgInt(5), ktgInt(5),
+          ktgWord("color", wkWord), ktgInt(1), ktgInt(1), ktgInt(1),
+          ktgWord("tags", wkWord), ktgBlock(@[ktgWord("ball", wkWord)]),
+        ]),
+      ]),
+    ]
+    let tagMap = collectTagMap(blk)
+    check tagMap.hasKey("paddle")
+    check tagMap["paddle"].len == 2
+    check "player" in tagMap["paddle"]
+    check "cpu" in tagMap["paddle"]
+    check tagMap.hasKey("ball")
+    check tagMap["ball"].len == 1
+    check "ball" in tagMap["ball"]
+
 suite "game dialect preprocess wiring":
   test "bare @game splices empty expansion":
     let src = "Kintsugi [name: 'test]\n@game [target: 'love2d]\nprint \"hi\"\n"
