@@ -71,6 +71,7 @@ proc love2dBindings(): seq[KtgValue] =
   for v in bindingEntry("love/graphics/rectangle", "love.graphics.rectangle", "call", 5): entries.add(v)
   for v in bindingEntry("love/event/quit",          "love.event.quit",          "call", 0): entries.add(v)
   for v in bindingEntry("love/keyboard/isDown",     "love.keyboard.isDown",     "call", 1): entries.add(v)
+  for v in bindingEntry("love/graphics/print",      "love.graphics.print",      "call", 3): entries.add(v)
   for v in bindingEntry("love/load",       "love.load",       "assign"): entries.add(v)
   for v in bindingEntry("love/update",     "love.update",     "assign"): entries.add(v)
   for v in bindingEntry("love/draw",       "love.draw",       "assign"): entries.add(v)
@@ -302,6 +303,7 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
   var entities: seq[Entity] = @[]
   var onKeys: seq[(KtgValue, seq[KtgValue])] = @[]
   var collides: seq[CollideForm] = @[]
+  var userDrawBody: seq[KtgValue] = @[]
 
   var i = 0
   while i < sceneBody.len:
@@ -335,6 +337,12 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
         body: sceneBody[i + 3].blockVals,
       ))
       i += 4
+    elif head.kind == vkWord and head.wordKind == wkWord and head.wordName == "draw" and
+         i + 1 < sceneBody.len and sceneBody[i + 1].kind == vkBlock:
+      assertNoSelf(sceneBody[i + 1].blockVals, "scene draw block")
+      for v in sceneBody[i + 1].blockVals:
+        userDrawBody.add(v)
+      i += 2
     else:
       i += 1
 
@@ -395,6 +403,8 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
     let h = ktgWord(ent.name & "/h", wkWord)
     for v in backend.drawRectCall(x, y, w, h):
       drawStatements.add(v)
+  for v in userDrawBody:
+    drawStatements.add(v)
 
   var keyBody: seq[KtgValue] = @[]
   if onKeys.len > 0:

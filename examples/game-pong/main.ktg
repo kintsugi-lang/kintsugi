@@ -18,15 +18,19 @@ Kintsugi [name: 'pong]
       pos 20 260  rect 12 80  color 0.9 0.9 1
       tags [paddle]
       update [
-        if love/keyboard/isDown "w" [self/y: self/y - (PADDLE-SPEED * dt)]
-        if love/keyboard/isDown "s" [self/y: self/y + (PADDLE-SPEED * dt)]
+        if not paused? [
+          if love/keyboard/isDown "w" [self/y: self/y - (PADDLE-SPEED * dt)]
+          if love/keyboard/isDown "s" [self/y: self/y + (PADDLE-SPEED * dt)]
+        ]
       ]
     ]
     entity cpu [
       pos 768 260 rect 12 80  color 0.9 0.9 1
       tags [paddle]
       update [
-        self/y: ball/y - 40
+        if not paused? [
+          self/y: ball/y - 40
+        ]
       ]
     ]
     entity ball [
@@ -35,13 +39,37 @@ Kintsugi [name: 'pong]
       field dy 0
       field speed 350
       update [
-        self/x: self/x + (self/dx * self/speed * dt)
-        self/y: self/y + (self/dy * self/speed * dt)
+        if not paused? [
+          self/x: self/x + (self/dx * self/speed * dt)
+          self/y: self/y + (self/dy * self/speed * dt)
+          if self/y < 0 [self/y: 0  self/dy: negate self/dy]
+          if self/y > (SCREEN-H - 8) [self/y: SCREEN-H - 8  self/dy: negate self/dy]
+          if self/x < 0 [
+            cpu-score: cpu-score + 1
+            self/x: 396
+            self/y: 296
+            self/dx: 1
+            self/dy: 0
+            self/speed: 350
+          ]
+          if self/x > SCREEN-W [
+            player-score: player-score + 1
+            self/x: 396
+            self/y: 296
+            self/dx: -1
+            self/dy: 0
+            self/speed: 350
+          ]
+        ]
       ]
     ]
     collide ball 'paddle [
       ball/dx: negate ball/dx
+      ball/dy: (ball/y - it/y) / 40
       ball/speed: ball/speed + BALL-ACCEL
+    ]
+    draw [
+      love/graphics/print rejoin [player-score "   " cpu-score] 380 20
     ]
     on-key "space"  [paused?: not paused?]
     on-key "escape" [quit]

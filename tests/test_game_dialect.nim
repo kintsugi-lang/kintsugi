@@ -388,6 +388,50 @@ suite "game dialect expansion":
             allCount += 1
     check allCount == 2
 
+  test "scene-level draw body appears in love/draw":
+    let blk = @[
+      ktgWord("target", wkSetWord), ktgWord("love2d", wkLitWord),
+      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgBlock(@[
+        ktgWord("entity", wkWord), ktgWord("player", wkWord),
+        ktgBlock(@[
+          ktgWord("pos", wkWord), ktgInt(0), ktgInt(0),
+          ktgWord("rect", wkWord), ktgInt(10), ktgInt(10),
+          ktgWord("color", wkWord), ktgInt(1), ktgInt(1), ktgInt(1),
+        ]),
+        ktgWord("draw", wkWord),
+        ktgBlock(@[
+          ktgWord("love/graphics/print", wkWord),
+          ktgString("hello"),
+          ktgInt(10),
+          ktgInt(20),
+        ]),
+      ]),
+    ]
+    let output = expand(blk)
+    var foundPrint = false
+    for i in 0 ..< output.len - 3:
+      if output[i].kind == vkWord and output[i].wordKind == wkSetWord and
+         output[i].wordName == "love/draw" and output[i + 3].kind == vkBlock:
+        let body = output[i + 3].blockVals
+        for v in body:
+          if v.kind == vkWord and v.wordKind == wkWord and
+             v.wordName == "love/graphics/print":
+            foundPrint = true
+    check foundPrint
+
+  test "self in scene draw block raises":
+    let blk = @[
+      ktgWord("target", wkSetWord), ktgWord("love2d", wkLitWord),
+      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgBlock(@[
+        ktgWord("draw", wkWord),
+        ktgBlock(@[ktgWord("self/x", wkWord)]),
+      ]),
+    ]
+    expect(ValueError):
+      discard expand(blk)
+
 suite "game dialect preprocess wiring":
   test "bare @game splices empty expansion":
     let src = "Kintsugi [name: 'test]\n@game [target: 'love2d]\nprint \"hi\"\n"
