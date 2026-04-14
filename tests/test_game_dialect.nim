@@ -74,6 +74,54 @@ suite "game dialect expansion":
         found = true
     check found
 
+  test "love/draw emits setColor + drawRect per entity":
+    let blk = @[
+      ktgWord("target", wkSetWord), ktgWord("love2d", wkLitWord),
+      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgBlock(@[
+        ktgWord("entity", wkWord), ktgWord("player", wkWord),
+        ktgBlock(@[
+          ktgWord("pos", wkWord), ktgInt(20), ktgInt(260),
+          ktgWord("rect", wkWord), ktgInt(12), ktgInt(80),
+          ktgWord("color", wkWord), ktgFloat(0.9), ktgFloat(0.9), ktgFloat(1.0),
+        ]),
+      ]),
+    ]
+    let output = expand(blk)
+    var sawLoad, sawUpdate, sawDraw, sawKeypressed = false
+    for v in output:
+      if v.kind == vkWord and v.wordKind == wkSetWord:
+        case v.wordName
+        of "love/load": sawLoad = true
+        of "love/update": sawUpdate = true
+        of "love/draw": sawDraw = true
+        of "love/keypressed": sawKeypressed = true
+        else: discard
+    check sawLoad
+    check sawUpdate
+    check sawDraw
+    check sawKeypressed
+    ## Locate love/draw body block (3 tokens after the set-word).
+    var drawBody: seq[KtgValue] = @[]
+    for i in 0 ..< output.len - 3:
+      if output[i].kind == vkWord and output[i].wordKind == wkSetWord and
+         output[i].wordName == "love/draw" and output[i + 3].kind == vkBlock:
+        drawBody = output[i + 3].blockVals
+    ## Draw body should contain setColor and rectangle calls referencing player's fields.
+    var sawSetColor, sawRect, sawPlayerCr, sawPlayerX = false
+    for v in drawBody:
+      if v.kind == vkWord and v.wordKind == wkWord:
+        case v.wordName
+        of "love/graphics/setColor": sawSetColor = true
+        of "love/graphics/rectangle": sawRect = true
+        of "player/cr": sawPlayerCr = true
+        of "player/x": sawPlayerX = true
+        else: discard
+    check sawSetColor
+    check sawRect
+    check sawPlayerCr
+    check sawPlayerX
+
 suite "game dialect preprocess wiring":
   test "bare @game splices empty expansion":
     let src = "Kintsugi [name: 'test]\n@game [target: 'love2d]\nprint \"hi\"\n"

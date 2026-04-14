@@ -14,14 +14,49 @@ type
     quitCall*: proc(): seq[KtgValue]
     isKeyDown*: proc(key: KtgValue): seq[KtgValue]
 
-proc love2dLoadShell(body: seq[KtgValue]): seq[KtgValue] = @[]
-proc love2dUpdateShell(body: seq[KtgValue]): seq[KtgValue] = @[]
-proc love2dDrawShell(body: seq[KtgValue]): seq[KtgValue] = @[]
-proc love2dKeypressedShell(body: seq[KtgValue]): seq[KtgValue] = @[]
-proc love2dSetColorCall(r, g, b: KtgValue): seq[KtgValue] = @[]
-proc love2dDrawRectCall(x, y, w, h: KtgValue): seq[KtgValue] = @[]
-proc love2dQuitCall(): seq[KtgValue] = @[]
-proc love2dIsKeyDown(key: KtgValue): seq[KtgValue] = @[]
+proc love2dLoadShell(body: seq[KtgValue]): seq[KtgValue] =
+  @[
+    ktgWord("love/load", wkSetWord),
+    ktgWord("function", wkWord),
+    ktgBlock(@[]),
+    ktgBlock(body),
+  ]
+
+proc love2dUpdateShell(body: seq[KtgValue]): seq[KtgValue] =
+  @[
+    ktgWord("love/update", wkSetWord),
+    ktgWord("function", wkWord),
+    ktgBlock(@[ktgWord("dt", wkWord)]),
+    ktgBlock(body),
+  ]
+
+proc love2dDrawShell(body: seq[KtgValue]): seq[KtgValue] =
+  @[
+    ktgWord("love/draw", wkSetWord),
+    ktgWord("function", wkWord),
+    ktgBlock(@[]),
+    ktgBlock(body),
+  ]
+
+proc love2dKeypressedShell(body: seq[KtgValue]): seq[KtgValue] =
+  @[
+    ktgWord("love/keypressed", wkSetWord),
+    ktgWord("function", wkWord),
+    ktgBlock(@[ktgWord("key", wkWord)]),
+    ktgBlock(body),
+  ]
+
+proc love2dSetColorCall(r, g, b: KtgValue): seq[KtgValue] =
+  @[ktgWord("love/graphics/setColor", wkWord), r, g, b]
+
+proc love2dDrawRectCall(x, y, w, h: KtgValue): seq[KtgValue] =
+  @[ktgWord("love/graphics/rectangle", wkWord), ktgWord("fill", wkLitWord), x, y, w, h]
+
+proc love2dQuitCall(): seq[KtgValue] =
+  @[ktgWord("love/event/quit", wkWord)]
+
+proc love2dIsKeyDown(key: KtgValue): seq[KtgValue] =
+  @[ktgWord("love/keyboard/isDown", wkWord), key]
 
 let love2dBackend* = GameBackend(
   name: "love2d",
@@ -91,6 +126,8 @@ proc expandEntityComponents(body: seq[KtgValue]): seq[KtgValue] =
 
 proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
                  backend: GameBackend): seq[KtgValue] =
+  var entityNames: seq[string] = @[]
+
   var i = 0
   while i < sceneBody.len:
     let head = sceneBody[i]
@@ -102,9 +139,29 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
       result.add(ktgWord(entName, wkSetWord))
       result.add(ktgWord("context", wkWord))
       result.add(ktgBlock(components))
+      entityNames.add(entName)
       i += 3
     else:
       i += 1
+
+  var drawStatements: seq[KtgValue] = @[]
+  for name in entityNames:
+    let cr = ktgWord(name & "/cr", wkWord)
+    let cg = ktgWord(name & "/cg", wkWord)
+    let cb = ktgWord(name & "/cb", wkWord)
+    for v in backend.setColorCall(cr, cg, cb):
+      drawStatements.add(v)
+    let x = ktgWord(name & "/x", wkWord)
+    let y = ktgWord(name & "/y", wkWord)
+    let w = ktgWord(name & "/w", wkWord)
+    let h = ktgWord(name & "/h", wkWord)
+    for v in backend.drawRectCall(x, y, w, h):
+      drawStatements.add(v)
+
+  for v in backend.loadShell(@[]): result.add(v)
+  for v in backend.updateShell(@[]): result.add(v)
+  for v in backend.drawShell(drawStatements): result.add(v)
+  for v in backend.keypressedShell(@[]): result.add(v)
 
 proc expand*(blk: seq[KtgValue]): seq[KtgValue] =
   let targetName = findTarget(blk)
