@@ -215,6 +215,12 @@ type
     updateBody: seq[KtgValue]
     tags: seq[string]
 
+  CollideForm = object
+    selfEntity: string
+    tagOrEntity: string
+    isTag: bool
+    body: seq[KtgValue]
+
 proc parseEntity(name: string, body: seq[KtgValue]): Entity =
   result.name = name
   var i = 0
@@ -295,6 +301,7 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
   var stateBlock: seq[KtgValue] = @[]
   var entities: seq[Entity] = @[]
   var onKeys: seq[(KtgValue, seq[KtgValue])] = @[]
+  var collides: seq[CollideForm] = @[]
 
   var i = 0
   while i < sceneBody.len:
@@ -315,6 +322,19 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
          sceneBody[i + 2].kind == vkBlock:
       onKeys.add((sceneBody[i + 1], sceneBody[i + 2].blockVals))
       i += 3
+    elif head.kind == vkWord and head.wordKind == wkWord and head.wordName == "collide" and
+         i + 3 < sceneBody.len and sceneBody[i + 1].kind == vkWord and
+         sceneBody[i + 1].wordKind == wkWord and
+         sceneBody[i + 2].kind == vkWord and
+         (sceneBody[i + 2].wordKind == wkLitWord or sceneBody[i + 2].wordKind == wkWord) and
+         sceneBody[i + 3].kind == vkBlock:
+      collides.add(CollideForm(
+        selfEntity: sceneBody[i + 1].wordName,
+        tagOrEntity: sceneBody[i + 2].wordName,
+        isTag: sceneBody[i + 2].wordKind == wkLitWord,
+        body: sceneBody[i + 3].blockVals,
+      ))
+      i += 4
     else:
       i += 1
 
@@ -325,10 +345,42 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
     result.add(ktgWord("context", wkWord))
     result.add(ktgBlock(ent.ctxBlock))
 
+  var tagMap: Table[string, seq[string]] = initTable[string, seq[string]]()
+  for ent in entities:
+    for tag in ent.tags:
+      if not tagMap.hasKey(tag):
+        tagMap[tag] = @[]
+      tagMap[tag].add(ent.name)
+
   var updateStatements: seq[KtgValue] = @[]
   for ent in entities:
     for v in ent.updateBody:
       updateStatements.add(v)
+
+  for coll in collides:
+    let others =
+      if coll.isTag:
+        if tagMap.hasKey(coll.tagOrEntity): tagMap[coll.tagOrEntity] else: @[]
+      else:
+        @[coll.tagOrEntity]
+    for other in others:
+      if other == coll.selfEntity: continue
+      let s = coll.selfEntity
+      let o = other
+      let aabbBlock = ktgBlock(@[
+        ktgWord(s & "/x", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "<"),
+        ktgParen(@[ktgWord(o & "/x", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "+"), ktgWord(o & "/w", wkWord)]),
+        ktgWord(o & "/x", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "<"),
+        ktgParen(@[ktgWord(s & "/x", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "+"), ktgWord(s & "/w", wkWord)]),
+        ktgWord(s & "/y", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "<"),
+        ktgParen(@[ktgWord(o & "/y", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "+"), ktgWord(o & "/h", wkWord)]),
+        ktgWord(o & "/y", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "<"),
+        ktgParen(@[ktgWord(s & "/y", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "+"), ktgWord(s & "/h", wkWord)]),
+      ])
+      updateStatements.add(ktgWord("if", wkWord))
+      updateStatements.add(ktgWord("all?", wkWord))
+      updateStatements.add(aabbBlock)
+      updateStatements.add(ktgBlock(substituteIt(coll.body, o)))
 
   var drawStatements: seq[KtgValue] = @[]
   for ent in entities:

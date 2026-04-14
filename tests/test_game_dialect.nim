@@ -348,6 +348,46 @@ suite "game dialect expansion":
     check tagMap["ball"].len == 1
     check "ball" in tagMap["ball"]
 
+  test "collide enumerates per-tag with flat if all? blocks":
+    let blk = @[
+      ktgWord("target", wkSetWord), ktgWord("love2d", wkLitWord),
+      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgBlock(@[
+        ktgWord("entity", wkWord), ktgWord("player", wkWord),
+        ktgBlock(@[
+          ktgWord("pos", wkWord), ktgInt(0), ktgInt(0),
+          ktgWord("rect", wkWord), ktgInt(10), ktgInt(10),
+          ktgWord("color", wkWord), ktgInt(1), ktgInt(1), ktgInt(1),
+          ktgWord("tags", wkWord), ktgBlock(@[ktgWord("paddle", wkWord)]),
+        ]),
+        ktgWord("entity", wkWord), ktgWord("cpu", wkWord),
+        ktgBlock(@[
+          ktgWord("pos", wkWord), ktgInt(0), ktgInt(0),
+          ktgWord("rect", wkWord), ktgInt(10), ktgInt(10),
+          ktgWord("color", wkWord), ktgInt(1), ktgInt(1), ktgInt(1),
+          ktgWord("tags", wkWord), ktgBlock(@[ktgWord("paddle", wkWord)]),
+        ]),
+        ktgWord("entity", wkWord), ktgWord("ball", wkWord),
+        ktgBlock(@[
+          ktgWord("pos", wkWord), ktgInt(0), ktgInt(0),
+          ktgWord("rect", wkWord), ktgInt(5), ktgInt(5),
+          ktgWord("color", wkWord), ktgInt(1), ktgInt(1), ktgInt(1),
+        ]),
+        ktgWord("collide", wkWord), ktgWord("ball", wkWord), ktgWord("paddle", wkLitWord),
+        ktgBlock(@[ktgWord("ball/dx", wkSetWord), ktgInt(1)]),
+      ]),
+    ]
+    let output = expand(blk)
+    var allCount = 0
+    for i in 0 ..< output.len - 3:
+      if output[i].kind == vkWord and output[i].wordKind == wkSetWord and
+         output[i].wordName == "love/update" and output[i + 3].kind == vkBlock:
+        let body = output[i + 3].blockVals
+        for v in body:
+          if v.kind == vkWord and v.wordKind == wkWord and v.wordName == "all?":
+            allCount += 1
+    check allCount == 2
+
 suite "game dialect preprocess wiring":
   test "bare @game splices empty expansion":
     let src = "Kintsugi [name: 'test]\n@game [target: 'love2d]\nprint \"hi\"\n"
