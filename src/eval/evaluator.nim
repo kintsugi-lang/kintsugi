@@ -2,6 +2,7 @@ import std/[strutils, tables, math, sets]
 import ../core/[types, equality]
 import ../parse/parser
 import dialect
+import ../dialects/game_dialect
 
 export Evaluator
 
@@ -1042,7 +1043,7 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue],
   var hasWork = false
   for v in ast:
     if v.kind == vkWord and v.wordKind == wkMetaWord and
-       v.wordName in ["preprocess", "inline", "macro"]:
+       v.wordName in ["preprocess", "inline", "macro", "game"]:
       hasWork = true
       break
   # Also check for macro calls from prior passes
@@ -1129,6 +1130,15 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue],
       else:
         result.add(expanded)
       i = callPos
+
+    # @game [block] - preprocess-time dialect expansion
+    elif ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
+       ast[i].wordName == "game" and i + 1 < ast.len and
+       ast[i + 1].kind == vkBlock:
+      let expanded = game_dialect.expand(ast[i + 1].blockVals)
+      for v in expanded:
+        result.add(v)
+      i += 2
 
     else:
       result.add(ast[i])
