@@ -21,6 +21,25 @@ proc setupEvaluator(): Evaluator =
   result = newEvaluator()
   result.registerNatives()
 
+suite "game dialect expansion":
+  test "constants become @const entries":
+    let blk = @[
+      ktgWord("target", wkSetWord), ktgWord("love2d", wkLitWord),
+      ktgWord("constants", wkWord),
+      ktgBlock(@[
+        ktgWord("SCREEN-W", wkSetWord), ktgInt(800),
+        ktgWord("SCREEN-H", wkSetWord), ktgInt(600),
+      ]),
+    ]
+    let output = expand(blk)
+    check output.len == 6
+    check output[0].kind == vkWord and output[0].wordKind == wkMetaWord and output[0].wordName == "const"
+    check output[1].kind == vkWord and output[1].wordKind == wkSetWord and output[1].wordName == "SCREEN-W"
+    check output[2].kind == vkInteger and output[2].intVal == 800
+    check output[3].kind == vkWord and output[3].wordKind == wkMetaWord and output[3].wordName == "const"
+    check output[4].kind == vkWord and output[4].wordKind == wkSetWord and output[4].wordName == "SCREEN-H"
+    check output[5].kind == vkInteger and output[5].intVal == 600
+
 suite "game dialect preprocess wiring":
   test "bare @game splices empty expansion":
     let src = "Kintsugi [name: 'test]\n@game [target: 'love2d]\nprint \"hi\"\n"
