@@ -60,9 +60,51 @@ proc expandConstants(constantsBlock: seq[KtgValue]): seq[KtgValue] =
     else:
       i += 1
 
+proc expandEntityComponents(body: seq[KtgValue]): seq[KtgValue] =
+  var i = 0
+  while i < body.len:
+    let head = body[i]
+    if head.kind == vkWord and head.wordKind == wkWord:
+      case head.wordName
+      of "pos":
+        if i + 2 < body.len:
+          result.add(ktgWord("x", wkSetWord)); result.add(body[i + 1])
+          result.add(ktgWord("y", wkSetWord)); result.add(body[i + 2])
+          i += 3
+          continue
+      of "rect":
+        if i + 2 < body.len:
+          result.add(ktgWord("w", wkSetWord)); result.add(body[i + 1])
+          result.add(ktgWord("h", wkSetWord)); result.add(body[i + 2])
+          i += 3
+          continue
+      of "color":
+        if i + 3 < body.len:
+          result.add(ktgWord("cr", wkSetWord)); result.add(body[i + 1])
+          result.add(ktgWord("cg", wkSetWord)); result.add(body[i + 2])
+          result.add(ktgWord("cb", wkSetWord)); result.add(body[i + 3])
+          i += 4
+          continue
+      else:
+        discard
+    i += 1
+
 proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
                  backend: GameBackend): seq[KtgValue] =
-  @[]
+  var i = 0
+  while i < sceneBody.len:
+    let head = sceneBody[i]
+    if head.kind == vkWord and head.wordKind == wkWord and head.wordName == "entity" and
+       i + 2 < sceneBody.len and sceneBody[i + 1].kind == vkWord and
+       sceneBody[i + 1].wordKind == wkWord and sceneBody[i + 2].kind == vkBlock:
+      let entName = sceneBody[i + 1].wordName
+      let components = expandEntityComponents(sceneBody[i + 2].blockVals)
+      result.add(ktgWord(entName, wkSetWord))
+      result.add(ktgWord("context", wkWord))
+      result.add(ktgBlock(components))
+      i += 3
+    else:
+      i += 1
 
 proc expand*(blk: seq[KtgValue]): seq[KtgValue] =
   let targetName = findTarget(blk)

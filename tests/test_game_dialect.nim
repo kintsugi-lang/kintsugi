@@ -40,6 +40,40 @@ suite "game dialect expansion":
     check output[4].kind == vkWord and output[4].wordKind == wkSetWord and output[4].wordName == "SCREEN-H"
     check output[5].kind == vkInteger and output[5].intVal == 600
 
+  test "entity expands to set-word context":
+    let blk = @[
+      ktgWord("target", wkSetWord), ktgWord("love2d", wkLitWord),
+      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgBlock(@[
+        ktgWord("entity", wkWord), ktgWord("player", wkWord),
+        ktgBlock(@[
+          ktgWord("pos", wkWord), ktgInt(20), ktgInt(260),
+          ktgWord("rect", wkWord), ktgInt(12), ktgInt(80),
+          ktgWord("color", wkWord), ktgFloat(0.9), ktgFloat(0.9), ktgFloat(1.0),
+        ]),
+      ]),
+    ]
+    let output = expand(blk)
+    var found = false
+    for i in 0 ..< output.len - 2:
+      if output[i].kind == vkWord and output[i].wordKind == wkSetWord and
+         output[i].wordName == "player":
+        check output[i + 1].kind == vkWord and output[i + 1].wordKind == wkWord
+        check output[i + 1].wordName == "context"
+        check output[i + 2].kind == vkBlock
+        let ctx = output[i + 2].blockVals
+        check ctx.len == 14  # 7 set-words + 7 values
+        check ctx[0].kind == vkWord and ctx[0].wordKind == wkSetWord and ctx[0].wordName == "x"
+        check ctx[1].kind == vkInteger and ctx[1].intVal == 20
+        check ctx[2].wordName == "y" and ctx[3].intVal == 260
+        check ctx[4].wordName == "w" and ctx[5].intVal == 12
+        check ctx[6].wordName == "h" and ctx[7].intVal == 80
+        check ctx[8].wordName == "cr"
+        check ctx[10].wordName == "cg"
+        check ctx[12].wordName == "cb"
+        found = true
+    check found
+
 suite "game dialect preprocess wiring":
   test "bare @game splices empty expansion":
     let src = "Kintsugi [name: 'test]\n@game [target: 'love2d]\nprint \"hi\"\n"
