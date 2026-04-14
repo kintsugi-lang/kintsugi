@@ -150,7 +150,10 @@ proc substituteSelf*(vals: seq[KtgValue], entityName: string): seq[KtgValue] =
   for idx, v in vals:
     case v.kind
     of vkWord:
-      if v.wordName.startsWith("self/"):
+      if v.wordName == "self":
+        raise newException(ValueError,
+          "bare `self` is not valid; use `self/<field>`")
+      elif v.wordName.startsWith("self/"):
         let suffix = v.wordName["self/".len .. ^1]
         result[idx] = ktgWord(entityName & "/" & suffix, v.wordKind)
       else:
@@ -161,6 +164,17 @@ proc substituteSelf*(vals: seq[KtgValue], entityName: string): seq[KtgValue] =
       result[idx] = ktgParen(substituteSelf(v.parenVals, entityName))
     else:
       result[idx] = v
+
+proc assertNoSelf*(vals: seq[KtgValue], contextLabel: string) =
+  for v in vals:
+    case v.kind
+    of vkWord:
+      if v.wordName == "self" or v.wordName.startsWith("self/"):
+        raise newException(ValueError,
+          "`self` has no binding inside " & contextLabel)
+    of vkBlock: assertNoSelf(v.blockVals, contextLabel)
+    of vkParen: assertNoSelf(v.parenVals, contextLabel)
+    else: discard
 
 type
   Entity = object
@@ -269,6 +283,7 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
   if onKeys.len > 0:
     var matchArms: seq[KtgValue] = @[]
     for (keyStr, armBody) in onKeys:
+      assertNoSelf(armBody, "on-key handler")
       matchArms.add(ktgBlock(@[keyStr]))
       matchArms.add(ktgBlock(substituteQuit(armBody, backend)))
     matchArms.add(ktgWord("default", wkWord))
