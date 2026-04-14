@@ -514,3 +514,34 @@ Same reasoning as `_insert`. Dual-mode helper unifies string/block removal.
 `table.sort(x)` works in-place on blocks. The helper wraps this to also handle strings (by char) and to return the table. Keep for the return-value convention.
 
 **Net result: one helper partial inline (`_subset` for known strings, already in place), five helpers kept with justification. Lean-lua Phase 2.4 done.**
+
+---
+
+## Appendix: GameBackend field count measurement (Step 9 exit gate)
+
+**Phase 1 field count (Step 5, 2026-04-13):** 10 fields
+
+1. `name` - target identifier string
+2. `bindings` - Kintsugi `bindings [...]` block spliced at top of expansion
+3. `loadShell` - wraps load body in target's load callback
+4. `updateShell` - wraps update body in target's update callback
+5. `drawShell` - wraps draw body in target's draw callback
+6. `keypressedShell` - wraps keypressed body in target's keypressed callback
+7. `setColorCall` - emits target's setColor invocation
+8. `drawRectCall` - emits target's filled-rectangle invocation
+9. `quitCall` - emits target's quit/exit invocation
+10. `isKeyDown` - emits target's key-is-down query
+
+**Phase 5 field count (Step 9):** 11 fields
+
+New fields added during Steps 5-9:
+
+11. `printCall` - emits target's text-rendering invocation (added to support `text-print` abstraction during Step 9's one-line-delta exit gate fix)
+
+**Delta:** +1 field.
+
+**Verdict:** Within the +2 field budget. Phase 1 abstraction shape held.
+
+**Design lesson:** The original Phase 1 abstraction missed `printCall` because Step 5's pong-stub had no HUD. Only when Step 9 required a Playdate target with a truly one-line source delta did the need for a cross-target text-rendering primitive surface. Adding it cost one field and one `substituteCalls` dispatch case. The `isKeyDown` field (which existed in Phase 1) went unused through Steps 5-8 because user code wrote `love/keyboard/isDown` directly; Step 9's fix also repurposed `isKeyDown` through the new `substituteCalls` pass and made the field actually reachable via the `key-down?` user-facing abstraction.
+
+**Follow-up:** Phase 6 tasks (animation, real ECS, custom components) may need additional backend fields. The +2 budget was set against Phase 1-5 scope; Phase 6 may legitimately require expansion.
