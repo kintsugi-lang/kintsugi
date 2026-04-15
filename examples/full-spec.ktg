@@ -87,6 +87,13 @@ my-email: user@example.com             ; email!
 
 my-money: $19.99                        ; money! (1999 cents)
 probe $0.00 - $0.50                     ; -$0.50 (sign preserved)
+; money!, date!, time!, tuple! all expose components via /field,
+; and their components can be rebound via set-path:
+;   m/cents                  ; -> 1999
+;   t: 14:30:00   t/minute: 45   ; t is now 14:45:00
+;   d: 2026-03-15 d/day: 20      ; d is now 2026-03-20
+;   v: 1.2.3      v/2: 99         ; v is now 1.99.3
+; Invalid rebinds (Feb 30, hour 24, ...) raise range errors.
 
 ; --- Composite ---
 

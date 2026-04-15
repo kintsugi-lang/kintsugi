@@ -6,6 +6,118 @@ import ../dialects/game_dialect
 
 export Evaluator
 
+proc daysInMonth(year: int, month: int): int =
+  ## Days in a given month, accounting for leap years.
+  case month
+  of 1, 3, 5, 7, 8, 10, 12: 31
+  of 4, 6, 9, 11: 30
+  of 2:
+    let leap = (year mod 4 == 0 and year mod 100 != 0) or year mod 400 == 0
+    if leap: 29 else: 28
+  else: 0
+
+proc intRhs(rhs: KtgValue, label: string): int64 =
+  ## Pull an integer out of a set-path RHS for value-type components that only
+  ## accept whole numbers (money cents, tuple byte, date/time fields).
+  if rhs.kind != vkInteger:
+    raise KtgError(kind: "type",
+      msg: label & " must be integer!, got " & typeName(rhs), data: rhs)
+  rhs.intVal
+
+proc buildValueTypeRebind(current: KtgValue, seg: string,
+                          rhs: KtgValue, line: int): KtgValue =
+  ## Given a value-type `current` and a field `seg`, produce a new value
+  ## of the same type with that component replaced by `rhs`. Validates
+  ## ranges and value-type-specific invariants (leap years, 0-59, etc.).
+  case current.kind
+  of vkPair:
+    if seg != "x" and seg != "y":
+      raise KtgError(kind: "undefined",
+        msg: seg & " not found on pair! (use /x or /y)", data: nil)
+    let v =
+      if rhs.kind == vkInteger: float64(rhs.intVal)
+      elif rhs.kind == vkFloat: rhs.floatVal
+      else:
+        raise KtgError(kind: "type",
+          msg: "pair! field must be integer! or float!, got " & typeName(rhs),
+          data: rhs)
+    if seg == "x": ktgPair(v, current.py, line)
+    else: ktgPair(current.px, v, line)
+  of vkMoney:
+    if seg != "cents":
+      raise KtgError(kind: "undefined",
+        msg: seg & " not found on money! (use /cents)", data: nil)
+    KtgValue(kind: vkMoney, cents: intRhs(rhs, "money!/cents"), line: line)
+  of vkTuple:
+    ## Numeric index; validate against current length and 0-255 byte range.
+    let idx =
+      try: parseInt(seg)
+      except ValueError:
+        raise KtgError(kind: "undefined",
+          msg: seg & " not found on tuple! (use /1, /2, etc.)", data: nil)
+    if idx < 1 or idx > current.tupleVals.len:
+      raise KtgError(kind: "range",
+        msg: "tuple index " & seg & " out of range", data: nil)
+    let v = intRhs(rhs, "tuple!/" & seg)
+    if v < 0 or v > 255:
+      raise KtgError(kind: "range",
+        msg: "tuple component must be 0..255, got " & $v, data: rhs)
+    var newVals = current.tupleVals
+    newVals[idx - 1] = uint8(v)
+    KtgValue(kind: vkTuple, tupleVals: newVals, line: line)
+  of vkDate:
+    var year = int(current.year)
+    var month = int(current.month)
+    var day = int(current.day)
+    let v = intRhs(rhs, "date!/" & seg)
+    case seg
+    of "year":
+      if v < int(int16.low) or v > int(int16.high):
+        raise KtgError(kind: "range", msg: "year out of range", data: rhs)
+      year = int(v)
+    of "month":
+      if v < 1 or v > 12:
+        raise KtgError(kind: "range", msg: "month must be 1..12, got " & $v, data: rhs)
+      month = int(v)
+    of "day":
+      if v < 1:
+        raise KtgError(kind: "range", msg: "day must be >= 1, got " & $v, data: rhs)
+      day = int(v)
+    else:
+      raise KtgError(kind: "undefined",
+        msg: seg & " not found on date! (use /year, /month, /day)", data: nil)
+    if day > daysInMonth(year, month):
+      raise KtgError(kind: "range",
+        msg: "day " & $day & " is invalid for " & $year & "-" & $month, data: rhs)
+    KtgValue(kind: vkDate, year: int16(year), month: uint8(month),
+             day: uint8(day), line: line)
+  of vkTime:
+    var hour = int(current.hour)
+    var minute = int(current.minute)
+    var second = int(current.second)
+    let v = intRhs(rhs, "time!/" & seg)
+    case seg
+    of "hour":
+      if v < 0 or v > 23:
+        raise KtgError(kind: "range", msg: "hour must be 0..23, got " & $v, data: rhs)
+      hour = int(v)
+    of "minute":
+      if v < 0 or v > 59:
+        raise KtgError(kind: "range", msg: "minute must be 0..59, got " & $v, data: rhs)
+      minute = int(v)
+    of "second":
+      if v < 0 or v > 59:
+        raise KtgError(kind: "range", msg: "second must be 0..59, got " & $v, data: rhs)
+      second = int(v)
+    else:
+      raise KtgError(kind: "undefined",
+        msg: seg & " not found on time! (use /hour, /minute, /second)", data: nil)
+    KtgValue(kind: vkTime, hour: uint8(hour), minute: uint8(minute),
+             second: uint8(second), line: line)
+  else:
+    raise KtgError(kind: "type",
+      msg: "cannot rebind field on " & typeName(current), data: current)
+
 proc toKebabCase*(name: string): string =
   ## Convert PascalCase to kebab-case: "CardReader" -> "card-reader"
   result = ""
@@ -318,6 +430,27 @@ proc navigatePath*(eval: Evaluator, head: KtgValue, segments: seq[string],
           raise KtgError(kind: "range", msg: "tuple index " & seg & " out of range", data: nil)
       except ValueError:
         raise KtgError(kind: "undefined", msg: seg & " not found on tuple (use /1, /2, etc.)", data: nil)
+    elif current.kind == vkMoney:
+      case seg
+      of "cents": current = ktgInt(current.cents)
+      else:
+        raise KtgError(kind: "undefined", msg: seg & " not found on money! (use /cents)", data: nil)
+    elif current.kind == vkDate:
+      case seg
+      of "year":  current = ktgInt(int64(current.year))
+      of "month": current = ktgInt(int64(current.month))
+      of "day":   current = ktgInt(int64(current.day))
+      else:
+        raise KtgError(kind: "undefined",
+          msg: seg & " not found on date! (use /year, /month, /day)", data: nil)
+    elif current.kind == vkTime:
+      case seg
+      of "hour":   current = ktgInt(int64(current.hour))
+      of "minute": current = ktgInt(int64(current.minute))
+      of "second": current = ktgInt(int64(current.second))
+      else:
+        raise KtgError(kind: "undefined",
+          msg: seg & " not found on time! (use /hour, /minute, /second)", data: nil)
     else:
       raise KtgError(kind: "type",
         msg: "cannot navigate path on " & typeName(current), data: nil)
@@ -549,22 +682,15 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
           raise KtgError(kind: "frozen",
             msg: "cannot mutate object! directly; use `make Type [field: value]` to stamp a mutable context from the template",
             data: nil)
-        elif current.kind == vkPair and (lastSeg == "x" or lastSeg == "y"):
-          let v =
-            if rhs.kind == vkInteger: float64(rhs.intVal)
-            elif rhs.kind == vkFloat: rhs.floatVal
-            else:
-              raise KtgError(kind: "type",
-                msg: "pair! field must be integer! or float!, got " & typeName(rhs),
-                data: rhs)
-          let newPair =
-            if lastSeg == "x": ktgPair(v, current.py, val.line)
-            else: ktgPair(current.px, v, val.line)
+        elif current.kind in {vkPair, vkMoney, vkTuple, vkDate, vkTime}:
+          ## Value types are immutable; set-path on a component rebuilds the
+          ## whole value and writes it back to whatever holds it.
+          let newVal = buildValueTypeRebind(current, lastSeg, rhs, val.line)
           if segments.len == 1:
-            ctx.set(head, newPair)
+            ctx.set(head, newVal)
           else:
             # Re-navigate head + segments[0..^3] to find the container holding
-            # the pair, then write newPair back at segments[^2].
+            # the value, then write newVal back at segments[^2].
             var holder = ctx.get(head)
             for i in 0 ..< segments.len - 2:
               let seg = segments[i]
@@ -576,19 +702,16 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
                   msg: "cannot navigate path on " & typeName(holder), data: holder)
             let pKey = segments[^2]
             if holder.kind == vkContext:
-              holder.ctx.set(pKey, newPair)
+              holder.ctx.set(pKey, newVal)
             elif holder.kind == vkMap:
-              holder.mapEntries[pKey] = newPair
+              holder.mapEntries[pKey] = newVal
             elif holder.kind == vkObject:
               raise KtgError(kind: "frozen",
                 msg: "cannot mutate object! directly; use `make Type [field: value]` to stamp a mutable context from the template",
               data: nil)
             else:
               raise KtgError(kind: "type",
-                msg: "cannot set pair field on " & typeName(holder), data: holder)
-        elif current.kind == vkPair:
-          raise KtgError(kind: "undefined",
-            msg: lastSeg & " not found on pair! (use /x or /y)", data: nil)
+                msg: "cannot set field on " & typeName(holder), data: holder)
         else:
           raise KtgError(kind: "type",
             msg: "cannot set field on " & typeName(current),

@@ -111,6 +111,19 @@ suite "money":
     check $eval.evalString("$10.00 + $5.50") == "$15.50"
     check $eval.evalString("$10.00 - $3.25") == "$6.75"
 
+  test "money/cents reads integer cents":
+    let eval = makeEval()
+    discard eval.evalString("m: $19.99")
+    check $eval.evalString("m/cents") == "1999"
+    discard eval.evalString("n: $0.00 - $0.50")
+    check $eval.evalString("n/cents") == "-50"
+
+  test "set-path on money/cents rebinds":
+    let eval = makeEval()
+    discard eval.evalString("m: $10.00")
+    discard eval.evalString("m/cents: 1250")
+    check $eval.evalString("m") == "$12.50"
+
 suite "pairs":
   test "pair literals and arithmetic":
     let eval = makeEval()
@@ -272,6 +285,52 @@ suite "comparison operators":
     let eval = makeEval()
     expect KtgError:
       discard eval.evalString("""1 < "hello" """)
+
+suite "set-path on scalar value types":
+  test "tuple components read and rebind":
+    let eval = makeEval()
+    discard eval.evalString("v: 1.2.3")
+    check $eval.evalString("v/1") == "1"
+    check $eval.evalString("v/2") == "2"
+    discard eval.evalString("v/2: 99")
+    check $eval.evalString("v") == "1.99.3"
+
+  test "tuple set-path out of range errors":
+    let eval = makeEval()
+    discard eval.evalString("v: 1.2.3")
+    expect KtgError:
+      discard eval.evalString("v/4: 1")
+
+  test "date components read":
+    let eval = makeEval()
+    discard eval.evalString("d: 2026-03-15")
+    check $eval.evalString("d/year") == "2026"
+    check $eval.evalString("d/month") == "3"
+    check $eval.evalString("d/day") == "15"
+
+  test "date set-path rebinds with validity check":
+    let eval = makeEval()
+    discard eval.evalString("d: 2026-03-15")
+    discard eval.evalString("d/day: 20")
+    check $eval.evalString("d") == "2026-03-20"
+    ## Setting month to Feb with day 30 must error.
+    discard eval.evalString("d: 2026-03-30")
+    expect KtgError:
+      discard eval.evalString("d/month: 2")
+
+  test "time components read and rebind":
+    let eval = makeEval()
+    discard eval.evalString("t: 14:30:00")
+    check $eval.evalString("t/hour") == "14"
+    check $eval.evalString("t/minute") == "30"
+    discard eval.evalString("t/minute: 45")
+    check $eval.evalString("t") == "14:45:00"
+
+  test "time set-path out of range errors":
+    let eval = makeEval()
+    discard eval.evalString("t: 14:30:00")
+    expect KtgError:
+      discard eval.evalString("t/hour: 24")
 
 suite "series access safety":
   test "first/second/last on blocks":
