@@ -285,8 +285,8 @@ proc navigatePath*(eval: Evaluator, head: KtgValue, segments: seq[string],
         raise KtgError(kind: "undefined", msg: seg & " not found in map", data: nil)
     elif current.kind == vkPair:
       case seg
-      of "x": current = ktgInt(int64(current.px))
-      of "y": current = ktgInt(int64(current.py))
+      of "x": current = numFromFloat(current.px)
+      of "y": current = numFromFloat(current.py)
       else:
         raise KtgError(kind: "undefined", msg: seg & " not found on pair (use /x or /y)", data: nil)
     elif current.kind == vkTuple:
@@ -529,17 +529,16 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
           raise KtgError(kind: "frozen",
             msg: "cannot mutate frozen object", data: nil)
         elif current.kind == vkPair and (lastSeg == "x" or lastSeg == "y"):
-          if rhs.kind != vkInteger:
-            raise KtgError(kind: "type",
-              msg: "pair! field must be integer!, got " & typeName(rhs),
-              data: rhs)
-          let v = rhs.intVal
-          if v < int32.low or v > int32.high:
-            raise KtgError(kind: "range",
-              msg: "pair component out of int32 range", data: rhs)
+          let v =
+            if rhs.kind == vkInteger: float64(rhs.intVal)
+            elif rhs.kind == vkFloat: rhs.floatVal
+            else:
+              raise KtgError(kind: "type",
+                msg: "pair! field must be integer! or float!, got " & typeName(rhs),
+                data: rhs)
           let newPair =
-            if lastSeg == "x": ktgPair(int32(v), current.py, val.line)
-            else: ktgPair(current.px, int32(v), val.line)
+            if lastSeg == "x": ktgPair(v, current.py, val.line)
+            else: ktgPair(current.px, v, val.line)
           if segments.len == 1:
             ctx.set(head, newPair)
           else:

@@ -1111,7 +1111,7 @@ proc emitLiteral(val: KtgValue): string =
     $val.cents
   of vkPair:
     # Emit as {x=N, y=M}
-    "{x=" & $val.px & ", y=" & $val.py & "}"
+    "{x=" & pairComp(val.px) & ", y=" & pairComp(val.py) & "}"
   of vkTuple:
     # Emit as {v1, v2, v3, ...}
     var parts: seq[string] = @[]

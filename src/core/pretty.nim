@@ -30,7 +30,7 @@ proc prettyPrintValue*(v: KtgValue): string =
     let cents = absCents mod 100
     (if negative: "-" else: "") & "$" & $dollars & "." &
       (if cents < 10: "0" & $cents else: $cents)
-  of vkPair:  $v.px & "x" & $v.py
+  of vkPair:  pairComp(v.px) & "x" & pairComp(v.py)
   of vkTuple:
     var parts: seq[string] = @[]
     for b in v.tupleVals: parts.add($b)

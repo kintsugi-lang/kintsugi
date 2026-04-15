@@ -46,7 +46,7 @@ proc registerConvertNatives*(eval: Evaluator) =
     of "block!":
       case val.kind
       of vkBlock: return val
-      of vkPair: return ktgBlock(@[ktgInt(int64(val.px)), ktgInt(int64(val.py))])
+      of vkPair: return ktgBlock(@[numFromFloat(val.px), numFromFloat(val.py)])
       of vkTuple:
         var vals: seq[KtgValue] = @[]
         for v in val.tupleVals: vals.add(ktgInt(int64(v)))
@@ -66,14 +66,18 @@ proc registerConvertNatives*(eval: Evaluator) =
       else: raise KtgError(kind: "type", msg: "cannot convert " & typeName(val) & " to money!", data: val)
 
     of "pair!":
+      proc toF(v: KtgValue): float64 =
+        case v.kind
+        of vkInteger: float64(v.intVal)
+        of vkFloat: v.floatVal
+        else: raise KtgError(kind: "type",
+          msg: "pair! component must be integer! or float!", data: v)
       if val.kind == vkBlock and val.blockVals.len == 2:
-        let x = if val.blockVals[0].kind == vkInteger: int32(val.blockVals[0].intVal) else: 0'i32
-        let y = if val.blockVals[1].kind == vkInteger: int32(val.blockVals[1].intVal) else: 0'i32
-        return ktgPair(x, y)
+        return ktgPair(toF(val.blockVals[0]), toF(val.blockVals[1]))
       if val.kind == vkString:
         let parts = val.strVal.split('x')
         if parts.len == 2:
-          return ktgPair(int32(parseInt(parts[0])), int32(parseInt(parts[1])))
+          return ktgPair(parseFloat(parts[0]), parseFloat(parts[1]))
       raise KtgError(kind: "type", msg: "cannot convert to pair!", data: val)
 
     of "word!":

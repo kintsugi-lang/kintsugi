@@ -125,6 +125,27 @@ suite "pairs":
     discard eval.evalString("p/y: 99")
     check $eval.evalString("p") == "50x99"
 
+  test "decimal pair literals":
+    let eval = makeEval()
+    check $eval.evalString("1.5x2.5") == "1.5x2.5"
+    check $eval.evalString("1.5x2.5 + 0.5x0.5") == "2x3"
+    check $eval.evalString("-1.5x2.0") == "-1.5x2"
+
+  test "pair stringifies as integer when whole-valued":
+    let eval = makeEval()
+    check $eval.evalString("10x20") == "10x20"
+    check $eval.evalString("10.0x20.0") == "10x20"
+
+  test "set-path on pair accepts float":
+    let eval = makeEval()
+    discard eval.evalString("p: 10x20")
+    discard eval.evalString("p/x: 1.5")
+    check $eval.evalString("p") == "1.5x20"
+
+  test "to pair! accepts floats":
+    let eval = makeEval()
+    check $eval.evalString("to pair! [1.5 2.5]") == "1.5x2.5"
+
   test "set-path on pair rejects unknown field":
     let eval = makeEval()
     discard eval.evalString("p: 10x20")

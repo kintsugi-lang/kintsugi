@@ -1,4 +1,4 @@
-import std/[tables, sets, hashes, strutils]
+import std/[tables, sets, hashes, strutils, math]
 
 type
   WordKind* = enum
@@ -51,7 +51,7 @@ type
     of vkLogic:     boolVal*: bool
     of vkNone:      discard
     of vkMoney:     cents*: int64
-    of vkPair:      px*, py*: int32
+    of vkPair:      px*, py*: float64
     of vkTuple:     tupleVals*: seq[uint8]
     of vkDate:
       year*: int16
@@ -154,8 +154,23 @@ proc ktgNone*(line = 0): KtgValue =
 proc ktgMoney*(cents: int64, line = 0): KtgValue =
   KtgValue(kind: vkMoney, cents: cents, line: line)
 
-proc ktgPair*(x, y: int32, line = 0): KtgValue =
+proc ktgPair*(x, y: float64, line = 0): KtgValue =
   KtgValue(kind: vkPair, px: x, py: y, line: line)
+
+proc ktgPair*(x, y: int, line = 0): KtgValue =
+  KtgValue(kind: vkPair, px: float64(x), py: float64(y), line: line)
+
+proc pairComp*(f: float64): string =
+  if f == trunc(f) and f >= -1e18 and f <= 1e18:
+    $int64(f)
+  else:
+    $f
+
+proc numFromFloat*(f: float64, line = 0): KtgValue =
+  if f == trunc(f) and f >= float64(int64.low) and f <= float64(int64.high):
+    KtgValue(kind: vkInteger, intVal: int64(f), line: line)
+  else:
+    KtgValue(kind: vkFloat, floatVal: f, line: line)
 
 proc ktgBlock*(vals: seq[KtgValue] = @[], line = 0): KtgValue =
   KtgValue(kind: vkBlock, blockVals: vals, line: line)
@@ -309,7 +324,7 @@ proc `$`*(val: KtgValue): string =
     let dollars = absCents div 100
     let cents = absCents mod 100
     (if negative: "-" else: "") & "$" & $dollars & "." & (if cents < 10: "0" & $cents else: $cents)
-  of vkPair:     $val.px & "x" & $val.py
+  of vkPair:     pairComp(val.px) & "x" & pairComp(val.py)
   of vkTuple:
     var s = ""
     for i, v in val.tupleVals:

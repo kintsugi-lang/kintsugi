@@ -93,14 +93,15 @@ proc readNumber(lex: var Lexer): KtgValue =
     let ch = lex.peek
     if isDigit(ch):
       numStr &= lex.advance
-    elif ch == '.' and not hasX:
-      # peek ahead: is this a tuple (1.2.3) or float (3.14)?
+    elif ch == '.':
+      # peek ahead: is this a tuple (1.2.3) or float (3.14) or pair (1.5x2.5)?
       dotCount += 1
       numStr &= lex.advance
       hasDot = true
-    elif ch == 'x' and not hasDot and not hasX:
-      # pair: 100x200 or 100x-200
+    elif ch == 'x' and not hasX:
+      # pair: 100x200, 100x-200, 1.5x2.5
       hasX = true
+      hasDot = false  # reset so the second component can have its own dot
       numStr &= lex.advance
       # allow negative second component
       if not lex.atEnd and lex.peek == '-':
@@ -118,11 +119,9 @@ proc readNumber(lex: var Lexer): KtgValue =
     let parts = numStr.split('x')
     if parts.len == 2:
       try:
-        let px = parseInt(parts[0])
-        let py = parseInt(parts[1])
-        if px < int32.low or px > int32.high or py < int32.low or py > int32.high:
-          raise KtgError(kind: "syntax", msg: "pair component out of int32 range: " & numStr, data: nil)
-        return ktgPair(int32(px), int32(py), startLine)
+        let px = parseFloat(parts[0])
+        let py = parseFloat(parts[1])
+        return ktgPair(px, py, startLine)
       except ValueError:
         raise KtgError(kind: "syntax", msg: "invalid pair literal: " & numStr, data: nil)
 

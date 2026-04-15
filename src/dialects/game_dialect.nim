@@ -213,7 +213,7 @@ proc takeTwoNums(body: seq[KtgValue], i: int): (KtgValue, KtgValue, int) =
   ## Two-number dialect args accept either two scalars or a single pair literal.
   if i + 1 < body.len and body[i + 1].kind == vkPair:
     let p = body[i + 1]
-    return (ktgInt(p.px.int64), ktgInt(p.py.int64), 2)
+    return (numFromFloat(p.px), numFromFloat(p.py), 2)
   if i + 2 < body.len:
     return (body[i + 1], body[i + 2], 3)
   return (nil, nil, 0)
