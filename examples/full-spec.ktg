@@ -41,7 +41,11 @@ Kintsugi [
 my-int: 42                              ; integer!
 negative: -7                            ; integer!
 my-float: 3.14                          ; float!
-my-pair: 100x200                        ; pair! (2D coordinates)
+my-pair: 100x200                        ; pair! (2D coordinates, float64 components)
+decimal-pair: 1.5x-2.5                  ; decimals and negatives allowed
+; pair/x and pair/y read components; set-path rebinds:
+;   p: 10x20   p/x: 50   ; p is now 50x20
+;   p/y: 1.5            ; p is now 50x1.5
 my-version: 1.2.3                       ; tuple! (versions, colors, IPs)
 
 ; --- Logic ---

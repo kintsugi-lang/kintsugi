@@ -78,7 +78,7 @@ Beyond JSON's minimal set: money, pairs, tuples, dates, times, files, URLs, emai
 
 ### Pairs Are 2D Coordinates
 
-`pair!` has `px` and `py` (int32). Syntax: `100x200`. Arithmetic works: `pos + 10x20`. Path access works: `pos/x`, `pos/y`.
+`pair!` has `px` and `py` (float64). Syntax: `100x200` or `1.5x-2.5`. Arithmetic works: `pos + 10x20`. Path access and set-path both work: `pos/x`, `pos/y`, `pos/x: 50`. Whole-valued pairs stringify as `100x200`, not `100.0x200.0`.
 
 **Why:** Game development is coordinate-heavy. A dedicated type is faster and more readable than generic tuples.
 
