@@ -1136,7 +1136,27 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue],
     elif ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
        ast[i].wordName == "game" and i + 1 < ast.len and
        ast[i + 1].kind == vkBlock:
-      let expanded = game_dialect.expand(ast[i + 1].blockVals, target)
+      ## Hand the dialect a macro-expansion callback so that user-defined
+      ## @component macros can be called inside entity bodies. Produces
+      ## dialect vocabulary (field/update/draw/...) via splicing.
+      let expander: game_dialect.MacroExpander = proc(body: seq[KtgValue]): seq[KtgValue] =
+        var i2 = 0
+        while i2 < body.len:
+          if body[i2].kind == vkWord and body[i2].wordKind == wkWord and
+             body[i2].wordName in eval.macros:
+            let mFn = eval.global.get(body[i2].wordName)
+            var cp = i2 + 1
+            let mExpanded = eval.callCallable(mFn, body, cp, eval.global)
+            if mExpanded.kind == vkBlock:
+              for v in mExpanded.blockVals:
+                result.add(v)
+            else:
+              result.add(mExpanded)
+            i2 = cp
+          else:
+            result.add(body[i2])
+            i2 += 1
+      let expanded = game_dialect.expand(ast[i + 1].blockVals, target, expander)
       for v in expanded:
         result.add(v)
       i += 2

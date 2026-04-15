@@ -4,6 +4,13 @@ import game_backend
 export game_backend
 import game_playdate
 
+type
+  MacroExpander* = proc(body: seq[KtgValue]): seq[KtgValue] {.closure.}
+    ## A callback the evaluator hands to game_dialect. Given a body (an entity's
+    ## contents), it walks the seq looking for top-level macro calls and splices
+    ## their expansions inline. Passed as nil in REPL/test mode where no macro
+    ## expansion should happen.
+
 proc love2dEmitCallbacks(updateBody, drawBody: seq[KtgValue]): seq[KtgValue] =
   result.add(ktgWord("love/load", wkSetWord))
   result.add(ktgWord("function", wkWord))
@@ -122,6 +129,31 @@ proc assertNoSelf*(vals: seq[KtgValue], contextLabel: string) =
     of vkParen: assertNoSelf(v.parenVals, contextLabel)
     else: discard
 
+proc rewriteDestroy*(vals: seq[KtgValue]): seq[KtgValue] =
+  ## Rewrites `destroy <target>` forms into `<target>/_alive: false`
+  ## assignments. Must run BEFORE substituteSelf / substituteIt so that
+  ## `destroy self` is expanded while the bare-self check still sees
+  ## `self/_alive` and not a bare `self`. Recurses into blocks and parens.
+  var i = 0
+  while i < vals.len:
+    let v = vals[i]
+    if v.kind == vkWord and v.wordKind == wkWord and v.wordName == "destroy" and
+       i + 1 < vals.len and vals[i + 1].kind == vkWord and
+       vals[i + 1].wordKind == wkWord:
+      let target = vals[i + 1].wordName
+      result.add(ktgWord(target & "/_alive", wkSetWord))
+      result.add(ktgLogic(false))
+      i += 2
+    elif v.kind == vkBlock:
+      result.add(ktgBlock(rewriteDestroy(v.blockVals)))
+      i += 1
+    elif v.kind == vkParen:
+      result.add(ktgParen(rewriteDestroy(v.parenVals)))
+      i += 1
+    else:
+      result.add(v)
+      i += 1
+
 proc substituteIt*(vals: seq[KtgValue], otherName: string): seq[KtgValue] =
   result = newSeq[KtgValue](vals.len)
   for idx, v in vals:
@@ -167,6 +199,7 @@ type
     selfEntity: string
     tagOrEntity: string
     isTag: bool
+    pred: string               ## empty = default AABB; non-empty = user predicate word
     body: seq[KtgValue]
 
 proc takeTwoNums(body: seq[KtgValue], i: int): (KtgValue, KtgValue, int) =
@@ -211,13 +244,20 @@ proc parseEntity(name: string, body: seq[KtgValue],
       of "field":
         if i + 2 < body.len and body[i + 1].kind == vkWord and
            body[i + 1].wordKind == wkWord:
+          if body[i + 1].wordName == "_alive":
+            raise newException(ValueError,
+              "@game entity `" & name & "`: `_alive` is a reserved field name " &
+              "(used by destroy / alive tracking)")
           result.ctxBlock.add(ktgWord(body[i + 1].wordName, wkSetWord))
           result.ctxBlock.add(body[i + 2])
           i += 3
           continue
       of "update":
         if i + 1 < body.len and body[i + 1].kind == vkBlock:
-          for v in substituteSelf(body[i + 1].blockVals, name):
+          ## rewriteDestroy MUST run before substituteSelf so that
+          ## `destroy self` becomes `self/_alive: false` while the
+          ## bare-self error check still sees it legal.
+          for v in substituteSelf(rewriteDestroy(body[i + 1].blockVals), name):
             result.updateBody.add(v)
           i += 2
           continue
@@ -238,6 +278,9 @@ proc parseEntity(name: string, body: seq[KtgValue],
       else:
         discard
     i += 1
+  ## Every entity tracks its own alive state for destroy.
+  result.ctxBlock.add(ktgWord("_alive", wkSetWord))
+  result.ctxBlock.add(ktgLogic(true))
 
 proc collectTagMap*(gameBlock: seq[KtgValue]): Table[string, seq[string]] =
   result = initTable[string, seq[string]]()
@@ -265,7 +308,8 @@ proc collectTagMap*(gameBlock: seq[KtgValue]): Table[string, seq[string]] =
     i += 1
 
 proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
-                 backend: GameBackend): seq[KtgValue] =
+                 backend: GameBackend,
+                 macroExpand: MacroExpander = nil): seq[KtgValue] =
   var stateBlock: seq[KtgValue] = @[]
   var entities: seq[Entity] = @[]
   var collides: seq[CollideForm] = @[]
@@ -283,7 +327,13 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
     elif head.kind == vkWord and head.wordKind == wkWord and head.wordName == "entity" and
        i + 2 < sceneBody.len and sceneBody[i + 1].kind == vkWord and
        sceneBody[i + 1].wordKind == wkWord and sceneBody[i + 2].kind == vkBlock:
-      let ent = parseEntity(sceneBody[i + 1].wordName, sceneBody[i + 2].blockVals,
+      ## Pre-expand any user `@component` macros in the entity body so they
+      ## produce dialect vocabulary (field/update/draw/...) that parseEntity
+      ## already understands. If no expander is provided (REPL/tests), the body
+      ## passes through unchanged.
+      let rawBody = sceneBody[i + 2].blockVals
+      let entityBody = if macroExpand != nil: macroExpand(rawBody) else: rawBody
+      let ent = parseEntity(sceneBody[i + 1].wordName, entityBody,
                             backend.storesColor)
       entities.add(ent)
       i += 3
@@ -297,9 +347,26 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
         selfEntity: sceneBody[i + 1].wordName,
         tagOrEntity: sceneBody[i + 2].wordName,
         isTag: sceneBody[i + 2].wordKind == wkLitWord,
-        body: sceneBody[i + 3].blockVals,
+        body: rewriteDestroy(sceneBody[i + 3].blockVals),
       ))
       i += 4
+    elif head.kind == vkWord and head.wordKind == wkWord and
+         head.wordName == "collide/using" and
+         i + 4 < sceneBody.len and sceneBody[i + 1].kind == vkWord and
+         sceneBody[i + 1].wordKind == wkWord and
+         sceneBody[i + 2].kind == vkWord and
+         (sceneBody[i + 2].wordKind == wkLitWord or sceneBody[i + 2].wordKind == wkWord) and
+         sceneBody[i + 3].kind == vkWord and
+         sceneBody[i + 3].wordKind == wkWord and
+         sceneBody[i + 4].kind == vkBlock:
+      collides.add(CollideForm(
+        selfEntity: sceneBody[i + 1].wordName,
+        tagOrEntity: sceneBody[i + 2].wordName,
+        isTag: sceneBody[i + 2].wordKind == wkLitWord,
+        pred: sceneBody[i + 3].wordName,
+        body: rewriteDestroy(sceneBody[i + 4].blockVals),
+      ))
+      i += 5
     elif head.kind == vkWord and head.wordKind == wkWord and head.wordName == "draw" and
          i + 1 < sceneBody.len and sceneBody[i + 1].kind == vkBlock:
       assertNoSelf(sceneBody[i + 1].blockVals, "scene draw block")
@@ -309,7 +376,7 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
     elif head.kind == vkWord and head.wordKind == wkWord and head.wordName == "on-update" and
          i + 1 < sceneBody.len and sceneBody[i + 1].kind == vkBlock:
       assertNoSelf(sceneBody[i + 1].blockVals, "scene on-update block")
-      for v in sceneBody[i + 1].blockVals:
+      for v in rewriteDestroy(sceneBody[i + 1].blockVals):
         userUpdatePre.add(v)
       i += 2
     else:
@@ -335,8 +402,11 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
   for v in userUpdatePre:
     updateStatements.add(v)
   for ent in entities:
-    for v in ent.updateBody:
-      updateStatements.add(v)
+    if ent.updateBody.len > 0:
+      ## Only update the entity if it's alive.
+      updateStatements.add(ktgWord("if", wkWord))
+      updateStatements.add(ktgWord(ent.name & "/_alive", wkWord))
+      updateStatements.add(ktgBlock(ent.updateBody))
 
   for coll in collides:
     let others =
@@ -348,38 +418,54 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
       if other == coll.selfEntity: continue
       let s = coll.selfEntity
       let o = other
-      let aabbBlock = ktgBlock(@[
-        ktgWord(s & "/x", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "<"),
-        ktgParen(@[ktgWord(o & "/x", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "+"), ktgWord(o & "/w", wkWord)]),
-        ktgWord(o & "/x", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "<"),
-        ktgParen(@[ktgWord(s & "/x", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "+"), ktgWord(s & "/w", wkWord)]),
-        ktgWord(s & "/y", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "<"),
-        ktgParen(@[ktgWord(o & "/y", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "+"), ktgWord(o & "/h", wkWord)]),
-        ktgWord(o & "/y", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "<"),
-        ktgParen(@[ktgWord(s & "/y", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "+"), ktgWord(s & "/h", wkWord)]),
-      ])
-      updateStatements.add(ktgWord("if", wkWord))
-      updateStatements.add(ktgWord("all?", wkWord))
-      updateStatements.add(aabbBlock)
-      updateStatements.add(ktgBlock(substituteIt(coll.body, o)))
+      ## Both alive checks gate the collision test regardless of which path.
+      let aliveChecks = @[
+        ktgWord(s & "/_alive", wkWord),
+        ktgWord(o & "/_alive", wkWord),
+      ]
+      if coll.pred.len > 0:
+        ## User predicate path: all? [<a>/_alive <b>/_alive (pred a b)].
+        var conds = aliveChecks
+        conds.add(ktgParen(@[
+          ktgWord(coll.pred, wkWord), ktgWord(s, wkWord), ktgWord(o, wkWord),
+        ]))
+        updateStatements.add(ktgWord("if", wkWord))
+        updateStatements.add(ktgWord("all?", wkWord))
+        updateStatements.add(ktgBlock(conds))
+        updateStatements.add(ktgBlock(substituteIt(coll.body, o)))
+      else:
+        ## Default AABB path: all? [<a>/_alive <b>/_alive <aabb-checks>].
+        var conds = aliveChecks
+        conds.add(ktgWord(s & "/x", wkWord)); conds.add(KtgValue(kind: vkOp, opFn: nil, opSymbol: "<"))
+        conds.add(ktgParen(@[ktgWord(o & "/x", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "+"), ktgWord(o & "/w", wkWord)]))
+        conds.add(ktgWord(o & "/x", wkWord)); conds.add(KtgValue(kind: vkOp, opFn: nil, opSymbol: "<"))
+        conds.add(ktgParen(@[ktgWord(s & "/x", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "+"), ktgWord(s & "/w", wkWord)]))
+        conds.add(ktgWord(s & "/y", wkWord)); conds.add(KtgValue(kind: vkOp, opFn: nil, opSymbol: "<"))
+        conds.add(ktgParen(@[ktgWord(o & "/y", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "+"), ktgWord(o & "/h", wkWord)]))
+        conds.add(ktgWord(o & "/y", wkWord)); conds.add(KtgValue(kind: vkOp, opFn: nil, opSymbol: "<"))
+        conds.add(ktgParen(@[ktgWord(s & "/y", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "+"), ktgWord(s & "/h", wkWord)]))
+        updateStatements.add(ktgWord("if", wkWord))
+        updateStatements.add(ktgWord("all?", wkWord))
+        updateStatements.add(ktgBlock(conds))
+        updateStatements.add(ktgBlock(substituteIt(coll.body, o)))
 
   var drawStatements: seq[KtgValue] = @[]
   for ent in entities:
-    if ent.hasCustomDraw:
-      ## User-supplied draw block for this entity - already self/-substituted.
-      for v in ent.drawBody:
-        drawStatements.add(v)
-    else:
-      ## Target-optimal auto-rect for this entity.
-      for v in backend.drawEntity(ent.name):
-        drawStatements.add(v)
+    let drawSeq =
+      if ent.hasCustomDraw: ent.drawBody
+      else: backend.drawEntity(ent.name)
+    ## Only draw the entity if it's alive.
+    drawStatements.add(ktgWord("if", wkWord))
+    drawStatements.add(ktgWord(ent.name & "/_alive", wkWord))
+    drawStatements.add(ktgBlock(drawSeq))
   for v in userDrawBody:
     drawStatements.add(v)
 
   for v in backend.emitCallbacks(updateStatements, drawStatements):
     result.add(v)
 
-proc expand*(blk: seq[KtgValue], targetName: string): seq[KtgValue] =
+proc expand*(blk: seq[KtgValue], targetName: string,
+             macroExpand: MacroExpander = nil): seq[KtgValue] =
   if targetName.len == 0:
     raise newException(ValueError,
       "@game requires a compile target; pass --target=<name> " &
@@ -412,7 +498,7 @@ proc expand*(blk: seq[KtgValue], targetName: string): seq[KtgValue] =
     elif v.kind == vkWord and v.wordKind == wkWord and v.wordName == "scene" and
          i + 2 < blk.len and blk[i + 1].kind == vkWord and
          blk[i + 1].wordKind == wkLitWord and blk[i + 2].kind == vkBlock:
-      for s in expandScene(blk[i + 1].wordName, blk[i + 2].blockVals, backend):
+      for s in expandScene(blk[i + 1].wordName, blk[i + 2].blockVals, backend, macroExpand):
         body.add(s)
       i += 3
     elif v.kind == vkWord and v.wordKind == wkWord and v.wordName == "go":
