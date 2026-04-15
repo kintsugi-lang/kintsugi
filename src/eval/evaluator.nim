@@ -542,9 +542,28 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
           if segments.len == 1:
             ctx.set(head, newPair)
           else:
-            raise KtgError(kind: "type",
-              msg: "set-path on nested pair! not yet supported",
-              data: current)
+            # Re-navigate head + segments[0..^3] to find the container holding
+            # the pair, then write newPair back at segments[^2].
+            var holder = ctx.get(head)
+            for i in 0 ..< segments.len - 2:
+              let seg = segments[i]
+              if holder.kind == vkContext: holder = holder.ctx.get(seg)
+              elif holder.kind == vkMap: holder = holder.mapEntries[seg]
+              elif holder.kind == vkObject: holder = holder.obj.get(seg)
+              else:
+                raise KtgError(kind: "type",
+                  msg: "cannot navigate path on " & typeName(holder), data: holder)
+            let pKey = segments[^2]
+            if holder.kind == vkContext:
+              holder.ctx.set(pKey, newPair)
+            elif holder.kind == vkMap:
+              holder.mapEntries[pKey] = newPair
+            elif holder.kind == vkObject:
+              raise KtgError(kind: "frozen",
+                msg: "cannot mutate frozen object", data: nil)
+            else:
+              raise KtgError(kind: "type",
+                msg: "cannot set pair field on " & typeName(holder), data: holder)
         elif current.kind == vkPair:
           raise KtgError(kind: "undefined",
             msg: lastSeg & " not found on pair! (use /x or /y)", data: nil)

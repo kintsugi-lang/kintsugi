@@ -146,6 +146,14 @@ suite "pairs":
     let eval = makeEval()
     check $eval.evalString("to pair! [1.5 2.5]") == "1.5x2.5"
 
+  test "nested pair set-path through context":
+    let eval = makeEval()
+    discard eval.evalString("e: context [pos: 10x20]")
+    discard eval.evalString("e/pos/x: 50")
+    check $eval.evalString("e/pos") == "50x20"
+    discard eval.evalString("e/pos/y: 1.5")
+    check $eval.evalString("e/pos") == "50x1.5"
+
   test "set-path on pair rejects unknown field":
     let eval = makeEval()
     discard eval.evalString("p: 10x20")
