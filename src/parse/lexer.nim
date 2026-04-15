@@ -204,17 +204,21 @@ proc readWord(lex: var Lexer): string =
     w &= lex.advance
   # consume path segments: word/segment/segment or word/:get-word or word/1
   while not lex.atEnd and lex.peek == '/':
-    if lex.peekAt(1).isAlpha:
+    let next = lex.peekAt(1)
+    ## Path segments can start with any valid word-start character,
+    ## including '_' (e.g., entity/_alive). Top-level word starts on
+    ## isAlpha or '_' (line 357), so path segments accept the same.
+    if next.isAlpha or next == '_':
       w &= lex.advance  # /
       while not lex.atEnd and isWordChar(lex.peek):
         w &= lex.advance
-    elif lex.peekAt(1) == ':' and lex.peekAt(2).isAlpha:
+    elif next == ':' and (lex.peekAt(2).isAlpha or lex.peekAt(2) == '_'):
       # get-word path segment: /:word
       w &= lex.advance  # /
       w &= lex.advance  # :
       while not lex.atEnd and isWordChar(lex.peek):
         w &= lex.advance
-    elif lex.peekAt(1).isDigit:
+    elif next.isDigit:
       # numeric path segment: word/1 (tuple/block indexing)
       w &= lex.advance  # /
       while not lex.atEnd and lex.peek.isDigit:
