@@ -1,0 +1,74 @@
+Kintsugi [name: 'entities]
+
+; =============================================================
+; Runtime entity list - the standard pattern.
+; =============================================================
+;
+; @game handles compile-time entities (singletons declared at
+; @game level via `entity foo [...]`). For dynamic entities -
+; spawning bullets, particles, enemies on the fly - this lib
+; provides the conventional list + iteration pattern.
+;
+; Use it like this:
+;
+;   entities: []  ; the storage list (this lib uses the name `entities`)
+;
+;   make-bullet: function [x vx] [
+;     context [
+;       x: x  vx: vx  _alive: true
+;       update: function [self dt] [
+;         self/x: self/x + (self/vx * dt)
+;       ]
+;       draw: function [self] [
+;         love/graphics/rectangle 'fill self/x 100 4 4
+;       ]
+;     ]
+;   ]
+;
+;   spawn-entity make-bullet 100 500
+;   ; ... in your game loop:
+;   run-updates dt
+;   run-draws
+;   cull-dead
+;
+; Different games want different shapes (pools, free-lists,
+; sorted iteration, partition by tag). This is the simple
+; default. Copy and modify, or import and override individual
+; functions. Nothing here is sacred.
+; =============================================================
+
+entities: []
+
+; --- Add an entity to the list. Returns the entity.
+spawn-entity: function [e] [
+  append entities e
+  e
+]
+
+; --- Run each entity's `update` function, skipping dead ones.
+run-updates: function [dt] [
+  loop [for [e] in entities do [
+    if e/_alive [
+      if has? e 'update [e/update e dt]
+    ]
+  ]]
+]
+
+; --- Run each entity's `draw` function, skipping dead ones.
+run-draws: function [] [
+  loop [for [e] in entities do [
+    if e/_alive [
+      if has? e 'draw [e/draw e]
+    ]
+  ]]
+]
+
+; --- Remove dead entities by rebuilding the list.
+;     Call once per frame after updates.
+cull-dead: function [] [
+  alive: copy []
+  loop [for [e] in entities do [
+    if e/_alive [append alive e]
+  ]]
+  entities: alive
+]
