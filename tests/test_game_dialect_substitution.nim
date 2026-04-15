@@ -2,17 +2,32 @@ import std/unittest
 import ../src/core/types
 import ../src/dialects/game_dialect
 
-suite "substituteSelf error cases":
-  test "bare self raises":
-    let body = @[ktgWord("self", wkWord)]
-    expect(ValueError):
-      discard substituteSelf(body, "player")
+suite "substituteSelf bare self":
+  test "bare self substitutes to entity name":
+    ## `reset-ball self 1` inside `entity ball [...]` becomes
+    ## `reset-ball ball 1` so the user helper receives the entity.
+    let body = @[
+      ktgWord("reset-ball", wkWord),
+      ktgWord("self", wkWord),
+      ktgInt(1),
+    ]
+    let output = substituteSelf(body, "ball")
+    check output[0].wordName == "reset-ball"
+    check output[1].kind == vkWord and output[1].wordKind == wkWord
+    check output[1].wordName == "ball"
+    check output[2].intVal == 1
 
-  test "bare self inside nested block raises":
+  test "bare self inside nested block also substitutes":
     let body = @[
       ktgWord("if", wkWord),
-      ktgBlock(@[ktgWord("self", wkWord)]),
+      ktgBlock(@[ktgWord("destroy", wkWord), ktgWord("self", wkWord)]),
     ]
+    let output = substituteSelf(body, "player")
+    let inner = output[1].blockVals
+    check inner[1].wordName == "player"
+
+  test "self as set-word raises (cannot reassign entity)":
+    let body = @[ktgWord("self", wkSetWord), ktgInt(1)]
     expect(ValueError):
       discard substituteSelf(body, "player")
 

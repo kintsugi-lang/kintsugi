@@ -1,3 +1,11 @@
+local function reset_ball(b, dir)
+  b.x = 396
+  b.y = 296
+  b.dx = dir
+  b.dy = 0
+  b.speed = 350
+  return b.speed
+end
 local is_paused = false
 local player_score = 0
 local cpu_score = 0
@@ -64,19 +72,11 @@ love.update = function(dt)
     end
     if ball.x < 0 then
       cpu_score = cpu_score + 1
-      ball.x = 396
-      ball.y = 296
-      ball.dx = 1
-      ball.dy = 0
-      ball.speed = 350
+      reset_ball(ball, 1)
     end
     if ball.x > 800 then
       player_score = player_score + 1
-      ball.x = 396
-      ball.y = 296
-      ball.dx = -1
-      ball.dy = 0
-      ball.speed = 350
+      reset_ball(ball, -1)
     end
   end
   if (ball.is_alive and player.is_alive and ball.x < (player.x + player.w) and player.x < (ball.x + ball.w) and ball.y < (player.y + player.h) and player.y < (ball.y + ball.h)) then

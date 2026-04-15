@@ -104,8 +104,15 @@ proc substituteSelf*(vals: seq[KtgValue], entityName: string): seq[KtgValue] =
     case v.kind
     of vkWord:
       if v.wordName == "self":
-        raise newException(ValueError,
-          "bare `self` is not valid; use `self/<field>`")
+        ## Bare `self` substitutes to the entity's own name. Useful for
+        ## passing the whole entity to a user helper: `reset-ball self 1`
+        ## becomes `reset-ball ball 1` inside the ball entity's update body.
+        ## Set-words like `self: ...` are rejected because reassigning the
+        ## entity itself is almost always a bug.
+        if v.wordKind == wkSetWord:
+          raise newException(ValueError,
+            "cannot reassign `self` (the entity itself); use self/<field> for fields")
+        result[idx] = ktgWord(entityName, v.wordKind)
       elif v.wordName.startsWith("self/"):
         let suffix = v.wordName["self/".len .. ^1]
         result[idx] = ktgWord(entityName & "/" & suffix, v.wordKind)
