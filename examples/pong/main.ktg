@@ -62,8 +62,7 @@ Ball: object [
   fields [
     optional [
       pos [pair!] 0x0
-      dx [integer!] 1
-      dy [integer!] 1
+      vel [pair!] 1x1        ; direction; magnitude comes from speed
       speed [integer!] BALL-SPEED
     ]
   ]
@@ -84,8 +83,8 @@ ball:   make Ball   [pos: 396x296]
 
 reset-ball: function [] [
   ball/pos: 396x296
-  ball/dx: either ball/dx > 0 [-1] [1]
-  ball/dy: either (random/int 2) = 1 [1] [-1]
+  ball/vel/x: either ball/vel/x > 0 [-1] [1]
+  ball/vel/y: either (random/int 2) = 1 [1] [-1]
   ball/speed: BALL-SPEED
   game/paused: true
 ]
@@ -139,40 +138,40 @@ love/update: function [dt] [
     if cpu/pos/y > (SCREEN-H - PADDLE-H) [cpu/pos/y: SCREEN-H - PADDLE-H]
 
     ; --- Ball movement ---
-    ball/pos/x: ball/pos/x + (ball/dx * ball/speed * dt)
-    ball/pos/y: ball/pos/y + (ball/dy * ball/speed * dt)
+    ball/pos/x: ball/pos/x + (ball/vel/x * ball/speed * dt)
+    ball/pos/y: ball/pos/y + (ball/vel/y * ball/speed * dt)
 
     ; Top/bottom bounce
     if ball/pos/y < 0 [
       ball/pos/y: 0
-      ball/dy: negate ball/dy
+      ball/vel/y: negate ball/vel/y
     ]
     if ball/pos/y > (SCREEN-H - BALL-SIZE) [
       ball/pos/y: SCREEN-H - BALL-SIZE
-      ball/dy: negate ball/dy
+      ball/vel/y: negate ball/vel/y
     ]
 
     ; Player paddle collision
     if all? [
-      ball/dx < 0
+      ball/vel/x < 0
       ball/pos/x < (player/pos/x + PADDLE-W)
       ball/pos/y > (player/pos/y - BALL-SIZE)
       ball/pos/y < (player/pos/y + PADDLE-H)
     ] [
       ball/pos/x: player/pos/x + PADDLE-W
-      ball/dx: negate ball/dx
+      ball/vel/x: negate ball/vel/x
       ball/speed: ball/speed + 20
     ]
 
     ; CPU paddle collision
     if all? [
-      ball/dx > 0
+      ball/vel/x > 0
       ball/pos/x > (cpu/pos/x - BALL-SIZE)
       ball/pos/y > (cpu/pos/y - BALL-SIZE)
       ball/pos/y < (cpu/pos/y + PADDLE-H)
     ] [
       ball/pos/x: cpu/pos/x - BALL-SIZE
-      ball/dx: negate ball/dx
+      ball/vel/x: negate ball/vel/x
       ball/speed: ball/speed + 20
     ]
 
