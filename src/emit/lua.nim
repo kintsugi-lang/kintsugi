@@ -110,6 +110,31 @@ var stmtHandlers = initTable[string, StmtHandler]()
 const BuiltinTypePredicates = ["integer?", "float?", "number?", "string?",
                                "logic?", "none?", "block?"]
 
+## Natives that exist in the interpreter but cannot be compiled to Lua.
+## Calling any of these from compiled code is a hard compile error instead of
+## silently emitting a call to a nonexistent Lua function.
+const InterpreterOnlyNatives = [
+  "read", "write", "save", "dir?", "file?",
+  "exit", "charset",
+]
+
+proc interpreterOnlyHint(name: string): string =
+  case name
+  of "read", "write", "save":
+    "filesystem IO is not available in the compiled target. Precompute " &
+    "the data via @preprocess and emit it into the source, or move this " &
+    "call into an interpreter-only script."
+  of "dir?", "file?":
+    "filesystem queries are not available in the compiled target."
+  of "exit":
+    "exit is not portable across targets. Use target-native calls (for " &
+    "example love/event/quit on LOVE2D) from a raw binding instead."
+  of "charset":
+    "charset only exists for the @parse dialect, which is interpreter-only. " &
+    "Restructure to avoid it in compiled code."
+  else:
+    "this native is not available in compiled output."
+
 proc inlineTypePredicate(name, valueExpr: string): string =
   ## Inline emission for built-in type predicates in match patterns.
   case name
@@ -2655,6 +2680,8 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
 
       # --- Generic function call or variable reference ---
       else:
+        if name in InterpreterOnlyNatives:
+          compileError(name, interpreterOnlyHint(name), val.line)
         let resolvedLua = e.resolvedName(name)
         let info = e.getBinding(name)
         let isMethod = name in e.bindingKinds and e.bindingKinds[name] == bkMethod

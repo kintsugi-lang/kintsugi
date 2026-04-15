@@ -399,3 +399,24 @@ suite "control flow emission":
       x: try [print 1]
     """))
     check "pcall" in code
+
+suite "interpreter-only natives in compiled output":
+  test "save raises compile error naming the native":
+    expect EmitError:
+      discard emitLua(parseSource("save %out.txt [1 2 3]"))
+
+  test "write raises compile error":
+    expect EmitError:
+      discard emitLua(parseSource("""write %out.txt "hi" """))
+
+  test "charset raises compile error":
+    expect EmitError:
+      discard emitLua(parseSource("""x: charset "abc" """))
+
+  test "error message includes the native name":
+    try:
+      discard emitLua(parseSource("save %o [1]"))
+      check false  ## should have raised
+    except EmitError as e:
+      check "save" in e.msg
+      check "filesystem IO" in e.msg
