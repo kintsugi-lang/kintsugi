@@ -1116,6 +1116,30 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue],
       eval.global.set(macroName, macroVal)
       i = defPos
 
+    # @component name: [spec] [body] - sugar for @macro name: function [spec] [@compose [body]]
+    elif ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
+       ast[i].wordName == "component" and i + 3 < ast.len and
+       ast[i + 1].kind == vkWord and ast[i + 1].wordKind == wkSetWord and
+       ast[i + 2].kind == vkBlock and ast[i + 3].kind == vkBlock:
+      let compName = ast[i + 1].wordName
+      let specBlock = ast[i + 2]
+      let userBody = ast[i + 3]
+      ## Synthesize `function [<spec>] [@compose [<body>]]`.
+      let composedBody = ktgBlock(@[
+        ktgWord("compose", wkMetaWord),
+        userBody,
+      ])
+      var fnAst = @[
+        ktgWord("function", wkWord),
+        specBlock,
+        composedBody,
+      ]
+      var defPos = 0
+      let fnVal = eval.evalNext(fnAst, defPos, eval.global)
+      eval.macros.incl(compName)
+      eval.global.set(compName, fnVal)
+      i += 4
+
     # Macro call - expand
     elif ast[i].kind == vkWord and ast[i].wordKind == wkWord and
        ast[i].wordName in eval.macros:

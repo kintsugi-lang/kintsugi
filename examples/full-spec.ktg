@@ -1569,32 +1569,42 @@ love/keypressed: function [key] [
 ; playdate/...) implicitly locks the file to that target. Compile
 ; with the wrong --target and you get a clean unbound-name error.
 
-; --- Components via @macro ---
+; --- Components via @component ---
 ;
-; A "component" is just an @macro that expands into entity-body
-; vocabulary. The dialect has no separate @component form: when
-; parseEntity sees an unknown word inside an entity block, it asks
-; the preprocessor whether the word is a registered macro and
+; A "component" is a macro that expands into entity-body vocabulary.
+; When parseEntity sees an unknown word inside an entity block, it
+; asks the preprocessor whether the word is a registered macro and
 ; splices the expansion inline.
+;
+; @component is sugar at the same preprocess layer as @macro:
+;
+;   @component name: [spec] [body]
+;
+; desugars to:
+;
+;   @macro name: function [spec] [@compose [body]]
 ;
 ; Define a health component that adds hp + max-hp fields and
 ; auto-destroys the entity when hp reaches zero:
 ;
-;   @macro health: function [amount [integer!]] [@compose [
+;   @component health: [amount [integer!]] [
 ;     field hp (amount)
 ;     field max-hp (amount)
 ;     update [if self/hp <= 0 [destroy self]]
-;   ]]
+;   ]
 ;
 ; Define a timeout component that self-destructs after N frames:
 ;
-;   @macro timeout: function [frames [integer!]] [@compose [
+;   @component timeout: [frames [integer!]] [
 ;     field _age 0
 ;     update [
 ;       self/_age: self/_age + 1
 ;       if self/_age > (frames) [destroy self]
 ;     ]
-;   ]]
+;   ]
+;
+; @macro still works for any macro that isn't shaped like a
+; component (not an entity-body producer, or custom composition).
 ;
 ; Compose multiple components on one entity:
 ;

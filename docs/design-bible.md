@@ -222,16 +222,29 @@ This split is the axis of responsibility. The dialect owns plumbing - how entiti
 
 **Clean Lua out.** Generated Lua calls target SDK functions directly. No shim helpers, no dead state, no indirection. When the dev opens `pong.lua` to hand-extend it, they see `love.graphics.rectangle("fill", player.x, player.y, player.w, player.h)` or `playdate.graphics.fillRect(player.x, player.y, player.w, player.h)` — the same function they would have written by hand. `@game` gives you plumbing; what it outputs is yours.
 
-**Components are macros, not a new form.** An entity body is a linear sequence of component calls: `pos`, `rect`, `color`, `field`, `update`, `draw`, `tags`. The dialect recognizes these directly. To add a new component — `health`, `velocity`, `timeout`, `gravity`, whatever — you write an `@macro` that expands into dialect vocabulary. When `parseEntity` encounters an unknown word inside an entity body, it asks the preprocessor whether the word is a registered macro; if so, the macro expands into the inline stream and parsing continues. There is no separate `@component` metaword. This is deliberate: a component is structurally identical to a function that returns a block of entity-body forms, and Kintsugi already has that primitive. Adding a second form would be ceremony.
+**Components are macros.** An entity body is a linear sequence of component calls: `pos`, `rect`, `color`, `field`, `update`, `draw`, `tags`. The dialect recognizes these directly. To add a new component — `health`, `velocity`, `timeout`, `gravity`, whatever — you write a macro that expands into dialect vocabulary. When `parseEntity` encounters an unknown word inside an entity body, it asks the preprocessor whether the word is a registered macro; if so, the macro expands into the inline stream and parsing continues.
+
+The `@component` metaword is sugar for the common shape:
+
+```
+@component health: [amount [integer!]] [
+  field hp (amount)
+  field max-hp (amount)
+]
+
+entity player [pos 20 40  rect 12 12  health 25]
+```
+
+which desugars in the preprocessor to:
 
 ```
 @macro health: function [amount [integer!]] [@compose [
   field hp (amount)
   field max-hp (amount)
 ]]
-
-entity player [pos 20 40  rect 12 12  health 25]
 ```
+
+`@component` lives at the same preprocess layer as `@macro`. It's a registration sugar, not a runtime distinction — a component *is* a macro. The sugar exists because the common case (a block template with interpolated parens) is verbose enough that people would hand-roll it every time.
 
 **Destroy is a skip marker, not a registry operation.** Every entity context carries an implicit `_alive: true` field. `destroy self` inside an update body, `destroy it` inside a collide body, and `destroy <name>` anywhere rewrite at dialect-expand time to `<target>/_alive: false`. Per-entity update and draw statements wrap in `if <entity>/_alive [...]`; collision pair tests include both sides' alive state in the guard condition. This is compile-time enough to model "entity is dead, stop processing it" without requiring a runtime entity registry or spawn/despawn machinery. Games that need dynamic entity counts — bullet hell, spawners, projectile pools — will eventually need a registry and the associated runtime loop; that's a bigger commitment and a separate dialect decision to make when a real game demands it.
 

@@ -773,6 +773,41 @@ suite "game dialect @component macros":
     check sawHp
     check sawMaxHp
 
+  test "@component is sugar for @macro ... function ... @compose":
+    ## @component should desugar to a registered macro that produces
+    ## entity-body vocabulary via @compose.
+    let src = """
+      Kintsugi [name: 'sugar]
+      @component health: [amount [integer!]] [
+        field hp (amount)
+        field max-hp (amount)
+      ]
+      @game [
+        scene 'main [
+          entity player [
+            pos 10 20  rect 4 4  color 1 1 1
+            health 7
+          ]
+        ]
+      ]
+    """
+    let ast = parseSource(src)
+    let eval = setupEvaluator()
+    let processed = eval.preprocess(ast, forCompilation = true, target = "love2d")
+    var sawHp, sawMaxHp = false
+    for i in 0 ..< processed.len - 2:
+      if processed[i].kind == vkWord and processed[i].wordKind == wkSetWord and
+         processed[i].wordName == "player" and processed[i + 2].kind == vkBlock:
+        let ctx = processed[i + 2].blockVals
+        for j in 0 ..< ctx.len - 1:
+          if ctx[j].kind == vkWord and ctx[j].wordKind == wkSetWord:
+            if ctx[j].wordName == "hp" and ctx[j + 1].intVal == 7:
+              sawHp = true
+            if ctx[j].wordName == "max-hp" and ctx[j + 1].intVal == 7:
+              sawMaxHp = true
+    check sawHp
+    check sawMaxHp
+
   test "non-macro words in entity body pass through unchanged":
     ## Same setup as before but no macros involved. The existing dialect
     ## vocabulary (pos/rect/color/field) still works when a macro expander
