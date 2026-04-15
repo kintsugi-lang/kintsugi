@@ -7,7 +7,7 @@ Kintsugi [name: 'pong]
     PADDLE-SPEED: 420
     BALL-ACCEL: 20
   ]
-  scene 'main [
+  group 'main [
     state [
       paused?: false
       player-score: 0

@@ -36,19 +36,19 @@ That's the whole grammar. Left-to-right evaluation, no operator precedence.
 The `@` sigil means "the language is doing something structural here."
 
 ```
-@type [string! | none!]           ; define a type
-@type/enum ['north | 'south]      ; define an enum
-@const x: 42                      ; constant
-@template unless: [c b [block!]] [; declarative code generation
+@type [string! | none!]              ; define a type
+@type/enum ['north | 'south]         ; define an enum
+@const x: 42                         ; constant
+@template unless: [c b [block!]] [   ; declarative code generation
   if not (c) (b)
 ]
 
-@compose [a (1 + 2) b]            ; block templating  -> [a 3 b]
-@parse "hello" [some alpha]       ; PEG parsing
-@preprocess [emit [x: 42]]        ; compile-time code injection
-@game [scene 'main [...]]         ; compile-time game dialect
-@enter [print "start"]            ; lifecycle hook
-@exit [print "cleanup"]           ; lifecycle hook
+@compose [a (1 + 2) b]               ; block templating  -> [a 3 b]
+@parse "hello" [some alpha]          ; PEG parsing
+@preprocess [emit [x: 42]]           ; compile-time code injection
+@game [group 'main [...]]            ; compile-time game dialect
+@enter [print "start"]               ; lifecycle hook
+@exit [print "cleanup"]              ; lifecycle hook
 ```
 
 ## Rich Types
@@ -59,8 +59,7 @@ The `@` sigil means "the language is doing something structural here."
 42                    ; integer!
 3.14                  ; float!
 $19.99                ; money! (exact cents, no float drift)
-100x200               ; pair! (2D coordinates, float64 components)
-1.5x-2.5              ; ...decimals and negatives work too
+100.5x200.5           ; pair! (2D coordinates, float64 components)
 1.2.3                 ; tuple! (versions, colors)
 2026-03-15            ; date!
 14:30:00              ; time!
@@ -69,15 +68,6 @@ https://example.com   ; url!
 user@example.com      ; email!
 'north                ; lit-word! (symbol)
 [1 "two" true]        ; block! (the universal container)
-```
-
-Pairs support componentwise arithmetic, scalar scaling, and set-path:
-
-```
-pos: 100x200
-pos + 10x20           ; 110x220
-pos * 2               ; 200x400
-pos/x: 50             ; pos is now 50x200
 ```
 
 ## System Dialects
@@ -121,7 +111,7 @@ result: attempt [
 ; update/draw wiring, collision. Compiles to direct LOVE2D or
 ; Playdate Lua with no runtime registry.
 @game [
-  scene 'main [
+  group 'main [
     entity player [pos 20x260  rect 12 80  color 1 1 1]
     entity ball   [pos 396x296 rect 8 8    color 1 0.8 0.2]
   ]
@@ -167,6 +157,7 @@ Targets LuaJIT / Lua 5.1 (LOVE2D) and Lua 5.4 (Playdate). Zero-dependency output
 bin/kintsugi -c game.ktg              # -> game.lua
 bin/kintsugi -c src/                  # compile directory
 bin/kintsugi -c game.ktg --dry-run    # print to stdout
+bin/kintsugi -c game.ktg --target=love2d
 bin/kintsugi -c game.ktg --target=playdate
 ```
 
@@ -189,6 +180,4 @@ bin/kintsugi -c file.ktg              # compile to Lua
 
 The language spec is a single executable file:
 
-**[`examples/full-spec.ktg`](examples/full-spec.ktg)** (~2,180 lines)
-
-It covers everything: types, functions, control flow, dialects, objects, error handling, modules, preprocessing, templates, the `@game` dialect, and the compilation model. Because it's `.ktg`, it's tested -- if the docs are wrong, the tests fail.
+**[`examples/full-spec.ktg`](examples/full-spec.ktg)**

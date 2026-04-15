@@ -35,7 +35,7 @@ suite "game dialect expansion":
         ktgWord("SCREEN-W", wkSetWord), ktgInt(800),
         ktgWord("SCREEN-H", wkSetWord), ktgInt(600),
       ]),
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("player", wkWord),
         ktgBlock(@[
@@ -60,7 +60,7 @@ suite "game dialect expansion":
 
   test "entity expands to set-word context on love2d (color stored)":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("player", wkWord),
         ktgBlock(@[
@@ -88,7 +88,7 @@ suite "game dialect expansion":
 
   test "entity on playdate drops color fields (monochrome)":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("player", wkWord),
         ktgBlock(@[
@@ -114,7 +114,7 @@ suite "game dialect expansion":
 
   test "pos and rect accept a pair literal":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("player", wkWord),
         ktgBlock(@[
@@ -139,7 +139,7 @@ suite "game dialect expansion":
 
   test "love/draw emits setColor + rectangle per entity directly":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("player", wkWord),
         ktgBlock(@[
@@ -170,7 +170,7 @@ suite "game dialect expansion":
 
   test "playdate draw body emits fillRect directly, no setColor":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("player", wkWord),
         ktgBlock(@[
@@ -195,7 +195,7 @@ suite "game dialect expansion":
 
   test "custom entity draw block replaces auto-rect":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("player", wkWord),
         ktgBlock(@[
@@ -244,7 +244,7 @@ suite "game dialect expansion":
 
   test "field inside entity adds to context":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("player", wkWord),
         ktgBlock(@[
@@ -273,7 +273,7 @@ suite "game dialect expansion":
 
   test "update body self substitution":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("player", wkWord),
         ktgBlock(@[
@@ -311,7 +311,7 @@ suite "game dialect expansion":
 
   test "state lifts to top-level set-words":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("state", wkWord),
         ktgBlock(@[
@@ -358,9 +358,36 @@ suite "game dialect expansion":
         sawCustom = true
     check sawCustom
 
+  test "group injects its name as a tag on every contained entity":
+    ## `group 'menu [entity title [...]]` should make `title` carry the
+    ## `menu` tag without the user writing `tags [menu]` by hand.
+    let blk = @[
+      ktgWord("group", wkWord), ktgWord("menu", wkLitWord),
+      ktgBlock(@[
+        ktgWord("entity", wkWord), ktgWord("title", wkWord),
+        ktgBlock(@[
+          ktgWord("pos", wkWord), ktgInt(0), ktgInt(0),
+          ktgWord("rect", wkWord), ktgInt(10), ktgInt(10),
+        ]),
+        ktgWord("entity", wkWord), ktgWord("play-btn", wkWord),
+        ktgBlock(@[
+          ktgWord("pos", wkWord), ktgInt(0), ktgInt(0),
+          ktgWord("rect", wkWord), ktgInt(10), ktgInt(10),
+          ktgWord("tags", wkWord), ktgBlock(@[ktgWord("clickable", wkWord)]),
+        ]),
+      ]),
+    ]
+    let tagMap = collectTagMap(blk)
+    check tagMap.hasKey("menu")
+    check "title" in tagMap["menu"]
+    check "play-btn" in tagMap["menu"]
+    ## Explicit tags in the entity body stay intact.
+    check tagMap.hasKey("clickable")
+    check "play-btn" in tagMap["clickable"]
+
   test "tags are collected per entity":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("player", wkWord),
         ktgBlock(@[
@@ -392,7 +419,7 @@ suite "game dialect expansion":
 
   test "collide/using emits predicate call instead of AABB":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("ball", wkWord),
         ktgBlock(@[
@@ -442,7 +469,7 @@ suite "game dialect expansion":
 
   test "collide enumerates per-tag with flat if all? blocks":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("player", wkWord),
         ktgBlock(@[
@@ -476,9 +503,9 @@ suite "game dialect expansion":
             allCount += 1
     check allCount == 2
 
-  test "scene-level draw body appears in love/draw":
+  test "group-level draw body appears in love/draw":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("player", wkWord),
         ktgBlock(@[
@@ -505,9 +532,9 @@ suite "game dialect expansion":
             foundPrint = true
     check foundPrint
 
-  test "self in scene draw block raises":
+  test "self in group draw block raises":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("draw", wkWord),
         ktgBlock(@[ktgWord("self/x", wkWord)]),
@@ -516,9 +543,9 @@ suite "game dialect expansion":
     expect(ValueError):
       discard expand(blk, "love2d")
 
-  test "scene-level on-update body appears first in love/update":
+  test "group-level on-update body appears first in love/update":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("on-update", wkWord),
         ktgBlock(@[
@@ -548,9 +575,9 @@ suite "game dialect expansion":
         found = true
     check found
 
-  test "self in scene on-update block raises":
+  test "self in group on-update block raises":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("on-update", wkWord),
         ktgBlock(@[ktgWord("self/x", wkWord)]),
@@ -562,7 +589,7 @@ suite "game dialect expansion":
 suite "game dialect destroy / alive?":
   test "every entity context includes alive? true field":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("player", wkWord),
         ktgBlock(@[
@@ -587,7 +614,7 @@ suite "game dialect destroy / alive?":
 
   test "reserved alive? field name errors when user declares":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("player", wkWord),
         ktgBlock(@[
@@ -602,7 +629,7 @@ suite "game dialect destroy / alive?":
 
   test "destroy self rewrites to self/alive?: false before self substitution":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("player", wkWord),
         ktgBlock(@[
@@ -643,7 +670,7 @@ suite "game dialect destroy / alive?":
 
   test "per-entity update body wraps in if <entity>/alive?":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("player", wkWord),
         ktgBlock(@[
@@ -672,7 +699,7 @@ suite "game dialect destroy / alive?":
 
   test "per-entity draw wraps in if <entity>/alive?":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("player", wkWord),
         ktgBlock(@[
@@ -697,7 +724,7 @@ suite "game dialect destroy / alive?":
 
   test "collide AABB includes alive checks in all? block":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("ball", wkWord),
         ktgBlock(@[
@@ -745,7 +772,7 @@ suite "game dialect @template components":
         field max-hp (amount)
       ]
       @game [
-        scene 'main [
+        group 'main [
           entity player [
             pos 20 40
             rect 12 12
@@ -783,7 +810,7 @@ suite "game dialect @template components":
         field max-hp (amount)
       ]
       @game [
-        scene 'main [
+        group 'main [
           entity player [
             pos 10 20  rect 4 4  color 1 1 1
             health 7
@@ -815,7 +842,7 @@ suite "game dialect @template components":
     let src = """
       Kintsugi [name: 'passthrough]
       @game [
-        scene 'main [
+        group 'main [
           entity player [
             pos 10 20  rect 4 4  color 1 1 1
             field hp 5
@@ -840,7 +867,7 @@ suite "game dialect @template components":
 
 suite "game dialect preprocess wiring":
   test "bare @game splices empty expansion":
-    let src = "Kintsugi [name: 'test]\n@game [scene 'main []]\nprint \"hi\"\n"
+    let src = "Kintsugi [name: 'test]\n@game [group 'main []]\nprint \"hi\"\n"
     let ast = parseSource(src)
     let eval = setupEvaluator()
     let processed = eval.preprocess(ast, forCompilation = true, target = "love2d")
@@ -853,7 +880,7 @@ suite "game dialect preprocess wiring":
     check sawPrint
 
   test "@game without target raises in preprocess":
-    let src = "Kintsugi [name: 'test]\n@game [scene 'main []]\n"
+    let src = "Kintsugi [name: 'test]\n@game [group 'main []]\n"
     let ast = parseSource(src)
     let eval = setupEvaluator()
     expect(ValueError):
@@ -862,7 +889,7 @@ suite "game dialect preprocess wiring":
 suite "game dialect backend prelude":
   test "playdate emits CoreLibs imports at top-of-file":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("p", wkWord),
         ktgBlock(@[
@@ -885,7 +912,7 @@ suite "game dialect backend prelude":
 
   test "playdate framePrelude injects dt and clear into update body":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("p", wkWord),
         ktgBlock(@[
@@ -912,7 +939,7 @@ suite "game dialect backend prelude":
 
   test "love2d framePrelude is empty":
     let blk = @[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
         ktgWord("entity", wkWord), ktgWord("p", wkWord),
         ktgBlock(@[
@@ -935,7 +962,7 @@ suite "game dialect backend prelude":
 
   test "love2d prelude is empty":
     let output = expand(@[
-      ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
+      ktgWord("group", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[]),
     ], "love2d")
     for v in output:

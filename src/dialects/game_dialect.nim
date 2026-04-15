@@ -289,21 +289,33 @@ proc parseEntity(name: string, body: seq[KtgValue],
   result.ctxBlock.add(ktgWord("alive?", wkSetWord))
   result.ctxBlock.add(ktgLogic(true))
 
+proc injectGroupTag(body: seq[KtgValue], groupName: string): seq[KtgValue] =
+  ## Prepend `tags [<groupName>]` to an entity body so parseEntity picks up
+  ## the group tag alongside any explicit tags the user wrote.
+  result = @[
+    ktgWord("tags", wkWord),
+    ktgBlock(@[ktgWord(groupName, wkWord)]),
+  ]
+  for v in body:
+    result.add(v)
+
 proc collectTagMap*(gameBlock: seq[KtgValue]): Table[string, seq[string]] =
   result = initTable[string, seq[string]]()
   var i = 0
   while i < gameBlock.len:
     let v = gameBlock[i]
-    if v.kind == vkWord and v.wordKind == wkWord and v.wordName == "scene" and
+    if v.kind == vkWord and v.wordKind == wkWord and v.wordName == "group" and
        i + 2 < gameBlock.len and gameBlock[i + 2].kind == vkBlock:
-      let sceneBody = gameBlock[i + 2].blockVals
+      let groupName = gameBlock[i + 1].wordName
+      let groupBody = gameBlock[i + 2].blockVals
       var j = 0
-      while j < sceneBody.len:
-        let h = sceneBody[j]
+      while j < groupBody.len:
+        let h = groupBody[j]
         if h.kind == vkWord and h.wordKind == wkWord and h.wordName == "entity" and
-           j + 2 < sceneBody.len and sceneBody[j + 1].kind == vkWord and
-           sceneBody[j + 2].kind == vkBlock:
-          let ent = parseEntity(sceneBody[j + 1].wordName, sceneBody[j + 2].blockVals)
+           j + 2 < groupBody.len and groupBody[j + 1].kind == vkWord and
+           groupBody[j + 2].kind == vkBlock:
+          let taggedBody = injectGroupTag(groupBody[j + 2].blockVals, groupName)
+          let ent = parseEntity(groupBody[j + 1].wordName, taggedBody)
           for tag in ent.tags:
             if not result.hasKey(tag):
               result[tag] = @[]
@@ -311,10 +323,11 @@ proc collectTagMap*(gameBlock: seq[KtgValue]): Table[string, seq[string]] =
           j += 3
         else:
           j += 1
-      break
-    i += 1
+      i += 3
+    else:
+      i += 1
 
-proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
+proc expandGroup(groupName: string, groupBody: seq[KtgValue],
                  backend: GameBackend,
                  macroExpand: MacroExpander = nil): seq[KtgValue] =
   var stateBlock: seq[KtgValue] = @[]
@@ -324,66 +337,69 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
   var userUpdatePre: seq[KtgValue] = @[]
 
   var i = 0
-  while i < sceneBody.len:
-    let head = sceneBody[i]
+  while i < groupBody.len:
+    let head = groupBody[i]
     if head.kind == vkWord and head.wordKind == wkWord and head.wordName == "state" and
-       i + 1 < sceneBody.len and sceneBody[i + 1].kind == vkBlock:
-      for v in sceneBody[i + 1].blockVals:
+       i + 1 < groupBody.len and groupBody[i + 1].kind == vkBlock:
+      for v in groupBody[i + 1].blockVals:
         stateBlock.add(v)
       i += 2
     elif head.kind == vkWord and head.wordKind == wkWord and head.wordName == "entity" and
-       i + 2 < sceneBody.len and sceneBody[i + 1].kind == vkWord and
-       sceneBody[i + 1].wordKind == wkWord and sceneBody[i + 2].kind == vkBlock:
+       i + 2 < groupBody.len and groupBody[i + 1].kind == vkWord and
+       groupBody[i + 1].wordKind == wkWord and groupBody[i + 2].kind == vkBlock:
       ## Pre-expand any user `@template` names in the entity body so they
       ## produce dialect vocabulary (field/update/draw/...) that parseEntity
       ## already understands. If no expander is provided (REPL/tests), the body
       ## passes through unchanged.
-      let rawBody = sceneBody[i + 2].blockVals
-      let entityBody = if macroExpand != nil: macroExpand(rawBody) else: rawBody
-      let ent = parseEntity(sceneBody[i + 1].wordName, entityBody,
+      let rawBody = groupBody[i + 2].blockVals
+      let expanded = if macroExpand != nil: macroExpand(rawBody) else: rawBody
+      ## Inject the group name as a tag on every entity inside this group,
+      ## so `collide <ent> '<group> [...]` and tag maps Just Work.
+      let taggedBody = injectGroupTag(expanded, groupName)
+      let ent = parseEntity(groupBody[i + 1].wordName, taggedBody,
                             backend.storesColor)
       entities.add(ent)
       i += 3
     elif head.kind == vkWord and head.wordKind == wkWord and head.wordName == "collide" and
-         i + 3 < sceneBody.len and sceneBody[i + 1].kind == vkWord and
-         sceneBody[i + 1].wordKind == wkWord and
-         sceneBody[i + 2].kind == vkWord and
-         (sceneBody[i + 2].wordKind == wkLitWord or sceneBody[i + 2].wordKind == wkWord) and
-         sceneBody[i + 3].kind == vkBlock:
+         i + 3 < groupBody.len and groupBody[i + 1].kind == vkWord and
+         groupBody[i + 1].wordKind == wkWord and
+         groupBody[i + 2].kind == vkWord and
+         (groupBody[i + 2].wordKind == wkLitWord or groupBody[i + 2].wordKind == wkWord) and
+         groupBody[i + 3].kind == vkBlock:
       collides.add(CollideForm(
-        selfEntity: sceneBody[i + 1].wordName,
-        tagOrEntity: sceneBody[i + 2].wordName,
-        isTag: sceneBody[i + 2].wordKind == wkLitWord,
-        body: rewriteDestroy(sceneBody[i + 3].blockVals),
+        selfEntity: groupBody[i + 1].wordName,
+        tagOrEntity: groupBody[i + 2].wordName,
+        isTag: groupBody[i + 2].wordKind == wkLitWord,
+        body: rewriteDestroy(groupBody[i + 3].blockVals),
       ))
       i += 4
     elif head.kind == vkWord and head.wordKind == wkWord and
          head.wordName == "collide/using" and
-         i + 4 < sceneBody.len and sceneBody[i + 1].kind == vkWord and
-         sceneBody[i + 1].wordKind == wkWord and
-         sceneBody[i + 2].kind == vkWord and
-         (sceneBody[i + 2].wordKind == wkLitWord or sceneBody[i + 2].wordKind == wkWord) and
-         sceneBody[i + 3].kind == vkWord and
-         sceneBody[i + 3].wordKind == wkWord and
-         sceneBody[i + 4].kind == vkBlock:
+         i + 4 < groupBody.len and groupBody[i + 1].kind == vkWord and
+         groupBody[i + 1].wordKind == wkWord and
+         groupBody[i + 2].kind == vkWord and
+         (groupBody[i + 2].wordKind == wkLitWord or groupBody[i + 2].wordKind == wkWord) and
+         groupBody[i + 3].kind == vkWord and
+         groupBody[i + 3].wordKind == wkWord and
+         groupBody[i + 4].kind == vkBlock:
       collides.add(CollideForm(
-        selfEntity: sceneBody[i + 1].wordName,
-        tagOrEntity: sceneBody[i + 2].wordName,
-        isTag: sceneBody[i + 2].wordKind == wkLitWord,
-        pred: sceneBody[i + 3].wordName,
-        body: rewriteDestroy(sceneBody[i + 4].blockVals),
+        selfEntity: groupBody[i + 1].wordName,
+        tagOrEntity: groupBody[i + 2].wordName,
+        isTag: groupBody[i + 2].wordKind == wkLitWord,
+        pred: groupBody[i + 3].wordName,
+        body: rewriteDestroy(groupBody[i + 4].blockVals),
       ))
       i += 5
     elif head.kind == vkWord and head.wordKind == wkWord and head.wordName == "draw" and
-         i + 1 < sceneBody.len and sceneBody[i + 1].kind == vkBlock:
-      assertNoSelf(sceneBody[i + 1].blockVals, "scene draw block")
-      for v in sceneBody[i + 1].blockVals:
+         i + 1 < groupBody.len and groupBody[i + 1].kind == vkBlock:
+      assertNoSelf(groupBody[i + 1].blockVals, "group draw block")
+      for v in groupBody[i + 1].blockVals:
         userDrawBody.add(v)
       i += 2
     elif head.kind == vkWord and head.wordKind == wkWord and head.wordName == "on-update" and
-         i + 1 < sceneBody.len and sceneBody[i + 1].kind == vkBlock:
-      assertNoSelf(sceneBody[i + 1].blockVals, "scene on-update block")
-      for v in rewriteDestroy(sceneBody[i + 1].blockVals):
+         i + 1 < groupBody.len and groupBody[i + 1].kind == vkBlock:
+      assertNoSelf(groupBody[i + 1].blockVals, "group on-update block")
+      for v in rewriteDestroy(groupBody[i + 1].blockVals):
         userUpdatePre.add(v)
       i += 2
     else:
@@ -502,14 +518,12 @@ proc expand*(blk: seq[KtgValue], targetName: string,
       for entry in blk[i + 1].blockVals:
         userBindings.add(entry)
       i += 2
-    elif v.kind == vkWord and v.wordKind == wkWord and v.wordName == "scene" and
+    elif v.kind == vkWord and v.wordKind == wkWord and v.wordName == "group" and
          i + 2 < blk.len and blk[i + 1].kind == vkWord and
          blk[i + 1].wordKind == wkLitWord and blk[i + 2].kind == vkBlock:
-      for s in expandScene(blk[i + 1].wordName, blk[i + 2].blockVals, backend, macroExpand):
+      for s in expandGroup(blk[i + 1].wordName, blk[i + 2].blockVals, backend, macroExpand):
         body.add(s)
       i += 3
-    elif v.kind == vkWord and v.wordKind == wkWord and v.wordName == "go":
-      i += 2
     else:
       i += 1
 

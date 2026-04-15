@@ -7,7 +7,7 @@ Kintsugi [name: 'pong-nocollide]
     PADDLE-SPEED: 420
     BALL-SPEED: 350
   ]
-  scene 'main [
+  group 'main [
     state [
       paused?: false
     ]

@@ -5,7 +5,7 @@ Kintsugi [name: 'pong]
 ;
 ; Demonstrates the @game dialect at its current shape:
 ; - constants block for compile-time inlined values
-; - scene 'main with state, entities, collide, draw
+; - group 'main with state, entities, collide, draw
 ; - per-entity update blocks with self/<field> substitution
 ; - tag-based collide form (`collide ball 'paddle [...]`)
 ; - love/keypressed wired outside @game (input is target-native)
@@ -41,7 +41,7 @@ reset-ball: function [b dir] [
     BALL-RADIUS: 8
   ]
 
-  scene 'main [
+  group 'main [
     state [
       paused?: false
       player-score: 0

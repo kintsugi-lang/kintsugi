@@ -1485,7 +1485,7 @@ if @parse/ok? "12345" [some digit] [print "all digits"]
 ; GAME DIALECT
 ; ============================================================
 ; @game is the structural dialect for writing games.
-; It handles scenes, entities, state, collision, and the
+; It handles entity groups, state, collision, and the
 ; update/draw/frame loop. It does not provide a cross-platform
 ; input or graphics API beyond the auto-rect entity draw.
 ;
@@ -1508,14 +1508,18 @@ _game-demo: [
     PADDLE-SPEED: 420
   ]
 
-  scene 'main [
+  ; `group 'main [...]` classifies every entity inside with the
+  ; `main` tag. It's a compile-time tag wrapper -- no runtime
+  ; scene concept. Use multiple groups to organize entities and
+  ; target them from `collide <ent> '<group> [...]`.
+  group 'main [
     ; state block lifts to top-level locals in the output
     state [
       paused?: false
       score: 0
     ]
 
-    ; scene-level tick runs before entity updates
+    ; group-level tick runs before entity updates
     on-update [if paused? [return]]
 
     ; entities are contexts with auto-extracted pos/rect/color fields
@@ -1551,18 +1555,16 @@ _game-demo: [
       ball/dy: (ball/y - it/y) / 40
     ]
 
-    ; scene-level draw runs after per-entity auto-rects
+    ; group-level draw runs after per-entity auto-rects
     draw [
       love/graphics/print score 380 20
     ]
   ]
-
-  go 'main
 ]
 
 ; Platform-specific wiring lives OUTSIDE @game. The dev writes
 ; target-native callback handlers directly. They see the state
-; variables that the scene lifted to top level.
+; variables that the group lifted to top level.
 love/keypressed: function [key] [
   match key [
     ["space"]  [paused?: not paused?]
