@@ -117,6 +117,20 @@ suite "pairs":
     check $eval.evalString("100x200") == "100x200"
     check $eval.evalString("10x20 + 5x10") == "15x30"
 
+  test "set-path on pair/x and pair/y rebinds":
+    let eval = makeEval()
+    discard eval.evalString("p: 10x20")
+    discard eval.evalString("p/x: 50")
+    check $eval.evalString("p") == "50x20"
+    discard eval.evalString("p/y: 99")
+    check $eval.evalString("p") == "50x99"
+
+  test "set-path on pair rejects unknown field":
+    let eval = makeEval()
+    discard eval.evalString("p: 10x20")
+    expect KtgError:
+      discard eval.evalString("p/z: 5")
+
 suite "type introspection":
   test "type queries":
     let eval = makeEval()

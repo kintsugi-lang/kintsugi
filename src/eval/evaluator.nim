@@ -528,6 +528,27 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
         elif current.kind == vkObject:
           raise KtgError(kind: "frozen",
             msg: "cannot mutate frozen object", data: nil)
+        elif current.kind == vkPair and (lastSeg == "x" or lastSeg == "y"):
+          if rhs.kind != vkInteger:
+            raise KtgError(kind: "type",
+              msg: "pair! field must be integer!, got " & typeName(rhs),
+              data: rhs)
+          let v = rhs.intVal
+          if v < int32.low or v > int32.high:
+            raise KtgError(kind: "range",
+              msg: "pair component out of int32 range", data: rhs)
+          let newPair =
+            if lastSeg == "x": ktgPair(int32(v), current.py, val.line)
+            else: ktgPair(current.px, int32(v), val.line)
+          if segments.len == 1:
+            ctx.set(head, newPair)
+          else:
+            raise KtgError(kind: "type",
+              msg: "set-path on nested pair! not yet supported",
+              data: current)
+        elif current.kind == vkPair:
+          raise KtgError(kind: "undefined",
+            msg: lastSeg & " not found on pair! (use /x or /y)", data: nil)
         else:
           raise KtgError(kind: "type",
             msg: "cannot set field on " & typeName(current),
