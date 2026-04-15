@@ -306,28 +306,37 @@ suite "series access safety":
     expect KtgError:
       discard eval.evalString("second [1]")
 
-suite "@macro":
-  test "macro that returns a block auto-evaluates it":
+suite "@template":
+  test "@template wraps body in @compose":
     let eval = makeEval()
     check $eval.evalString("""
-      @macro add-one-two: function [] [ [1 + 2] ]
-      add-one-two
-    """) == "3"
-
-  test "macro that returns non-block passes through":
-    let eval = makeEval()
-    check $eval.evalString("""
-      @macro always-42: function [] [42]
-      always-42
+      @template unless: [cond body [block!]] [
+        if not (cond) (body)
+      ]
+      result: 0
+      unless false [result: 42]
+      result
     """) == "42"
 
-  test "macro result evaluated in caller context":
+  test "@template/deep uses @compose/deep":
     let eval = makeEval()
     check $eval.evalString("""
-      x: 10
-      @macro get-x: function [] [ [x] ]
-      get-x
-    """) == "10"
+      @template/deep make-adder: [n [integer!]] [
+        function [x] [x + (n)]
+      ]
+      add5: make-adder 5
+      add5 10
+    """) == "15"
+
+  test "@template/only uses @compose/only":
+    let eval = makeEval()
+    check $eval.evalString("""
+      @template/only defn: [name [string!] params [block!] body [block!]] [
+        (to set-word! name) function (params) (body)
+      ]
+      defn "square" [x] [x * x]
+      square 7
+    """) == "49"
 
 suite "recursion depth limit":
   test "infinite recursion raises stack overflow":

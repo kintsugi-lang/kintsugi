@@ -11,7 +11,7 @@ type
     dialects*: seq[Dialect]
     moduleCache*: Table[string, KtgValue]
     moduleLoading*: HashSet[string]
-    macros*: HashSet[string]   ## words declared with @macro
+    macros*: HashSet[string]   ## words declared with @template
     parseFn*: proc(eval: Evaluator, input, rules: KtgValue, okOnly: bool): KtgValue  ## @parse implementation
 
   Dialect* = ref object of RootObj

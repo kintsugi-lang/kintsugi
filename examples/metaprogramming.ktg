@@ -2,12 +2,12 @@
 ;
 ; Three tools:
 ;   @compose     - template blocks with paren interpolation
-;   @macro       - functions whose return value is evaluated as code
+;   @template    - named, declarative templates expanded at call sites
 ;   @preprocess  - compile-time code generation via emit
 ;
 ; The key insight: blocks are inert data. Code and data are the
-; same structure. Macros don't need special syntax -- they just
-; return blocks that get evaluated.
+; same structure. Templates don't need special syntax -- they
+; return blocks that get spliced at the call site.
 
 ; ============================================================
 ; @compose -- block templates
@@ -29,32 +29,34 @@ x: 42
 probe @compose/deep [outer [inner (x)]]     ; [outer [inner 42]]
 
 ; ============================================================
-; @macro -- code generation without ceremony
+; @template -- code generation without ceremony
 ; ============================================================
-; Tag a function with @macro. When called, its return value
-; (a block) is automatically evaluated in the caller's scope.
+; @template declares a named template. The body is auto-wrapped
+; in @compose, so (paren) interpolation splices args into the
+; generated block. The expansion happens at the call site.
 
-; Simple macro: unless
-@macro unless: function [cond body [block!]] [
-  @compose [if not (cond) (body)]
+; Simple template: unless
+@template unless: [cond body [block!]] [
+  if not (cond) (body)
 ]
 
 unless (1 > 10) [print "math works"]    ; math works
 
-; Macro that generates a named function
-@macro defn: function [name [string!] params [block!] body [block!]] [
-  @compose/only [(to set-word! name) function (params) (body)]
+; Template that generates a named function
+; Use /only when the generated block contains set-words or
+; words that should not themselves be composed.
+@template/only defn: [name [string!] params [block!] body [block!]] [
+  (to set-word! name) function (params) (body)
 ]
 
 defn "square" [n] [n * n]
 print square 7                          ; 49
 
-; Macro with before/after wrapping
-@macro traced: function [label [string!] body [block!]] [
-  result: @compose/deep [print rejoin ["[" (label) "] start"]]
-  append result body
-  append result @compose/deep [print rejoin ["[" (label) "] end"]]
-  result
+; Template with before/after wrapping via /deep composition
+@template/deep traced: [label [string!] body [block!]] [
+  print rejoin ["[" (label) "] start"]
+  (body)
+  print rejoin ["[" (label) "] end"]
 ]
 
 traced "demo" [
@@ -63,6 +65,10 @@ traced "demo" [
 ; [demo] start
 ; doing work
 ; [demo] end
+
+; For anything beyond a declarative rewrite -- reading files,
+; looping to build blocks, branching at compile time -- reach
+; for @preprocess [emit [...]] below.
 
 ; ============================================================
 ; @preprocess -- compile-time code generation

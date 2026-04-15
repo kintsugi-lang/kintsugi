@@ -334,7 +334,7 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
     elif head.kind == vkWord and head.wordKind == wkWord and head.wordName == "entity" and
        i + 2 < sceneBody.len and sceneBody[i + 1].kind == vkWord and
        sceneBody[i + 1].wordKind == wkWord and sceneBody[i + 2].kind == vkBlock:
-      ## Pre-expand any user `@component` macros in the entity body so they
+      ## Pre-expand any user `@template` names in the entity body so they
       ## produce dialect vocabulary (field/update/draw/...) that parseEntity
       ## already understands. If no expander is provided (REPL/tests), the body
       ## passes through unchanged.

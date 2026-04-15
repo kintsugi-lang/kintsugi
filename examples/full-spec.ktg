@@ -1573,25 +1573,27 @@ love/keypressed: function [key] [
 ; playdate/...) implicitly locks the file to that target. Compile
 ; with the wrong --target and you get a clean unbound-name error.
 
-; --- Components via @component ---
+; --- Components via @template ---
 ;
-; A "component" is a macro that expands into entity-body vocabulary.
-; When parseEntity sees an unknown word inside an entity block, it
-; asks the preprocessor whether the word is a registered macro and
-; splices the expansion inline.
+; A "component" is a template that expands into entity-body
+; vocabulary. When parseEntity sees an unknown word inside an
+; entity block, it asks the preprocessor whether the word is a
+; registered template and splices the expansion inline.
 ;
-; @component is sugar at the same preprocess layer as @macro:
+; @template is the canonical form for named, declarative code
+; generation. The body is auto-wrapped in @compose, so (paren)
+; interpolation splices arguments into the produced block.
 ;
-;   @component name: [spec] [body]
+; Refinements /deep and /only select the @compose mode when
+; simple paren-splicing is not what you want:
 ;
-; desugars to:
-;
-;   @macro name: function [spec] [@compose [body]]
+;   @template/deep  ...  -> @compose/deep
+;   @template/only  ...  -> @compose/only
 ;
 ; Define a health component that adds hp + max-hp fields and
 ; auto-destroys the entity when hp reaches zero:
 ;
-;   @component health: [amount [integer!]] [
+;   @template health: [amount [integer!]] [
 ;     field hp (amount)
 ;     field max-hp (amount)
 ;     update [if self/hp <= 0 [destroy self]]
@@ -1599,16 +1601,13 @@ love/keypressed: function [key] [
 ;
 ; Define a timeout component that self-destructs after N frames:
 ;
-;   @component timeout: [frames [integer!]] [
+;   @template timeout: [frames [integer!]] [
 ;     field _age 0
 ;     update [
 ;       self/_age: self/_age + 1
 ;       if self/_age > (frames) [destroy self]
 ;     ]
 ;   ]
-;
-; @macro still works for any macro that isn't shaped like a
-; component (not an entity-body producer, or custom composition).
 ;
 ; Compose multiple components on one entity:
 ;
@@ -1685,27 +1684,29 @@ print second result                     ; 12
 
 
 ; ============================================================
-; MACROS
+; TEMPLATES
 ; ============================================================
-; @macro tags a function as a macro. When called, the return
-; value (if it's a block) is automatically evaluated in the
-; calling context. This is code generation without ceremony.
+; @template declares a compile-time template: the body is
+; auto-wrapped in @compose so (paren) interpolation splices
+; arguments into the generated block. The expansion happens at
+; the call site.
+;
+; @template/deep and @template/only select @compose/deep and
+; @compose/only respectively -- use /deep to interpolate inside
+; nested blocks, and /only when generated tokens like set-words
+; must not themselves be composed.
 
-@macro unless: function [cond body [block!]] [
-  @compose [if not (cond) (body)]
+@template unless: [cond body [block!]] [
+  if not (cond) (body)
 ]
 
 unless (3 > 5) [print "3 is not greater than 5"]
 
-; Macros can wrap code with before/after logic.
-; Use @compose/deep to interpolate inside nested blocks,
-; and splicing (default) to inline block contents.
-
-@macro with-timing: function [label [string!] body [block!]] [
-  result: @compose/deep [print rejoin ["[" (label) "] start"]]
-  append result body
-  append result @compose/deep [print rejoin ["[" (label) "] end"]]
-  result
+; Wrap a body with before/after logic via /deep:
+@template/deep with-timing: [label [string!] body [block!]] [
+  print rejoin ["[" (label) "] start"]
+  (body)
+  print rejoin ["[" (label) "] end"]
 ]
 
 with-timing "test" [

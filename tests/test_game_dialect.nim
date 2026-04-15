@@ -733,17 +733,17 @@ suite "game dialect destroy / alive?":
     scan(output)
     check sawBothAlive
 
-suite "game dialect @component macros":
-  test "user @component expands into dialect vocabulary inside entity body":
-    ## @component health adds an hp field and an update hook.
-    ## The entity body references it as `health 10` which must
-    ## expand at @game parse time into field+update forms.
+suite "game dialect @template components":
+  test "user @template expands into dialect vocabulary inside entity body":
+    ## An @template named `health` adds hp + max-hp fields. The
+    ## entity body references it as `health 25` which must expand
+    ## at @game parse time into field forms.
     let src = """
       Kintsugi [name: 'comptest]
-      @macro health: function [amount [integer!]] [@compose [
+      @template health: [amount [integer!]] [
         field hp (amount)
         field max-hp (amount)
-      ]]
+      ]
       @game [
         scene 'main [
           entity player [
@@ -773,12 +773,12 @@ suite "game dialect @component macros":
     check sawHp
     check sawMaxHp
 
-  test "@component is sugar for @macro ... function ... @compose":
-    ## @component should desugar to a registered macro that produces
-    ## entity-body vocabulary via @compose.
+  test "@template body is auto-wrapped in @compose":
+    ## @template should register a preprocess-time macro that produces
+    ## entity-body vocabulary via @compose without the caller writing it.
     let src = """
       Kintsugi [name: 'sugar]
-      @component health: [amount [integer!]] [
+      @template health: [amount [integer!]] [
         field hp (amount)
         field max-hp (amount)
       ]

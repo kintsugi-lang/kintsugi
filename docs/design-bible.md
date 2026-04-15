@@ -183,7 +183,7 @@ A closure holds a reference to the enclosing context, not a copy. It can read pa
 
 A dialect is a block where words change meaning. `loop [for [x] in series do [body]]` — inside that block, `for`, `in`, `do` have loop-specific semantics. The parent evaluator hands the entire block to the dialect as data. The dialect walks it with its own rules.
 
-**Why:** Dialects and macros are complementary. Macros (`@macro`, `@compose`) generate code — they produce blocks that get evaluated. Dialects interpret data — they receive blocks and walk them with custom rules. Dialects are not "more powerful" than macros; they solve a different problem. Use macros when you need code generation. Use dialects when you need a custom vocabulary for a domain.
+**Why:** Dialects and templates are complementary. Templates (`@template`, `@compose`) generate code — they produce blocks that get spliced at the call site. Dialects interpret data — they receive blocks and walk them with custom rules. Dialects are not "more powerful" than templates; they solve a different problem. Use templates when you need code generation. Use dialects when you need a custom vocabulary for a domain.
 
 ### Six System Dialects
 
@@ -192,7 +192,7 @@ A dialect is a block where words change meaning. `loop [for [x] in series do [bo
 3. **Parse** — PEG-style parsing with backtracking (interpreter-only)
 4. **Object** — Frozen objects with typed fields, auto-constructors, `make`
 5. **Attempt** — Resilient pipelines with `source`, `then`, `when`, `catch`, `fallback`, `retries`
-6. **Game** — Compile-time EC; user supplies S. Scenes, entities, components (via `@macro`), collision, update/draw wiring, destroy/`alive?`. Compile-time only.
+6. **Game** — Compile-time EC; user supplies S. Scenes, entities, components (via `@template`), collision, update/draw wiring, destroy/`alive?`. Compile-time only.
 
 **Why:** These are the essential abstractions. Loops, pattern matching, parsing, objects, error handling, and games. Everything else is built from these.
 
@@ -222,12 +222,10 @@ This split is the axis of responsibility. The dialect owns plumbing - how entiti
 
 **Clean Lua out.** Generated Lua calls target SDK functions directly. No shim helpers, no dead state, no indirection. When the dev opens `pong.lua` to hand-extend it, they see `love.graphics.rectangle("fill", player.x, player.y, player.w, player.h)` or `playdate.graphics.fillRect(player.x, player.y, player.w, player.h)` — the same function they would have written by hand. `@game` gives you plumbing; what it outputs is yours.
 
-**Components are macros.** An entity body is a linear sequence of component calls: `pos`, `rect`, `color`, `field`, `update`, `draw`, `tags`. The dialect recognizes these directly. To add a new component — `health`, `velocity`, `timeout`, `gravity`, whatever — you write a macro that expands into dialect vocabulary. When `parseEntity` encounters an unknown word inside an entity body, it asks the preprocessor whether the word is a registered macro; if so, the macro expands into the inline stream and parsing continues.
-
-The `@component` metaword is sugar for the common shape:
+**Components are templates.** An entity body is a linear sequence of component calls: `pos`, `rect`, `color`, `field`, `update`, `draw`, `tags`. The dialect recognizes these directly. To add a new component — `health`, `velocity`, `timeout`, `gravity`, whatever — you write an `@template` that expands into dialect vocabulary. When `parseEntity` encounters an unknown word inside an entity body, it asks the preprocessor whether the word is a registered template; if so, the template expands into the inline stream and parsing continues.
 
 ```
-@component health: [amount [integer!]] [
+@template health: [amount [integer!]] [
   field hp (amount)
   field max-hp (amount)
 ]
@@ -235,16 +233,7 @@ The `@component` metaword is sugar for the common shape:
 entity player [pos 20 40  rect 12 12  health 25]
 ```
 
-which desugars in the preprocessor to:
-
-```
-@macro health: function [amount [integer!]] [@compose [
-  field hp (amount)
-  field max-hp (amount)
-]]
-```
-
-`@component` lives at the same preprocess layer as `@macro`. It's a registration sugar, not a runtime distinction — a component *is* a macro. The sugar exists because the common case (a block template with interpolated parens) is verbose enough that people would hand-roll it every time.
+`@template` auto-wraps the body in `@compose`, so paren interpolation splices arguments directly. Refinements `/deep` and `/only` select `@compose/deep` and `@compose/only` respectively, for cases where nested interpolation or per-value splicing is required. For code generation that needs branching, iteration, or file I/O — anything beyond a declarative rewrite — use `@preprocess [emit [...]]` instead.
 
 **Destroy is a skip marker, not a registry operation.** Every entity context carries an implicit `alive?: true` field. `destroy self` inside an update body, `destroy it` inside a collide body, and `destroy <name>` anywhere rewrite at dialect-expand time to `<target>/alive?: false`. Per-entity update and draw statements wrap in `if <entity>/alive? [...]`; collision pair tests include both sides' alive state in the guard condition. This is compile-time enough to model "entity is dead, stop processing it" without requiring a runtime entity registry or spawn/despawn machinery. Games that need dynamic entity counts — bullet hell, spawners, projectile pools — will eventually need a registry and the associated runtime loop; that's a bigger commitment and a separate dialect decision to make when a real game demands it.
 

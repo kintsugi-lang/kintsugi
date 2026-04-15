@@ -2159,7 +2159,7 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
       if val.wordName == "parse":
         compileError("@parse", "the parse dialect is interpreter-only; restructure to avoid it in compiled code", val.line)
       if val.wordName == "compose" or val.wordName.startsWith("compose/"):
-        compileError("@compose", "@compose is a compile-time feature; use it inside @macro or @preprocess", val.line)
+        compileError("@compose", "@compose is a compile-time feature; use it inside @template or @preprocess", val.line)
       # Other meta-words (@type, etc.) are erased in compiled output
       result = "nil"
 

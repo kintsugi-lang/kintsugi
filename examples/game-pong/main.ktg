@@ -15,7 +15,7 @@ Kintsugi [name: 'pong]
 ; "compile-time EC, you supply the S" in practice: respawn is a
 ; system concern, so it's user code that the entity update calls.
 ;
-; Pong does not exercise the heavier @game features (@component,
+; Pong does not exercise the heavier @game features (@template,
 ; destroy/alive?, collide/using) because pong's three entities
 ; have no shared behavior, no death, and rectangular collisions.
 ; They're documented in the bible and full-spec for games that do.

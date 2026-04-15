@@ -696,18 +696,6 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
           return rhs
         return val
 
-      # @macro — tag the next function definition as a macro
-      if val.wordName == "macro":
-        if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkSetWord:
-          let setWord = vals[pos]
-          pos += 1
-          var rhs = eval.evalNext(vals, pos, ctx)
-          eval.applyInfix(rhs, vals, pos, ctx)
-          eval.macros.incl(setWord.wordName)
-          ctx.set(setWord.wordName, rhs)
-          return rhs
-        return val
-
       # #compose — block composition with paren interpolation
       # Default: splice block results. /only: insert as single element.
       # /deep: recurse into nested blocks.
@@ -1094,15 +1082,16 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue],
   ## Walk the AST looking for:
   ##   @preprocess [block]  - evaluate block, splice emitted values
   ##   @inline [expr]       - evaluate expr, splice result
-  ##   @macro name: fn      - register macro (expanded at call site)
-  ##   macro calls          - expand and splice
+  ##   @template name: ...  - register template (expanded at call site)
+  ##   template calls       - expand and splice
   ## When forCompilation=true, system/platform is set to 'lua.
 
   # Quick scan: anything to do?
   var hasWork = false
   for v in ast:
     if v.kind == vkWord and v.wordKind == wkMetaWord and
-       v.wordName in ["preprocess", "inline", "macro", "game"]:
+       v.wordName in ["preprocess", "inline", "game",
+                      "template", "template/deep", "template/only"]:
       hasWork = true
       break
   # Also check for macro calls from prior passes
@@ -1162,29 +1151,26 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue],
 
       i += 2
 
-    # @macro name: function [spec] [body] - register and skip
+    # @template name: [spec] [body]                — declarative compile-time
+    # @template/deep name: [spec] [body]            — @compose/deep body
+    # @template/only name: [spec] [body]            — @compose/only body
     elif ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
-       ast[i].wordName == "macro" and i + 1 < ast.len and
-       ast[i + 1].kind == vkWord and ast[i + 1].wordKind == wkSetWord:
-      let macroName = ast[i + 1].wordName
-      # Evaluate the macro definition in global scope
-      var defPos = i + 2
-      let macroVal = eval.evalNext(ast, defPos, eval.global)
-      eval.macros.incl(macroName)
-      eval.global.set(macroName, macroVal)
-      i = defPos
-
-    # @component name: [spec] [body] - sugar for @macro name: function [spec] [@compose [body]]
-    elif ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
-       ast[i].wordName == "component" and i + 3 < ast.len and
+       (ast[i].wordName == "template" or
+        ast[i].wordName == "template/deep" or
+        ast[i].wordName == "template/only") and i + 3 < ast.len and
        ast[i + 1].kind == vkWord and ast[i + 1].wordKind == wkSetWord and
        ast[i + 2].kind == vkBlock and ast[i + 3].kind == vkBlock:
       let compName = ast[i + 1].wordName
       let specBlock = ast[i + 2]
       let userBody = ast[i + 3]
-      ## Synthesize `function [<spec>] [@compose [<body>]]`.
+      let composeName =
+        case ast[i].wordName
+        of "template/deep": "compose/deep"
+        of "template/only": "compose/only"
+        else: "compose"
+      ## Synthesize `function [<spec>] [@compose[/mode] [<body>]]`.
       let composedBody = ktgBlock(@[
-        ktgWord("compose", wkMetaWord),
+        ktgWord(composeName, wkMetaWord),
         userBody,
       ])
       var fnAst = @[
@@ -1218,8 +1204,8 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue],
     elif ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
        ast[i].wordName == "game" and i + 1 < ast.len and
        ast[i + 1].kind == vkBlock:
-      ## Hand the dialect a macro-expansion callback so that user-defined
-      ## @component macros can be called inside entity bodies. Produces
+      ## Hand the dialect a template-expansion callback so that user-defined
+      ## @template names can be called inside entity bodies. Produces
       ## dialect vocabulary (field/update/draw/...) via splicing.
       let expander: game_dialect.MacroExpander = proc(body: seq[KtgValue]): seq[KtgValue] =
         var i2 = 0

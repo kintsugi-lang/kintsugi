@@ -514,22 +514,22 @@ suite "cross-mode: loop refinements":
     """)
 
 # ============================================================
-# Macros and preprocessing
+# Templates and preprocessing
 # ============================================================
 
-suite "cross-mode: macros":
-  test "macro expands at compile time":
+suite "cross-mode: templates":
+  test "template expands at compile time":
     crossCheck("""
-      @macro unless: function [cond body [block!]] [
-        @compose [if not (cond) (body)]
+      @template unless: [cond body [block!]] [
+        if not (cond) (body)
       ]
       unless (3 > 5) [print "yes"]
     """)
 
-  test "macro with compose/deep":
+  test "template with compose/deep":
     crossCheck("""
-      @macro make-adder: function [n [integer!]] [
-        @compose/deep [function [x] [x + (n)]]
+      @template/deep make-adder: [n [integer!]] [
+        function [x] [x + (n)]
       ]
       add5: make-adder 5
       print add5 10
