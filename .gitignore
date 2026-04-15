@@ -7,3 +7,5 @@ web/
 # nim-built test binaries alongside their .nim source
 tests/test_*
 !tests/test_*.nim
+# nim-built main binary when compiling src/kintsugi.nim directly
+src/kintsugi
