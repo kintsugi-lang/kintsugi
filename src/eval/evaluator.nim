@@ -369,91 +369,97 @@ proc applyInfix*(eval: Evaluator, result: var KtgValue,
 # --- Path navigation ---
 
 proc navigatePath*(eval: Evaluator, head: KtgValue, segments: seq[string],
-                   ctx: KtgContext): KtgValue =
+                   ctx: KtgContext, pathWord: string = ""): KtgValue =
   var current = head
   for seg in segments:
-    # Dynamic get-word segment: :name → evaluate name, use result as index
-    if seg.startsWith(":"):
-      let varName = seg[1..^1]
-      let idx = ctx.get(varName)
-      if current.kind == vkBlock:
-        if idx.kind == vkInteger:
-          let i = int(idx.intVal)
-          if i >= 1 and i <= current.blockVals.len:
-            current = current.blockVals[i - 1]
+    try:
+      # Dynamic get-word segment: :name → evaluate name, use result as index
+      if seg.startsWith(":"):
+        let varName = seg[1..^1]
+        let idx = ctx.get(varName)
+        if current.kind == vkBlock:
+          if idx.kind == vkInteger:
+            let i = int(idx.intVal)
+            if i >= 1 and i <= current.blockVals.len:
+              current = current.blockVals[i - 1]
+            else:
+              raise KtgError(kind: "range",
+                msg: "index " & $i & " out of range (1.." & $current.blockVals.len & ")",
+                data: idx)
           else:
-            raise KtgError(kind: "range",
-              msg: "index " & $i & " out of range (1.." & $current.blockVals.len & ")",
-              data: idx)
+            raise KtgError(kind: "type",
+              msg: "block index must be integer!, got " & typeName(idx), data: idx)
+        elif current.kind == vkMap:
+          let key = $idx
+          if key in current.mapEntries:
+            current = current.mapEntries[key]
+          else:
+            raise KtgError(kind: "undefined",
+              msg: key & " not found in map", data: idx)
+        elif current.kind == vkContext:
+          let key = $idx
+          current = current.ctx.get(key)
+        elif current.kind == vkObject:
+          let key = $idx
+          current = current.obj.get(key)
         else:
           raise KtgError(kind: "type",
-            msg: "block index must be integer!, got " & typeName(idx), data: idx)
+            msg: "cannot index " & typeName(current) & " with dynamic path", data: idx)
+      # Static word segment: literal field lookup
+      elif current.kind == vkContext:
+        current = current.ctx.get(seg)
+      elif current.kind == vkObject:
+        current = current.obj.get(seg)
       elif current.kind == vkMap:
-        let key = $idx
-        if key in current.mapEntries:
-          current = current.mapEntries[key]
+        if seg in current.mapEntries:
+          current = current.mapEntries[seg]
+        else:
+          raise KtgError(kind: "undefined", msg: seg & " not found in map", data: nil)
+      elif current.kind == vkPair:
+        case seg
+        of "x": current = numFromFloat(current.px)
+        of "y": current = numFromFloat(current.py)
+        else:
+          raise KtgError(kind: "undefined", msg: seg & " not found on pair! (use /x or /y)", data: nil)
+      elif current.kind == vkTuple:
+        # tuple/1, tuple/2, tuple/3 for indexed access
+        try:
+          let idx = parseInt(seg)
+          if idx >= 1 and idx <= current.tupleVals.len:
+            current = ktgInt(int64(current.tupleVals[idx - 1]))
+          else:
+            raise KtgError(kind: "range", msg: "tuple index " & seg & " out of range", data: nil)
+        except ValueError:
+          raise KtgError(kind: "undefined", msg: seg & " not found on tuple! (use /1, /2, etc.)", data: nil)
+      elif current.kind == vkMoney:
+        case seg
+        of "cents": current = ktgInt(current.cents)
+        else:
+          raise KtgError(kind: "undefined", msg: seg & " not found on money! (use /cents)", data: nil)
+      elif current.kind == vkDate:
+        case seg
+        of "year":  current = ktgInt(int64(current.year))
+        of "month": current = ktgInt(int64(current.month))
+        of "day":   current = ktgInt(int64(current.day))
         else:
           raise KtgError(kind: "undefined",
-            msg: key & " not found in map", data: idx)
-      elif current.kind == vkContext:
-        let key = $idx
-        current = current.ctx.get(key)
-      elif current.kind == vkObject:
-        let key = $idx
-        current = current.obj.get(key)
+            msg: seg & " not found on date! (use /year, /month, /day)", data: nil)
+      elif current.kind == vkTime:
+        case seg
+        of "hour":   current = ktgInt(int64(current.hour))
+        of "minute": current = ktgInt(int64(current.minute))
+        of "second": current = ktgInt(int64(current.second))
+        else:
+          raise KtgError(kind: "undefined",
+            msg: seg & " not found on time! (use /hour, /minute, /second)", data: nil)
       else:
         raise KtgError(kind: "type",
-          msg: "cannot index " & typeName(current) & " with dynamic path", data: idx)
-    # Static word segment: literal field lookup
-    elif current.kind == vkContext:
-      current = current.ctx.get(seg)
-    elif current.kind == vkObject:
-      current = current.obj.get(seg)
-    elif current.kind == vkMap:
-      if seg in current.mapEntries:
-        current = current.mapEntries[seg]
-      else:
-        raise KtgError(kind: "undefined", msg: seg & " not found in map", data: nil)
-    elif current.kind == vkPair:
-      case seg
-      of "x": current = numFromFloat(current.px)
-      of "y": current = numFromFloat(current.py)
-      else:
-        raise KtgError(kind: "undefined", msg: seg & " not found on pair (use /x or /y)", data: nil)
-    elif current.kind == vkTuple:
-      # tuple/1, tuple/2, tuple/3 for indexed access
-      try:
-        let idx = parseInt(seg)
-        if idx >= 1 and idx <= current.tupleVals.len:
-          current = ktgInt(int64(current.tupleVals[idx - 1]))
-        else:
-          raise KtgError(kind: "range", msg: "tuple index " & seg & " out of range", data: nil)
-      except ValueError:
-        raise KtgError(kind: "undefined", msg: seg & " not found on tuple (use /1, /2, etc.)", data: nil)
-    elif current.kind == vkMoney:
-      case seg
-      of "cents": current = ktgInt(current.cents)
-      else:
-        raise KtgError(kind: "undefined", msg: seg & " not found on money! (use /cents)", data: nil)
-    elif current.kind == vkDate:
-      case seg
-      of "year":  current = ktgInt(int64(current.year))
-      of "month": current = ktgInt(int64(current.month))
-      of "day":   current = ktgInt(int64(current.day))
-      else:
-        raise KtgError(kind: "undefined",
-          msg: seg & " not found on date! (use /year, /month, /day)", data: nil)
-    elif current.kind == vkTime:
-      case seg
-      of "hour":   current = ktgInt(int64(current.hour))
-      of "minute": current = ktgInt(int64(current.minute))
-      of "second": current = ktgInt(int64(current.second))
-      else:
-        raise KtgError(kind: "undefined",
-          msg: seg & " not found on time! (use /hour, /minute, /second)", data: nil)
-    else:
-      raise KtgError(kind: "type",
-        msg: "cannot navigate path on " & typeName(current), data: nil)
+          msg: "cannot navigate path on " & typeName(current), data: nil)
+    except KtgError as e:
+      if e.path.len == 0 and pathWord.len > 0:
+        e.path = pathWord
+        e.pathSeg = seg
+      raise
   current
 
 
@@ -547,7 +553,7 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
         var segIdx = 0
         while segIdx < segments.len:
           let seg = segments[segIdx]
-          let next = eval.navigatePath(current, @[seg], ctx)
+          let next = eval.navigatePath(current, @[seg], ctx, val.wordName)
           # If resolved is callable and there are more segments, treat as refinements
           if isCallable(next) and segIdx + 1 < segments.len:
             eval.currentRefinements = segments[segIdx + 1 .. ^1]
@@ -607,15 +613,63 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
         var current = headVal
         for i in 0 ..< segments.len - 1:
           let seg = segments[i]
-          # Dynamic get-word segment in set-path
-          if seg.startsWith(":"):
-            let varName = seg[1..^1]
+          try:
+            # Dynamic get-word segment in set-path
+            if seg.startsWith(":"):
+              let varName = seg[1..^1]
+              let idx = ctx.get(varName)
+              if current.kind == vkBlock:
+                if idx.kind == vkInteger:
+                  let j = int(idx.intVal)
+                  if j >= 1 and j <= current.blockVals.len:
+                    current = current.blockVals[j - 1]
+                  else:
+                    raise KtgError(kind: "range",
+                      msg: "index " & $j & " out of range", data: idx)
+                else:
+                  raise KtgError(kind: "type",
+                    msg: "block index must be integer!", data: idx)
+              elif current.kind == vkContext:
+                current = current.ctx.get($idx)
+              elif current.kind == vkMap:
+                let key = $idx
+                if key in current.mapEntries:
+                  current = current.mapEntries[key]
+                else:
+                  raise KtgError(kind: "undefined", msg: key & " not found in map", data: nil)
+              else:
+                raise KtgError(kind: "type",
+                  msg: "cannot navigate path on " & typeName(current), data: current)
+            elif current.kind == vkContext:
+              current = current.ctx.get(seg)
+            elif current.kind == vkMap:
+              if seg in current.mapEntries:
+                current = current.mapEntries[seg]
+              else:
+                raise KtgError(kind: "undefined", msg: seg & " not found in map", data: nil)
+            elif current.kind == vkObject:
+              current = current.obj.get(seg)
+            else:
+              raise KtgError(kind: "type",
+                msg: "cannot navigate path on " & typeName(current),
+                data: current)
+          except KtgError as e:
+            if e.path.len == 0:
+              e.path = val.wordName
+              e.pathSeg = seg
+            raise
+        # Set on the final target
+        let lastSeg = segments[^1]
+        try:
+          # Dynamic get-word as final segment
+          if lastSeg.startsWith(":"):
+            let varName = lastSeg[1..^1]
             let idx = ctx.get(varName)
             if current.kind == vkBlock:
               if idx.kind == vkInteger:
                 let j = int(idx.intVal)
                 if j >= 1 and j <= current.blockVals.len:
-                  current = current.blockVals[j - 1]
+                  current.blockVals[j - 1] = rhs
                 else:
                   raise KtgError(kind: "range",
                     msg: "index " & $j & " out of range", data: idx)
@@ -623,99 +677,63 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
                 raise KtgError(kind: "type",
                   msg: "block index must be integer!", data: idx)
             elif current.kind == vkContext:
-              current = current.ctx.get($idx)
+              current.ctx.set($idx, rhs)
             elif current.kind == vkMap:
-              let key = $idx
-              if key in current.mapEntries:
-                current = current.mapEntries[key]
-              else:
-                raise KtgError(kind: "undefined", msg: key & " not found in map", data: nil)
+              current.mapEntries[$idx] = rhs
+            elif current.kind == vkObject:
+              raise KtgError(kind: "frozen",
+                msg: "cannot mutate object! directly; use `make Type [field: value]` to stamp a mutable context from the template",
+                data: nil)
             else:
               raise KtgError(kind: "type",
-                msg: "cannot navigate path on " & typeName(current), data: current)
+                msg: "cannot set on " & typeName(current), data: current)
           elif current.kind == vkContext:
-            current = current.ctx.get(seg)
+            current.ctx.set(lastSeg, rhs)
           elif current.kind == vkMap:
-            if seg in current.mapEntries:
-              current = current.mapEntries[seg]
-            else:
-              raise KtgError(kind: "undefined", msg: seg & " not found in map", data: nil)
-          elif current.kind == vkObject:
-            current = current.obj.get(seg)
-          else:
-            raise KtgError(kind: "type",
-              msg: "cannot navigate path on " & typeName(current),
-              data: current)
-        # Set on the final target
-        let lastSeg = segments[^1]
-        # Dynamic get-word as final segment
-        if lastSeg.startsWith(":"):
-          let varName = lastSeg[1..^1]
-          let idx = ctx.get(varName)
-          if current.kind == vkBlock:
-            if idx.kind == vkInteger:
-              let j = int(idx.intVal)
-              if j >= 1 and j <= current.blockVals.len:
-                current.blockVals[j - 1] = rhs
-              else:
-                raise KtgError(kind: "range",
-                  msg: "index " & $j & " out of range", data: idx)
-            else:
-              raise KtgError(kind: "type",
-                msg: "block index must be integer!", data: idx)
-          elif current.kind == vkContext:
-            current.ctx.set($idx, rhs)
-          elif current.kind == vkMap:
-            current.mapEntries[$idx] = rhs
+            current.mapEntries[lastSeg] = rhs
           elif current.kind == vkObject:
             raise KtgError(kind: "frozen",
               msg: "cannot mutate object! directly; use `make Type [field: value]` to stamp a mutable context from the template",
               data: nil)
-          else:
-            raise KtgError(kind: "type",
-              msg: "cannot set on " & typeName(current), data: current)
-        elif current.kind == vkContext:
-          current.ctx.set(lastSeg, rhs)
-        elif current.kind == vkMap:
-          current.mapEntries[lastSeg] = rhs
-        elif current.kind == vkObject:
-          raise KtgError(kind: "frozen",
-            msg: "cannot mutate object! directly; use `make Type [field: value]` to stamp a mutable context from the template",
-            data: nil)
-        elif current.kind in {vkPair, vkMoney, vkTuple, vkDate, vkTime}:
-          ## Value types are immutable; set-path on a component rebuilds the
-          ## whole value and writes it back to whatever holds it.
-          let newVal = buildValueTypeRebind(current, lastSeg, rhs, val.line)
-          if segments.len == 1:
-            ctx.set(head, newVal)
-          else:
-            # Re-navigate head + segments[0..^3] to find the container holding
-            # the value, then write newVal back at segments[^2].
-            var holder = ctx.get(head)
-            for i in 0 ..< segments.len - 2:
-              let seg = segments[i]
-              if holder.kind == vkContext: holder = holder.ctx.get(seg)
-              elif holder.kind == vkMap: holder = holder.mapEntries[seg]
-              elif holder.kind == vkObject: holder = holder.obj.get(seg)
+          elif current.kind in {vkPair, vkMoney, vkTuple, vkDate, vkTime}:
+            ## Value types are immutable; set-path on a component rebuilds the
+            ## whole value and writes it back to whatever holds it.
+            let newVal = buildValueTypeRebind(current, lastSeg, rhs, val.line)
+            if segments.len == 1:
+              ctx.set(head, newVal)
+            else:
+              # Re-navigate head + segments[0..^3] to find the container holding
+              # the value, then write newVal back at segments[^2].
+              var holder = ctx.get(head)
+              for i in 0 ..< segments.len - 2:
+                let seg = segments[i]
+                if holder.kind == vkContext: holder = holder.ctx.get(seg)
+                elif holder.kind == vkMap: holder = holder.mapEntries[seg]
+                elif holder.kind == vkObject: holder = holder.obj.get(seg)
+                else:
+                  raise KtgError(kind: "type",
+                    msg: "cannot navigate path on " & typeName(holder), data: holder)
+              let pKey = segments[^2]
+              if holder.kind == vkContext:
+                holder.ctx.set(pKey, newVal)
+              elif holder.kind == vkMap:
+                holder.mapEntries[pKey] = newVal
+              elif holder.kind == vkObject:
+                raise KtgError(kind: "frozen",
+                  msg: "cannot mutate object! directly; use `make Type [field: value]` to stamp a mutable context from the template",
+                data: nil)
               else:
                 raise KtgError(kind: "type",
-                  msg: "cannot navigate path on " & typeName(holder), data: holder)
-            let pKey = segments[^2]
-            if holder.kind == vkContext:
-              holder.ctx.set(pKey, newVal)
-            elif holder.kind == vkMap:
-              holder.mapEntries[pKey] = newVal
-            elif holder.kind == vkObject:
-              raise KtgError(kind: "frozen",
-                msg: "cannot mutate object! directly; use `make Type [field: value]` to stamp a mutable context from the template",
-              data: nil)
-            else:
-              raise KtgError(kind: "type",
-                msg: "cannot set field on " & typeName(holder), data: holder)
-        else:
-          raise KtgError(kind: "type",
-            msg: "cannot set field on " & typeName(current),
+                  msg: "cannot set field on " & typeName(holder), data: holder)
+          else:
+            raise KtgError(kind: "type",
+              msg: "cannot set field on " & typeName(current),
             data: current)
+        except KtgError as e:
+          if e.path.len == 0:
+            e.path = val.wordName
+            e.pathSeg = lastSeg
+          raise
         return rhs
 
       # Auto-generation for object! assignment
@@ -900,8 +918,13 @@ proc evalBlock*(eval: Evaluator, vals: seq[KtgValue],
       result = ktgNone()
       var pos = 0
       while pos < bodyVals.len:
-        result = eval.evalNext(bodyVals, pos, ctx)
-        eval.applyInfix(result, bodyVals, pos, ctx)
+        let startLine = bodyVals[pos].line
+        try:
+          result = eval.evalNext(bodyVals, pos, ctx)
+          eval.applyInfix(result, bodyVals, pos, ctx)
+        except KtgError as e:
+          discard e.attachLine(startLine)
+          raise
     finally:
       for blk in exitBlocks:
         discard eval.evalBlock(blk, ctx)
@@ -909,8 +932,13 @@ proc evalBlock*(eval: Evaluator, vals: seq[KtgValue],
     result = ktgNone()
     var pos = 0
     while pos < vals.len:
-      result = eval.evalNext(vals, pos, ctx)
-      eval.applyInfix(result, vals, pos, ctx)
+      let startLine = vals[pos].line
+      try:
+        result = eval.evalNext(vals, pos, ctx)
+        eval.applyInfix(result, vals, pos, ctx)
+      except KtgError as e:
+        discard e.attachLine(startLine)
+        raise
 
 
 proc matchesCustomTypeByName*(eval: Evaluator, value: KtgValue, typeName: string, ctx: KtgContext): bool

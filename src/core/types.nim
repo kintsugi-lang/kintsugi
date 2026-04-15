@@ -134,6 +134,9 @@ type
     kind*: string         ## 'type, 'math, 'undefined, etc.
     data*: KtgValue
     stack*: seq[StackFrame]
+    line*: int            ## source line where the error originated (0 = unknown)
+    path*: string         ## path-expression context (empty = none) — e.g. "enemy/pos/x"
+    pathSeg*: string      ## which segment in `path` failed (empty = whole path)
 
 
 # --- Value constructors ---
@@ -197,6 +200,13 @@ proc ktgEmail*(email: string, line = 0): KtgValue =
 
 
 # --- Context operations ---
+
+proc attachLine*(e: KtgError, line: int): KtgError {.discardable.} =
+  ## If the error has no line yet, stamp one on it. Used by eval wrappers that
+  ## know the source line of the currently-evaluating value.
+  if e.line == 0 and line != 0:
+    e.line = line
+  e
 
 proc newContext*(parent: KtgContext = nil): KtgContext =
   KtgContext(entries: initOrderedTable[string, KtgValue](), parent: parent)

@@ -9,7 +9,7 @@
 ##   kintsugi -c <file|dir> --dry-run — print compiled Lua to stdout
 
 import std/[os, strutils, algorithm, tables]
-import core/types
+import core/[types, errors]
 import parse/parser
 import eval/[dialect, evaluator, natives]
 import emit/lua
@@ -196,7 +196,7 @@ proc repl() =
     except ExitSignal as e:
       quit(e.code)
     except KtgError as e:
-      echo "Error [" & e.kind & "]: " & e.msg
+      echo formatError(line, e)
     except CatchableError as e:
       echo "Error: " & e.msg
 
@@ -224,15 +224,12 @@ proc runSingleFile(path: string, eval: Evaluator = nil) =
     discard e.evalString(source)
   except ExitSignal as e:
     quit(e.code)
-  except KtgError as e:
-    echo "Error [" & e.kind & "]: " & e.msg
-    if e.stack.len > 0:
-      echo "Stack trace:"
-      for frame in e.stack:
-        echo "  " & frame.name & " at line " & $frame.line
+  except KtgError as ke:
+    echo path & ":"
+    echo formatError(source, ke)
     quit(1)
-  except CatchableError as e:
-    echo "Error: " & e.msg
+  except CatchableError as ce:
+    echo "Error: " & ce.msg
     quit(1)
 
 proc runFile(path: string) =
@@ -379,11 +376,7 @@ proc main() =
     except ExitSignal as e:
       quit(e.code)
     except KtgError as e:
-      echo "Error [" & e.kind & "]: " & e.msg
-      if e.stack.len > 0:
-        echo "Stack trace:"
-        for frame in e.stack:
-          echo "  " & frame.name & " at line " & $frame.line
+      echo formatError(evalExpr, e)
       quit(1)
     except CatchableError as e:
       echo "Error: " & e.msg
@@ -410,7 +403,9 @@ proc main() =
       else:
         compilePath(filePath, outPath, target)
     except KtgError as e:
-      echo "Error [" & e.kind & "]: " & e.msg
+      # Best-effort: read the source for preview if the path is a file.
+      let src = if fileExists(filePath): readFile(filePath) else: ""
+      echo formatError(src, e)
       quit(1)
     except ValueError as e:
       echo "Error: " & e.msg

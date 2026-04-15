@@ -64,15 +64,9 @@ Premature XL work on a pre-1.0 language with zero external users is the single m
 
 **Do not**: build a package manager before there is anything to package. The correct order is namespaces -> versions -> registry, and each step waits for the previous one to feel constrained.
 
-## 10. Error messages (M)
+## 10. Error messages (M) — done 2026-04-15
 
-**What**: Lexer errors are excellent (line numbers, character context). Evaluator errors are okay (kind + message, line in most cases). Path errors are weak: "cannot navigate path on context!" does not say *which* path or *where* in the source. Compile errors are best because the emitter has the prescan info.
-
-**Size**: M (~1 week). Thread `line` through every `KtgError` raise site that currently omits it, and add a source-line preview with a caret to the error formatter. Tedious not hard — maybe 500-800 LOC across many files.
-
-**Revisit when**: next session. This is the smallest M item and the one with the broadest payoff, because every other rough edge surfaces as an error message first. If anything on this list jumps in priority it's this.
-
-**Do not**: try to rewrite the error formatter before threading the line info. The formatter improvements compound on the data being there, and the data isn't there yet in most places.
+Shipped: `line`, `path`, and `pathSeg` fields on `KtgError`; `evalBlock` wraps each evaluation in a try/except that stamps line from the value being evaluated (propagates automatically to nested raises); `navigatePath` and the set-path code attach path context to any error raised during traversal; new `src/core/errors.nim` with `formatError(source, err)` that renders kind + msg, path context ("in path: x/pos/z (at /pos)"), source line preview, and a caret pointing at the path word. Wired into the REPL, `-e`, file runner, and compiler runner. Covered by `tests/test_error_formatting.nim` (20 tests, 1482 total).
 
 ---
 
