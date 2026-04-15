@@ -392,7 +392,40 @@ Built-in type checks (`is? integer! x`, `integer?`, `string?`, etc.) emit Lua `t
 
 No intermediate representation. Both the interpreter and emitter walk the same `seq[KtgValue]`. The pipeline is: parse, prescan, infer, emit — all operating on the same data structure.
 
-**Why:** Homoiconic design. Code-as-data macros (`@compose`) work naturally. No IR translation bugs. One representation to understand, not two.
+**Why:** Homoiconic design. Code-as-data templates (`@compose`) work naturally. No IR translation bugs. One representation to understand, not two.
+
+---
+
+## `@` Sigil Reference
+
+The `@` sigil means "the language is doing something structural here." A word that starts with `@` is not a normal lookup — it is always handled by the parser, preprocessor, or a dialect registration rather than being resolved from the current context. Readers can treat `@foo` as a signal to look the word up in this table rather than trying to evaluate it mentally.
+
+| Sigil | Shape | What it does |
+|-------|-------|--------------|
+| `@type` | `@type name: [rule]` | Define a custom type (rule block like `[string! \| none!]`). |
+| `@type/enum` | `@type/enum name: ['a \| 'b]` | Define an enum over lit-words. |
+| `@type/where` | `@type/where name: [spec] [guard]` | Define a type with a validation guard expression. |
+| `@const` | `@const name: value` | Bind a constant. The binding may not be reassigned. |
+| `@compose` | `@compose [body]` | Evaluate parens inside the block and splice their results. Used to build block values with interpolated data. |
+| `@compose/deep` | `@compose/deep [body]` | Recurse into nested blocks while composing. |
+| `@compose/only` | `@compose/only [body]` | Insert each paren result as a single value instead of splicing block contents. |
+| `@template` | `@template name: [spec] [body]` | Declare a named template. Body is auto-wrapped in `@compose`; arguments splice via paren interpolation at the call site. |
+| `@template/deep` | `@template/deep name: ...` | Same, but body is auto-wrapped in `@compose/deep`. |
+| `@template/only` | `@template/only name: ...` | Same, but body is auto-wrapped in `@compose/only`. |
+| `@preprocess` | `@preprocess [body]` | Evaluate the body at parse time. Inside, `emit [...]` injects code into the source stream. The imperative escape hatch for code generation. |
+| `@inline` | `@inline [expr]` | Evaluate a single expression at parse time and splice the result into the source stream. |
+| `@parse` | `@parse input [rules]` | Run the parse dialect. Returns a context with `ok`, captures, and the match position. Interpreter-only; raises a compile error under `kintsugi -c`. |
+| `@game` | `@game [body]` | Compile-time game dialect. Processes `constants`, `bindings`, `group 'name [entity ... collide ... on-update ... draw ...]` and produces direct target-native Lua via a backend record. Compile-time only; requires `--target=love2d` or `--target=playdate`. |
+| `@enter` | `@enter [body]` | Lifecycle hook run when entering the enclosing `scope`/`context`. |
+| `@exit` | `@exit [body]` | Lifecycle hook run on normal or error exit from the enclosing scope. Guaranteed to run. |
+
+### `@name` in destructuring positions
+
+Inside `set` destructuring (for example `set [first @rest] block`), a `@`-prefixed word is a **collect-rest** binding — the remaining elements of the source are captured into a block under that name. This is a pattern element, not a meta-word of its own; `@rest` and `@tail` are conventions, but any `@name` works.
+
+### `@type-defined` inside dialects
+
+Dialects can recognize their own `@`-prefixed tokens as pattern elements (for example the capture dialect treats `@name` as a keyword sigil). Those are dialect-local and do not collide with the top-level table above — the dialect sees them first because the enclosing block is handed to the dialect as data.
 
 ---
 
