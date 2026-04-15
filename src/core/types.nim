@@ -81,6 +81,8 @@ type
     entries*: OrderedTable[string, KtgValue]
     parent*: KtgContext
     localOnly*: bool  ## when true, setThrough behaves like set (for context builders)
+    instanceOf*: string  ## non-empty when `make <Type>` built this context,
+                         ## holds the object type name (e.g., "Enemy")
 
   FieldSpec* = object
     name*: string

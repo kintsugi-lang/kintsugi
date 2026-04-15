@@ -536,7 +536,8 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
             current.mapEntries[$idx] = rhs
           elif current.kind == vkObject:
             raise KtgError(kind: "frozen",
-              msg: "cannot mutate frozen object", data: nil)
+              msg: "cannot mutate object! directly; use `make Type [field: value]` to stamp a mutable context from the template",
+              data: nil)
           else:
             raise KtgError(kind: "type",
               msg: "cannot set on " & typeName(current), data: current)
@@ -546,7 +547,8 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
           current.mapEntries[lastSeg] = rhs
         elif current.kind == vkObject:
           raise KtgError(kind: "frozen",
-            msg: "cannot mutate frozen object", data: nil)
+            msg: "cannot mutate object! directly; use `make Type [field: value]` to stamp a mutable context from the template",
+            data: nil)
         elif current.kind == vkPair and (lastSeg == "x" or lastSeg == "y"):
           let v =
             if rhs.kind == vkInteger: float64(rhs.intVal)
@@ -579,7 +581,8 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
               holder.mapEntries[pKey] = newPair
             elif holder.kind == vkObject:
               raise KtgError(kind: "frozen",
-                msg: "cannot mutate frozen object", data: nil)
+                msg: "cannot mutate object! directly; use `make Type [field: value]` to stamp a mutable context from the template",
+              data: nil)
             else:
               raise KtgError(kind: "type",
                 msg: "cannot set pair field on " & typeName(holder), data: holder)

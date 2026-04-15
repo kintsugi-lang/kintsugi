@@ -235,6 +235,10 @@ proc registerObjectDialect*(eval: Evaluator) =
           data: source)
 
       let instance = newContext(eval.global)
+      ## Tag the instance with its source object's name so `type` can
+      ## report it as the user-declared type instead of bare `context!`.
+      if source.kind == vkObject and source.obj.name.len > 0:
+        instance.instanceOf = source.obj.name
 
       # Step 1: Shallow copy all entries from source
       for key, val in sourceEntries:

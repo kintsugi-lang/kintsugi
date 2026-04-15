@@ -1,4 +1,4 @@
-import std/unittest
+import std/[unittest, strutils]
 import ../src/core/types
 import ../src/eval/[dialect, evaluator, natives]
 import ../src/dialects/[loop_dialect, object_dialect]
@@ -276,3 +276,32 @@ suite "freeze":
       frozen? :Point
     """)
     check r.boolVal == true
+
+  test "type on a make'd instance reports the object name":
+    let eval = makeEval()
+    discard eval.evalString("""
+      Enemy: object [field/optional [hp [integer!] 0]]
+      goblin: make Enemy [hp: 30]
+    """)
+    check $eval.evalString("type goblin") == "enemy!"
+    ## Kebab-cased: SuperHero -> super-hero!
+    discard eval.evalString("""
+      SuperHero: object [field/optional [power [integer!] 0]]
+      hero: make SuperHero [power: 99]
+    """)
+    check $eval.evalString("type hero") == "super-hero!"
+    ## Plain contexts still report context!.
+    check $eval.evalString("type context [x: 1]") == "context!"
+
+  test "frozen-object mutation error suggests make":
+    let eval = makeEval()
+    var caught = ""
+    try:
+      discard eval.evalString("""
+        Point: object [field/optional [x [integer!] 0]]
+        Point/x: 99
+      """)
+    except KtgError as e:
+      caught = e.msg
+    check "make" in caught
+    check "mutable context" in caught

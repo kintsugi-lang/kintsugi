@@ -147,6 +147,10 @@ proc registerNatives*(eval: Evaluator) =
   # --- Type introspection ---
 
   ctx.native("type", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    ## For `make Enemy [...]` instances, report the source object's kebab-cased
+    ## name (e.g. `enemy!`) instead of the bare `context!` carrier type.
+    if args[0].kind == vkContext and args[0].ctx.instanceOf.len > 0:
+      return ktgType(toKebabCase(args[0].ctx.instanceOf) & "!")
     ktgType(typeName(args[0]))
   )
 
