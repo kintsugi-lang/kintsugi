@@ -6,7 +6,7 @@ local player = {
   cr = 0.9,
   cg = 0.9,
   cb = 1,
-  _alive = true
+  is_alive = true
 }
 local cpu = {
   x = 768,
@@ -16,7 +16,7 @@ local cpu = {
   cr = 0.9,
   cg = 0.9,
   cb = 1,
-  _alive = true
+  is_alive = true
 }
 local ball = {
   x = 396,
@@ -26,22 +26,22 @@ local ball = {
   cr = 1,
   cg = 0.8,
   cb = 0.2,
-  _alive = true
+  is_alive = true
 }
 love.load = function()
 end
 love.update = function(dt)
 end
 love.draw = function()
-  if player._alive then
+  if player.is_alive then
     love.graphics.setColor(player.cr, player.cg, player.cb, 1)
     love.graphics.rectangle("fill", player.x, player.y, player.w, player.h)
   end
-  if cpu._alive then
+  if cpu.is_alive then
     love.graphics.setColor(cpu.cr, cpu.cg, cpu.cb, 1)
     love.graphics.rectangle("fill", cpu.x, cpu.y, cpu.w, cpu.h)
   end
-  if ball._alive then
+  if ball.is_alive then
     love.graphics.setColor(ball.cr, ball.cg, ball.cb, 1)
     love.graphics.rectangle("fill", ball.x, ball.y, ball.w, ball.h)
   end

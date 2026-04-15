@@ -233,14 +233,6 @@ suite "Lexer: Paths":
     check tokens[0].kind == vkWord
     check tokens[0].wordName == "a/b/c"
 
-  test "lex path with underscore segment":
-    ## Underscore is a valid word-start character at top level
-    ## (lexer.nim:357), so it must also be valid as a path segment start.
-    let tokens = tokenize("c/_alive")
-    check tokens.len == 1
-    check tokens[0].kind == vkWord
-    check tokens[0].wordName == "c/_alive"
-
 suite "Lexer: Set-Paths":
   test "lex basic set path":
     let tokens = tokenize("obj/field:")

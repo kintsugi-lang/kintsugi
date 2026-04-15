@@ -192,7 +192,7 @@ A dialect is a block where words change meaning. `loop [for [x] in series do [bo
 3. **Parse** — PEG-style parsing with backtracking (interpreter-only)
 4. **Object** — Frozen objects with typed fields, auto-constructors, `make`
 5. **Attempt** — Resilient pipelines with `source`, `then`, `when`, `catch`, `fallback`, `retries`
-6. **Game** — Compile-time EC; user supplies S. Scenes, entities, components (via `@macro`), collision, update/draw wiring, destroy/`_alive`. Compile-time only.
+6. **Game** — Compile-time EC; user supplies S. Scenes, entities, components (via `@macro`), collision, update/draw wiring, destroy/`alive?`. Compile-time only.
 
 **Why:** These are the essential abstractions. Loops, pattern matching, parsing, objects, error handling, and games. Everything else is built from these.
 
@@ -246,7 +246,7 @@ which desugars in the preprocessor to:
 
 `@component` lives at the same preprocess layer as `@macro`. It's a registration sugar, not a runtime distinction — a component *is* a macro. The sugar exists because the common case (a block template with interpolated parens) is verbose enough that people would hand-roll it every time.
 
-**Destroy is a skip marker, not a registry operation.** Every entity context carries an implicit `_alive: true` field. `destroy self` inside an update body, `destroy it` inside a collide body, and `destroy <name>` anywhere rewrite at dialect-expand time to `<target>/_alive: false`. Per-entity update and draw statements wrap in `if <entity>/_alive [...]`; collision pair tests include both sides' alive state in the guard condition. This is compile-time enough to model "entity is dead, stop processing it" without requiring a runtime entity registry or spawn/despawn machinery. Games that need dynamic entity counts — bullet hell, spawners, projectile pools — will eventually need a registry and the associated runtime loop; that's a bigger commitment and a separate dialect decision to make when a real game demands it.
+**Destroy is a skip marker, not a registry operation.** Every entity context carries an implicit `alive?: true` field. `destroy self` inside an update body, `destroy it` inside a collide body, and `destroy <name>` anywhere rewrite at dialect-expand time to `<target>/alive?: false`. Per-entity update and draw statements wrap in `if <entity>/alive? [...]`; collision pair tests include both sides' alive state in the guard condition. This is compile-time enough to model "entity is dead, stop processing it" without requiring a runtime entity registry or spawn/despawn machinery. Games that need dynamic entity counts — bullet hell, spawners, projectile pools — will eventually need a registry and the associated runtime loop; that's a bigger commitment and a separate dialect decision to make when a real game demands it.
 
 **Collision has an override seam.** The default collision test is an AABB between two entities' `pos` + `rect`. When that's not enough — circles, swept collisions, distance thresholds, per-pixel tests — use the `/using` refinement: `collide/using ball 'enemy circle-hit? [body]`. The dialect emits the user's predicate as the test in place of the AABB, with the same `it/<field>` substitution in the body. Default is what you want 80% of the time; the override is there for the 20% where it isn't.
 
@@ -260,23 +260,23 @@ Two patterns that other game frameworks bake into their core — runtime entity 
 
 ```
 spawn-entity: function [e] [append entities e  e]
-run-updates:  function [dt] [loop [for [e] in entities do [if e/_alive [if has? e 'update [e/update e dt]]]]]
-run-draws:    function [] [loop [for [e] in entities do [if e/_alive [if has? e 'draw [e/draw e]]]]]
-cull-dead:    function [] [alive: copy []  loop [for [e] in entities do [if e/_alive [append alive e]]]  entities: alive]
+run-updates:  function [dt] [loop [for [e] in entities do [if e/alive? [if has? e 'update [e/update e dt]]]]]
+run-draws:    function [] [loop [for [e] in entities do [if e/alive? [if has? e 'draw [e/draw e]]]]]
+cull-dead:    function [] [alive: copy []  loop [for [e] in entities do [if e/alive? [append alive e]]]  entities: alive]
 ```
 
-Users write factory functions that return `context` values with `update`, `draw`, and `_alive` fields. `spawn-entity` adds them to the list. The `@game` `on-update` block calls `run-updates dt` and `cull-dead`; the `draw` block calls `run-draws`. The dialect contributes nothing - the runtime entity system is plain Kintsugi composing existing primitives.
+Users write factory functions that return `context` values with `update`, `draw`, and `alive?` fields. `spawn-entity` adds them to the list. The `@game` `on-update` block calls `run-updates dt` and `cull-dead`; the `draw` block calls `run-draws`. The dialect contributes nothing - the runtime entity system is plain Kintsugi composing existing primitives.
 
 The reason the dialect doesn't grow a `runtime` flag, an `@archetype` form, or a `spawn` keyword is that **any auto-generation locks in shape decisions** (free-list vs swap-and-pop vs pools? when does cull run? how is iteration ordered? how does collision interact?). Different games want different shapes - bullet hells want pools, RTS-style games want stable references, puzzle games want nothing at all. The dialect picking one shape forecloses the others. Plain functions don't.
 
 The pattern also coexists with `@game`'s static entities. The `player`, `score-display`, and any other compile-time-known singleton stays unrolled and lean. Dynamic bullets and particles iterate the runtime list. Two categories of entity, one Lua output that mixes flat field access with table iteration. Both clean, neither pretending to be the other.
 
-**Scene transitions = state plus alive flags.** Same answer. A `state [game-phase: 'menu]` declaration, an `on-update` block that watches the phase and toggles entities' `_alive` flags, and you have scene switching:
+**Scene transitions = state plus alive flags.** Same answer. A `state [game-phase: 'menu]` declaration, an `on-update` block that watches the phase and toggles entities' `alive?` flags, and you have scene switching:
 
 ```
 on-update [
-  cursor/_alive: game-phase = 'menu
-  player/_alive: game-phase = 'playing
+  cursor/alive?: game-phase = 'menu
+  player/alive?: game-phase = 'playing
   if all? [game-phase = 'menu  love/keyboard/isDown "space"] [game-phase: 'playing]
 ]
 ```

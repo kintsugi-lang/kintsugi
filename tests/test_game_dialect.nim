@@ -77,11 +77,11 @@ suite "game dialect expansion":
          output[i].wordName == "player":
         check output[i + 1].kind == vkWord and output[i + 1].wordName == "context"
         let ctx = output[i + 2].blockVals
-        ## 8 fields: x y w h cr cg cb _alive = 16 tokens
+        ## 8 fields: x y w h cr cg cb alive? = 16 tokens
         check ctx.len == 16
         check ctx[0].wordName == "x" and ctx[1].intVal == 20
         check ctx[8].wordName == "cr"
-        check ctx[14].wordName == "_alive"
+        check ctx[14].wordName == "alive?"
         check ctx[15].kind == vkLogic and ctx[15].boolVal == true
         found = true
     check found
@@ -104,7 +104,7 @@ suite "game dialect expansion":
       if output[i].kind == vkWord and output[i].wordKind == wkSetWord and
          output[i].wordName == "player":
         let ctx = output[i + 2].blockVals
-        ## x y w h _alive = 10 tokens (no cr/cg/cb)
+        ## x y w h alive? = 10 tokens (no cr/cg/cb)
         check ctx.len == 10
         for v in ctx:
           check not (v.kind == vkWord and v.wordKind == wkSetWord and
@@ -290,7 +290,7 @@ suite "game dialect expansion":
       ]),
     ]
     let output = expand(blk, "love2d")
-    ## Update body is now wrapped in `if player/_alive [<statements>]`.
+    ## Update body is now wrapped in `if player/alive? [<statements>]`.
     ## Recurse into the guarded block to find the substituted self/y reference.
     var sawPlayerYSet, sawPlayerYRef = false
     proc scan(vs: seq[KtgValue]) =
@@ -559,8 +559,8 @@ suite "game dialect expansion":
     expect(ValueError):
       discard expand(blk, "love2d")
 
-suite "game dialect destroy / _alive":
-  test "every entity context includes _alive true field":
+suite "game dialect destroy / alive?":
+  test "every entity context includes alive? true field":
     let blk = @[
       ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
@@ -580,12 +580,12 @@ suite "game dialect destroy / _alive":
         let ctx = output[i + 2].blockVals
         for j in 0 ..< ctx.len - 1:
           if ctx[j].kind == vkWord and ctx[j].wordKind == wkSetWord and
-             ctx[j].wordName == "_alive":
+             ctx[j].wordName == "alive?":
             check ctx[j + 1].kind == vkLogic and ctx[j + 1].boolVal == true
             sawAlive = true
     check sawAlive
 
-  test "reserved _alive field name errors when user declares":
+  test "reserved alive? field name errors when user declares":
     let blk = @[
       ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
@@ -593,14 +593,14 @@ suite "game dialect destroy / _alive":
         ktgBlock(@[
           ktgWord("pos", wkWord), ktgInt(0), ktgInt(0),
           ktgWord("rect", wkWord), ktgInt(1), ktgInt(1),
-          ktgWord("field", wkWord), ktgWord("_alive", wkWord), ktgLogic(false),
+          ktgWord("field", wkWord), ktgWord("alive?", wkWord), ktgLogic(false),
         ]),
       ]),
     ]
     expect(ValueError):
       discard expand(blk, "love2d")
 
-  test "destroy self rewrites to self/_alive: false before self substitution":
+  test "destroy self rewrites to self/alive?: false before self substitution":
     let blk = @[
       ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
@@ -617,13 +617,13 @@ suite "game dialect destroy / _alive":
       ]),
     ]
     let output = expand(blk, "love2d")
-    ## Inside love/update body, we should find `player/_alive: false`.
+    ## Inside love/update body, we should find `player/alive?: false`.
     var sawPlayerAliveFalse = false
     proc scan(vs: seq[KtgValue]) =
       for j in 0 ..< vs.len:
         let v = vs[j]
         if j + 1 < vs.len and v.kind == vkWord and v.wordKind == wkSetWord and
-           v.wordName == "player/_alive" and
+           v.wordName == "player/alive?" and
            vs[j + 1].kind == vkLogic and vs[j + 1].boolVal == false:
           sawPlayerAliveFalse = true
         if v.kind == vkBlock: scan(v.blockVals)
@@ -641,7 +641,7 @@ suite "game dialect destroy / _alive":
     scanDestroy(output)
     check not sawBareDestroy
 
-  test "per-entity update body wraps in if <entity>/_alive":
+  test "per-entity update body wraps in if <entity>/alive?":
     let blk = @[
       ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
@@ -656,21 +656,21 @@ suite "game dialect destroy / _alive":
       ]),
     ]
     let output = expand(blk, "love2d")
-    ## love/update body should contain: if player/_alive [player/x: 5]
+    ## love/update body should contain: if player/alive? [player/x: 5]
     var sawGuardedUpdate = false
     for i in 0 ..< output.len - 3:
       if output[i].kind == vkWord and output[i].wordKind == wkSetWord and
          output[i].wordName == "love/update" and output[i + 3].kind == vkBlock:
         let body = output[i + 3].blockVals
-        ## Look for the if/player_alive/block sequence.
+        ## Look for the if/playeralive?/block sequence.
         for j in 0 ..< body.len - 2:
           if body[j].kind == vkWord and body[j].wordName == "if" and
-             body[j + 1].kind == vkWord and body[j + 1].wordName == "player/_alive" and
+             body[j + 1].kind == vkWord and body[j + 1].wordName == "player/alive?" and
              body[j + 2].kind == vkBlock:
             sawGuardedUpdate = true
     check sawGuardedUpdate
 
-  test "per-entity draw wraps in if <entity>/_alive":
+  test "per-entity draw wraps in if <entity>/alive?":
     let blk = @[
       ktgWord("scene", wkWord), ktgWord("main", wkLitWord),
       ktgBlock(@[
@@ -690,7 +690,7 @@ suite "game dialect destroy / _alive":
         let body = output[i + 3].blockVals
         for j in 0 ..< body.len - 2:
           if body[j].kind == vkWord and body[j].wordName == "if" and
-             body[j + 1].kind == vkWord and body[j + 1].wordName == "player/_alive" and
+             body[j + 1].kind == vkWord and body[j + 1].wordName == "player/alive?" and
              body[j + 2].kind == vkBlock:
             sawGuardedDraw = true
     check sawGuardedDraw
@@ -723,8 +723,8 @@ suite "game dialect destroy / _alive":
         if v.kind == vkBlock:
           var hasBallAlive, hasPaddleAlive = false
           for x in v.blockVals:
-            if x.kind == vkWord and x.wordName == "ball/_alive": hasBallAlive = true
-            if x.kind == vkWord and x.wordName == "paddle/_alive": hasPaddleAlive = true
+            if x.kind == vkWord and x.wordName == "ball/alive?": hasBallAlive = true
+            if x.kind == vkWord and x.wordName == "paddle/alive?": hasPaddleAlive = true
           if hasBallAlive and hasPaddleAlive:
             sawBothAlive = true
           scan(v.blockVals)

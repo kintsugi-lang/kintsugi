@@ -15,7 +15,7 @@ Kintsugi [name: 'entities]
 ;
 ;   make-bullet: function [x vx] [
 ;     context [
-;       x: x  vx: vx  _alive: true
+;       x: x  vx: vx  alive?: true
 ;       update: function [self dt] [
 ;         self/x: self/x + (self/vx * dt)
 ;       ]
@@ -48,7 +48,7 @@ spawn-entity: function [e] [
 ; --- Run each entity's `update` function, skipping dead ones.
 run-updates: function [dt] [
   loop [for [e] in entities do [
-    if e/_alive [
+    if e/alive? [
       if has? e 'update [e/update e dt]
     ]
   ]]
@@ -57,7 +57,7 @@ run-updates: function [dt] [
 ; --- Run each entity's `draw` function, skipping dead ones.
 run-draws: function [] [
   loop [for [e] in entities do [
-    if e/_alive [
+    if e/alive? [
       if has? e 'draw [e/draw e]
     ]
   ]]
@@ -68,7 +68,7 @@ run-draws: function [] [
 cull-dead: function [] [
   alive: copy []
   loop [for [e] in entities do [
-    if e/_alive [append alive e]
+    if e/alive? [append alive e]
   ]]
   entities: alive
 ]

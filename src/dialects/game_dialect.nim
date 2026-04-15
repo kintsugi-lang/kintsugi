@@ -130,10 +130,10 @@ proc assertNoSelf*(vals: seq[KtgValue], contextLabel: string) =
     else: discard
 
 proc rewriteDestroy*(vals: seq[KtgValue]): seq[KtgValue] =
-  ## Rewrites `destroy <target>` forms into `<target>/_alive: false`
+  ## Rewrites `destroy <target>` forms into `<target>/alive?: false`
   ## assignments. Must run BEFORE substituteSelf / substituteIt so that
   ## `destroy self` is expanded while the bare-self check still sees
-  ## `self/_alive` and not a bare `self`. Recurses into blocks and parens.
+  ## `self/alive?` and not a bare `self`. Recurses into blocks and parens.
   var i = 0
   while i < vals.len:
     let v = vals[i]
@@ -141,7 +141,7 @@ proc rewriteDestroy*(vals: seq[KtgValue]): seq[KtgValue] =
        i + 1 < vals.len and vals[i + 1].kind == vkWord and
        vals[i + 1].wordKind == wkWord:
       let target = vals[i + 1].wordName
-      result.add(ktgWord(target & "/_alive", wkSetWord))
+      result.add(ktgWord(target & "/alive?", wkSetWord))
       result.add(ktgLogic(false))
       i += 2
     elif v.kind == vkBlock:
@@ -244,9 +244,9 @@ proc parseEntity(name: string, body: seq[KtgValue],
       of "field":
         if i + 2 < body.len and body[i + 1].kind == vkWord and
            body[i + 1].wordKind == wkWord:
-          if body[i + 1].wordName == "_alive":
+          if body[i + 1].wordName == "alive?":
             raise newException(ValueError,
-              "@game entity `" & name & "`: `_alive` is a reserved field name " &
+              "@game entity `" & name & "`: `alive?` is a reserved field name " &
               "(used by destroy / alive tracking)")
           result.ctxBlock.add(ktgWord(body[i + 1].wordName, wkSetWord))
           result.ctxBlock.add(body[i + 2])
@@ -255,7 +255,7 @@ proc parseEntity(name: string, body: seq[KtgValue],
       of "update":
         if i + 1 < body.len and body[i + 1].kind == vkBlock:
           ## rewriteDestroy MUST run before substituteSelf so that
-          ## `destroy self` becomes `self/_alive: false` while the
+          ## `destroy self` becomes `self/alive?: false` while the
           ## bare-self error check still sees it legal.
           for v in substituteSelf(rewriteDestroy(body[i + 1].blockVals), name):
             result.updateBody.add(v)
@@ -279,7 +279,7 @@ proc parseEntity(name: string, body: seq[KtgValue],
         discard
     i += 1
   ## Every entity tracks its own alive state for destroy.
-  result.ctxBlock.add(ktgWord("_alive", wkSetWord))
+  result.ctxBlock.add(ktgWord("alive?", wkSetWord))
   result.ctxBlock.add(ktgLogic(true))
 
 proc collectTagMap*(gameBlock: seq[KtgValue]): Table[string, seq[string]] =
@@ -405,7 +405,7 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
     if ent.updateBody.len > 0:
       ## Only update the entity if it's alive.
       updateStatements.add(ktgWord("if", wkWord))
-      updateStatements.add(ktgWord(ent.name & "/_alive", wkWord))
+      updateStatements.add(ktgWord(ent.name & "/alive?", wkWord))
       updateStatements.add(ktgBlock(ent.updateBody))
 
   for coll in collides:
@@ -420,11 +420,11 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
       let o = other
       ## Both alive checks gate the collision test regardless of which path.
       let aliveChecks = @[
-        ktgWord(s & "/_alive", wkWord),
-        ktgWord(o & "/_alive", wkWord),
+        ktgWord(s & "/alive?", wkWord),
+        ktgWord(o & "/alive?", wkWord),
       ]
       if coll.pred.len > 0:
-        ## User predicate path: all? [<a>/_alive <b>/_alive (pred a b)].
+        ## User predicate path: all? [<a>/alive? <b>/alive? (pred a b)].
         var conds = aliveChecks
         conds.add(ktgParen(@[
           ktgWord(coll.pred, wkWord), ktgWord(s, wkWord), ktgWord(o, wkWord),
@@ -434,7 +434,7 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
         updateStatements.add(ktgBlock(conds))
         updateStatements.add(ktgBlock(substituteIt(coll.body, o)))
       else:
-        ## Default AABB path: all? [<a>/_alive <b>/_alive <aabb-checks>].
+        ## Default AABB path: all? [<a>/alive? <b>/alive? <aabb-checks>].
         var conds = aliveChecks
         conds.add(ktgWord(s & "/x", wkWord)); conds.add(KtgValue(kind: vkOp, opFn: nil, opSymbol: "<"))
         conds.add(ktgParen(@[ktgWord(o & "/x", wkWord), KtgValue(kind: vkOp, opFn: nil, opSymbol: "+"), ktgWord(o & "/w", wkWord)]))
@@ -456,7 +456,7 @@ proc expandScene(sceneName: string, sceneBody: seq[KtgValue],
       else: backend.drawEntity(ent.name)
     ## Only draw the entity if it's alive.
     drawStatements.add(ktgWord("if", wkWord))
-    drawStatements.add(ktgWord(ent.name & "/_alive", wkWord))
+    drawStatements.add(ktgWord(ent.name & "/alive?", wkWord))
     drawStatements.add(ktgBlock(drawSeq))
   for v in userDrawBody:
     drawStatements.add(v)
