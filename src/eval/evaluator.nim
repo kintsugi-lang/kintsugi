@@ -160,6 +160,25 @@ proc applyOp*(eval: Evaluator, op: string, left, right: KtgValue): KtgValue =
     of "-": return ktgPair(left.px - right.px, left.py - right.py)
     else: discard
 
+  # pair <op> scalar (and scalar * pair)
+  proc scalarOf(v: KtgValue): float64 =
+    if v.kind == vkInteger: float64(v.intVal)
+    elif v.kind == vkFloat: v.floatVal
+    else: NaN
+  if left.kind == vkPair and right.kind in {vkInteger, vkFloat}:
+    let s = scalarOf(right)
+    case op
+    of "*": return ktgPair(left.px * s, left.py * s)
+    of "/":
+      if s == 0: raise KtgError(kind: "math", msg: "pair division by zero", data: right)
+      return ktgPair(left.px / s, left.py / s)
+    else: discard
+  if left.kind in {vkInteger, vkFloat} and right.kind == vkPair:
+    let s = scalarOf(left)
+    case op
+    of "*": return ktgPair(right.px * s, right.py * s)
+    else: discard
+
   # comparison ops
   case op
   of "=":  return ktgLogic(valuesEqual(left, right))

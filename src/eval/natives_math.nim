@@ -23,14 +23,16 @@ proc registerMathNatives*(eval: Evaluator) =
     case args[0].kind
     of vkInteger: ktgInt(abs(args[0].intVal))
     of vkFloat: ktgFloat(abs(args[0].floatVal))
-    else: raise KtgError(kind: "type", msg: "abs expects number!", data: nil)
+    of vkPair: ktgPair(abs(args[0].px), abs(args[0].py))
+    else: raise KtgError(kind: "type", msg: "abs expects number! or pair!", data: nil)
   )
 
   ctx.native("negate", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     case args[0].kind
     of vkInteger: ktgInt(-args[0].intVal)
     of vkFloat: ktgFloat(-args[0].floatVal)
-    else: raise KtgError(kind: "type", msg: "negate expects number!", data: nil)
+    of vkPair: ktgPair(-args[0].px, -args[0].py)
+    else: raise KtgError(kind: "type", msg: "negate expects number! or pair!", data: nil)
   )
 
   ctx.native("min", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
@@ -40,7 +42,9 @@ proc registerMathNatives*(eval: Evaluator) =
       let a = if args[0].kind == vkInteger: float64(args[0].intVal) else: args[0].floatVal
       let b = if args[1].kind == vkInteger: float64(args[1].intVal) else: args[1].floatVal
       return ktgFloat(min(a, b))
-    raise KtgError(kind: "type", msg: "min expects number!", data: nil)
+    if args[0].kind == vkPair and args[1].kind == vkPair:
+      return ktgPair(min(args[0].px, args[1].px), min(args[0].py, args[1].py))
+    raise KtgError(kind: "type", msg: "min expects number! or pair!", data: nil)
   )
 
   ctx.native("max", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
@@ -50,7 +54,9 @@ proc registerMathNatives*(eval: Evaluator) =
       let a = if args[0].kind == vkInteger: float64(args[0].intVal) else: args[0].floatVal
       let b = if args[1].kind == vkInteger: float64(args[1].intVal) else: args[1].floatVal
       return ktgFloat(max(a, b))
-    raise KtgError(kind: "type", msg: "max expects number!", data: nil)
+    if args[0].kind == vkPair and args[1].kind == vkPair:
+      return ktgPair(max(args[0].px, args[1].px), max(args[0].py, args[1].py))
+    raise KtgError(kind: "type", msg: "max expects number! or pair!", data: nil)
   )
 
   ctx.native("round", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =

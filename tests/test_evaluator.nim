@@ -146,6 +146,20 @@ suite "pairs":
     let eval = makeEval()
     check $eval.evalString("to pair! [1.5 2.5]") == "1.5x2.5"
 
+  test "pair scaled by scalar":
+    let eval = makeEval()
+    check $eval.evalString("10x20 * 3") == "30x60"
+    check $eval.evalString("3 * 10x20") == "30x60"
+    check $eval.evalString("10x20 / 2") == "5x10"
+    check $eval.evalString("10x20 * 1.5") == "15x30"
+
+  test "pair abs min max":
+    let eval = makeEval()
+    check $eval.evalString("abs -10x20") == "10x20"
+    check $eval.evalString("abs -10x-20") == "10x20"
+    check $eval.evalString("min 10x50 20x40") == "10x40"
+    check $eval.evalString("max 10x50 20x40") == "20x50"
+
   test "nested pair set-path through context":
     let eval = makeEval()
     discard eval.evalString("e: context [pos: 10x20]")
