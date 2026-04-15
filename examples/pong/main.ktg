@@ -3,12 +3,12 @@ Kintsugi [
   version: 1.0.0
 ]
 
-; Pong in Kintsugi — a LÖVE2D game using objects, make, and merge.
+; Pong in Kintsugi — a LOVE2D game using objects, make, and merge.
 ; Compile: kintsugi -c main.ktg -o main.lua
 ; Run:     love .
 
 ; ============================================================
-; LÖVE2D bindings
+; LOVE2D bindings
 ; ============================================================
 
 bindings [
@@ -51,8 +51,7 @@ BALL-SPEED: 300
 Paddle: object [
   fields [
     optional [
-      x [integer!] 0
-      y [integer!] 0
+      pos [pair!] 0x0
       score [integer!] 0
       speed [integer!] PADDLE-SPEED
     ]
@@ -62,8 +61,7 @@ Paddle: object [
 Ball: object [
   fields [
     optional [
-      x [integer!] 0
-      y [integer!] 0
+      pos [pair!] 0x0
       dx [integer!] 1
       dy [integer!] 1
       speed [integer!] BALL-SPEED
@@ -76,17 +74,16 @@ game: context [
   font: none
 ]
 
-player: make Paddle [x: 20  y: 260]
-cpu:    make Paddle [x: 768 y: 260]
-ball:   make Ball   [x: 396 y: 296]
+player: make Paddle [pos: 20x260]
+cpu:    make Paddle [pos: 768x260]
+ball:   make Ball   [pos: 396x296]
 
 ; ============================================================
 ; Game logic
 ; ============================================================
 
 reset-ball: function [] [
-  ball/x: 396
-  ball/y: 296
+  ball/pos: 396x296
   ball/dx: either ball/dx > 0 [-1] [1]
   ball/dy: either (random/int 2) = 1 [1] [-1]
   ball/speed: BALL-SPEED
@@ -94,7 +91,7 @@ reset-ball: function [] [
 ]
 
 ; ============================================================
-; LÖVE callbacks
+; LOVE callbacks
 ; ============================================================
 
 love/load: function [] [
@@ -120,49 +117,49 @@ love/update: function [dt] [
 
     ; --- Player movement ---
     if lk/isDown "w" [
-      player/y: player/y - (player/speed * dt)
+      player/pos/y: player/pos/y - (player/speed * dt)
     ]
     if lk/isDown "s" [
-      player/y: player/y + (player/speed * dt)
+      player/pos/y: player/pos/y + (player/speed * dt)
     ]
 
     ; Clamp player
-    if player/y < 0 [player/y: 0]
-    if player/y > (SCREEN-H - PADDLE-H) [player/y: SCREEN-H - PADDLE-H]
+    if player/pos/y < 0 [player/pos/y: 0]
+    if player/pos/y > (SCREEN-H - PADDLE-H) [player/pos/y: SCREEN-H - PADDLE-H]
 
     ; --- CPU AI: follow ball ---
-    cpu-center: cpu/y + (PADDLE-H / 2)
-    if cpu-center < (ball/y - 20) [
-      cpu/y: cpu/y + (cpu/speed * dt * 0.7)
+    cpu-center: cpu/pos/y + (PADDLE-H / 2)
+    if cpu-center < (ball/pos/y - 20) [
+      cpu/pos/y: cpu/pos/y + (cpu/speed * dt * 0.7)
     ]
-    if cpu-center > (ball/y + 20) [
-      cpu/y: cpu/y - (cpu/speed * dt * 0.7)
+    if cpu-center > (ball/pos/y + 20) [
+      cpu/pos/y: cpu/pos/y - (cpu/speed * dt * 0.7)
     ]
-    if cpu/y < 0 [cpu/y: 0]
-    if cpu/y > (SCREEN-H - PADDLE-H) [cpu/y: SCREEN-H - PADDLE-H]
+    if cpu/pos/y < 0 [cpu/pos/y: 0]
+    if cpu/pos/y > (SCREEN-H - PADDLE-H) [cpu/pos/y: SCREEN-H - PADDLE-H]
 
     ; --- Ball movement ---
-    ball/x: ball/x + (ball/dx * ball/speed * dt)
-    ball/y: ball/y + (ball/dy * ball/speed * dt)
+    ball/pos/x: ball/pos/x + (ball/dx * ball/speed * dt)
+    ball/pos/y: ball/pos/y + (ball/dy * ball/speed * dt)
 
     ; Top/bottom bounce
-    if ball/y < 0 [
-      ball/y: 0
+    if ball/pos/y < 0 [
+      ball/pos/y: 0
       ball/dy: negate ball/dy
     ]
-    if ball/y > (SCREEN-H - BALL-SIZE) [
-      ball/y: SCREEN-H - BALL-SIZE
+    if ball/pos/y > (SCREEN-H - BALL-SIZE) [
+      ball/pos/y: SCREEN-H - BALL-SIZE
       ball/dy: negate ball/dy
     ]
 
     ; Player paddle collision
     if all? [
       ball/dx < 0
-      ball/x < (player/x + PADDLE-W)
-      ball/y > (player/y - BALL-SIZE)
-      ball/y < (player/y + PADDLE-H)
+      ball/pos/x < (player/pos/x + PADDLE-W)
+      ball/pos/y > (player/pos/y - BALL-SIZE)
+      ball/pos/y < (player/pos/y + PADDLE-H)
     ] [
-      ball/x: player/x + PADDLE-W
+      ball/pos/x: player/pos/x + PADDLE-W
       ball/dx: negate ball/dx
       ball/speed: ball/speed + 20
     ]
@@ -170,21 +167,21 @@ love/update: function [dt] [
     ; CPU paddle collision
     if all? [
       ball/dx > 0
-      ball/x > (cpu/x - BALL-SIZE)
-      ball/y > (cpu/y - BALL-SIZE)
-      ball/y < (cpu/y + PADDLE-H)
+      ball/pos/x > (cpu/pos/x - BALL-SIZE)
+      ball/pos/y > (cpu/pos/y - BALL-SIZE)
+      ball/pos/y < (cpu/pos/y + PADDLE-H)
     ] [
-      ball/x: cpu/x - BALL-SIZE
+      ball/pos/x: cpu/pos/x - BALL-SIZE
       ball/dx: negate ball/dx
       ball/speed: ball/speed + 20
     ]
 
     ; Score
-    if ball/x < 0 [
+    if ball/pos/x < 0 [
       cpu/score: cpu/score + 1
       reset-ball
     ]
-    if ball/x > SCREEN-W [
+    if ball/pos/x > SCREEN-W [
       player/score: player/score + 1
       reset-ball
     ]
@@ -198,12 +195,12 @@ love/draw: function [] [
 
   ; Paddles
   lg/setColor 0.9 0.9 1 1
-  lg/rectangle "fill" player/x player/y PADDLE-W PADDLE-H
-  lg/rectangle "fill" cpu/x cpu/y PADDLE-W PADDLE-H
+  lg/rectangle "fill" player/pos/x player/pos/y PADDLE-W PADDLE-H
+  lg/rectangle "fill" cpu/pos/x cpu/pos/y PADDLE-W PADDLE-H
 
   ; Ball
   lg/setColor 1 0.8 0.2 1
-  lg/circle "fill" ball/x ball/y BALL-SIZE
+  lg/circle "fill" ball/pos/x ball/pos/y BALL-SIZE
 
   ; Score
   lg/setFont game/font
