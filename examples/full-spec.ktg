@@ -1569,6 +1569,78 @@ love/keypressed: function [key] [
 ; playdate/...) implicitly locks the file to that target. Compile
 ; with the wrong --target and you get a clean unbound-name error.
 
+; --- Components via @macro ---
+;
+; A "component" is just an @macro that expands into entity-body
+; vocabulary. The dialect has no separate @component form: when
+; parseEntity sees an unknown word inside an entity block, it asks
+; the preprocessor whether the word is a registered macro and
+; splices the expansion inline.
+;
+; Define a health component that adds hp + max-hp fields and
+; auto-destroys the entity when hp reaches zero:
+;
+;   @macro health: function [amount [integer!]] [@compose [
+;     field hp (amount)
+;     field max-hp (amount)
+;     update [if self/hp <= 0 [destroy self]]
+;   ]]
+;
+; Define a timeout component that self-destructs after N frames:
+;
+;   @macro timeout: function [frames [integer!]] [@compose [
+;     field _age 0
+;     update [
+;       self/_age: self/_age + 1
+;       if self/_age > (frames) [destroy self]
+;     ]
+;   ]]
+;
+; Compose multiple components on one entity:
+;
+;   entity bullet [
+;     pos 100 100  rect 4 4  color 1 1 0
+;     health 1
+;     timeout 120
+;     tags [projectile]
+;   ]
+;
+; After macro expansion, the entity body is just field / update /
+; tags forms the dialect already knows. Multiple update blocks
+; accumulate and run in declaration order each frame.
+
+; --- destroy and _alive ---
+;
+; Every entity context carries an implicit _alive: true field.
+; `destroy self` (in an update body) or `destroy <name>` (anywhere)
+; rewrites to `<target>/_alive: false`. Each per-entity update and
+; draw statement wraps in `if <entity>/_alive [...]`, so a destroyed
+; entity silently stops being processed. No runtime registry, no
+; spawn - just a skip marker that works for collision kills and
+; timeout despawn.
+;
+; `_alive` is a reserved field name; `field _alive ...` errors.
+
+; --- collide/using for custom collision shapes ---
+;
+; Default `collide` uses AABB on pos + rect. For anything else,
+; use /using with a user predicate:
+;
+;   circle-hit?: function [a b] [
+;     dx: a/x - b/x
+;     dy: a/y - b/y
+;     (dx * dx + dy * dy) < (a/r + b/r) * (a/r + b/r)
+;   ]
+;
+;   collide/using ball 'enemy circle-hit? [
+;     destroy it
+;     score: score + 1
+;   ]
+;
+; The dialect calls `circle-hit? ball <other>` in place of the AABB
+; test. The collide body still gets `it/<field>` substitution and
+; alive-check wrapping.
+
 
 ; ============================================================
 ; BLOCKS & HOMOICONICITY

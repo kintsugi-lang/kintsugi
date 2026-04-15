@@ -214,7 +214,22 @@ A dialect is a block where words change meaning. `loop [for [x] in series do [bo
 
 **Clean Lua out.** Generated Lua calls target SDK functions directly. No shim helpers, no dead state, no indirection. When the dev opens `pong.lua` to hand-extend it, they see `love.graphics.rectangle("fill", player.x, player.y, player.w, player.h)` or `playdate.graphics.fillRect(player.x, player.y, player.w, player.h)` — the same function they would have written by hand. `@game` gives you plumbing; what it outputs is yours.
 
-**Why:** A game dialect that pretends to hide the target makes every game worse on every target. `@game` only hides what's the same across targets — structure — and leaves surface concerns alone. Most game code is structure, so most game code is portable. The parts that are not portable are where the dev would have made a platform-specific decision anyway. The dialect respects that by not lying.
+**Components are macros, not a new form.** An entity body is a linear sequence of component calls: `pos`, `rect`, `color`, `field`, `update`, `draw`, `tags`. The dialect recognizes these directly. To add a new component — `health`, `velocity`, `timeout`, `gravity`, whatever — you write an `@macro` that expands into dialect vocabulary. When `parseEntity` encounters an unknown word inside an entity body, it asks the preprocessor whether the word is a registered macro; if so, the macro expands into the inline stream and parsing continues. There is no separate `@component` metaword. This is deliberate: a component is structurally identical to a function that returns a block of entity-body forms, and Kintsugi already has that primitive. Adding a second form would be ceremony.
+
+```
+@macro health: function [amount [integer!]] [@compose [
+  field hp (amount)
+  field max-hp (amount)
+]]
+
+entity player [pos 20 40  rect 12 12  health 25]
+```
+
+**Destroy is a skip marker, not a registry operation.** Every entity context carries an implicit `_alive: true` field. `destroy self` inside an update body, `destroy it` inside a collide body, and `destroy <name>` anywhere rewrite at dialect-expand time to `<target>/_alive: false`. Per-entity update and draw statements wrap in `if <entity>/_alive [...]`; collision pair tests include both sides' alive state in the guard condition. This is compile-time enough to model "entity is dead, stop processing it" without requiring a runtime entity registry or spawn/despawn machinery. Games that need dynamic entity counts — bullet hell, spawners, projectile pools — will eventually need a registry and the associated runtime loop; that's a bigger commitment and a separate dialect decision to make when a real game demands it.
+
+**Collision has an override seam.** The default collision test is an AABB between two entities' `pos` + `rect`. When that's not enough — circles, swept collisions, distance thresholds, per-pixel tests — use the `/using` refinement: `collide/using ball 'enemy circle-hit? [body]`. The dialect emits the user's predicate as the test in place of the AABB, with the same `it/<field>` substitution in the body. Default is what you want 80% of the time; the override is there for the 20% where it isn't.
+
+**Why:** A game dialect that pretends to hide the target makes every game worse on every target. `@game` only hides what's the same across targets — structure — and leaves surface concerns alone. Most game code is structure, so most game code is portable. The parts that are not portable are where the dev would have made a platform-specific decision anyway. The dialect respects that by not lying. Components, destroy, and collision override all follow the same pattern: the common case is built in, the uncommon case gets an escape hatch, and neither the dialect nor the runtime grows machinery to hide the difference.
 
 ---
 
