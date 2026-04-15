@@ -227,6 +227,20 @@ print $10.00 > $5.00                    ; true
 ; --- Pair arithmetic ---
 print 100x200 + 10x20                  ; 110x220
 print 100x200 - 10x20                  ; 90x180
+print 10x20 * 3                        ; 30x60   (scalar scale)
+print 3 * 10x20                        ; 30x60   (either side)
+print 10x20 / 2                        ; 5x10
+print 10x20 * 1.5                      ; 15x30   (float scalar ok)
+print negate -10x20                    ; 10x-20
+print abs -10x-20                      ; 10x20
+print min 10x50 20x40                  ; 10x40   (componentwise)
+print max 10x50 20x40                  ; 20x50   (componentwise)
+
+; set-path on a pair rebinds the variable to a new pair:
+p: 10x20
+p/x: 50                                 ; p is now 50x20
+p/y: 1.5                                ; p is now 50x1.5
+print p                                 ; 50x1.5
 
 ; --- String concatenation ---
 ; Use rejoin to concatenate strings. + on strings is an error.

@@ -39,14 +39,14 @@ The `@` sigil means "the language is doing something structural here."
 @type [string! | none!]           ; define a type
 @type/enum ['north | 'south]      ; define an enum
 @const x: 42                      ; constant
-@shared score: 0                  ; write-through from inner scopes
-@macro unless: function [c b [block!]] [  ; code generation
-  @compose [if not (c) (b)]
+@template unless: [c b [block!]] [; declarative code generation
+  if not (c) (b)
 ]
 
 @compose [a (1 + 2) b]            ; block templating  -> [a 3 b]
 @parse "hello" [some alpha]       ; PEG parsing
 @preprocess [emit [x: 42]]        ; compile-time code injection
+@game [scene 'main [...]]         ; compile-time game dialect
 @enter [print "start"]            ; lifecycle hook
 @exit [print "cleanup"]           ; lifecycle hook
 ```
@@ -59,7 +59,8 @@ The `@` sigil means "the language is doing something structural here."
 42                    ; integer!
 3.14                  ; float!
 $19.99                ; money! (exact cents, no float drift)
-100x200               ; pair! (2D coordinates)
+100x200               ; pair! (2D coordinates, float64 components)
+1.5x-2.5              ; ...decimals and negatives work too
 1.2.3                 ; tuple! (versions, colors)
 2026-03-15            ; date!
 14:30:00              ; time!
@@ -70,29 +71,38 @@ user@example.com      ; email!
 [1 "two" true]        ; block! (the universal container)
 ```
 
+Pairs support componentwise arithmetic, scalar scaling, and set-path:
+
+```
+pos: 100x200
+pos + 10x20           ; 110x220
+pos * 2               ; 200x400
+pos/x: 50             ; pos is now 50x200
+```
+
 ## System Dialects
 
 Dialects are scoped vocabularies. Words change meaning inside their block.
 
 ```
-; Loop — for/in, from/to, collect, fold, partition
+; Loop -- for/in, from/to, collect, fold, partition
 evens: loop/collect [for [x] from 1 to 10 when [even? x] do [x]]
 
-; Match — pattern matching with destructuring
+; Match -- pattern matching with destructuring
 match value [
   [integer!] [print "a number"]
   ['north]   [print "going north"]
   default:   [print "something else"]
 ]
 
-; Parse — PEG on strings and blocks
+; Parse -- PEG on strings and blocks
 result: @parse "user@example.com" [
   name: some [alpha | digit | "."]
   "@"
   domain: some [alpha | digit | "." | "-"]
 ]
 
-; Object — frozen objects with typed fields
+; Object -- frozen objects with typed fields
 Enemy: object [
   field/required [hp [integer!]]
   field/optional [speed [float!] 1.0]
@@ -100,17 +110,27 @@ Enemy: object [
 ]
 goblin: make Enemy [hp: 30]
 
-; Attempt — resilient pipelines
+; Attempt -- resilient pipelines
 result: attempt [
   source [read %config.txt]
   then [trim it]
   fallback ["default"]
 ]
+
+; Game -- compile-time EC; you supply the S. Scenes, entities,
+; update/draw wiring, collision. Compiles to direct LOVE2D or
+; Playdate Lua with no runtime registry.
+@game [
+  scene 'main [
+    entity player [pos 20x260  rect 12 80  color 1 1 1]
+    entity ball   [pos 396x296 rect 8 8    color 1 0.8 0.2]
+  ]
+]
 ```
 
 ## User Dialects
 
-`capture` extracts keywords from blocks. `@macro` generates code. Together they make user-defined dialects trivial:
+`capture` extracts keywords from blocks. `@template` generates code. Together they make user-defined dialects trivial:
 
 ```
 entity: function [spec [block!]] [
@@ -125,14 +145,29 @@ warrior: entity [name "Warrior" hp 100 attack 15 defense 10]
 print warrior/max-hp                    ; 100
 ```
 
+`@template` auto-wraps the body in `@compose`, so paren interpolation splices arguments into the generated block. Refinements `/deep` and `/only` pick the matching compose flavor:
+
+```
+@template/deep with-timing: [label [string!] body [block!]] [
+  print rejoin ["[" (label) "] start"]
+  (body)
+  print rejoin ["[" (label) "] end"]
+]
+
+with-timing "work" [do-stuff]
+```
+
+For imperative compile-time codegen (reading files, looping to build blocks, branching at parse time), use `@preprocess [emit [...]]`.
+
 ## Compiles to Lua
 
-Target: Lua 5.1 (LOVE2D, Playdate). Zero-dependency output. Tree-shaken prelude — only helpers you use are emitted.
+Targets LuaJIT / Lua 5.1 (LOVE2D) and Lua 5.4 (Playdate). Zero-dependency output. Tree-shaken prelude -- only helpers you use are emitted.
 
 ```bash
 bin/kintsugi -c game.ktg              # -> game.lua
 bin/kintsugi -c src/                  # compile directory
 bin/kintsugi -c game.ktg --dry-run    # print to stdout
+bin/kintsugi -c game.ktg --target=playdate
 ```
 
 Modules compile recursively. `import` emits `require`. `exports` emits `return {...}`.
@@ -146,15 +181,14 @@ nimble build                          # build interpreter + compiler
 nimble test                           # run all tests
 bin/kintsugi                          # REPL
 bin/kintsugi file.ktg                 # run a file
-bin/kintsugi -e 'print 1 + 2'        # evaluate expression
-bin/kintsugi -c file.ktg             # compile to Lua
+bin/kintsugi -e 'print 1 + 2'         # evaluate expression
+bin/kintsugi -c file.ktg              # compile to Lua
 ```
 
 ## Learn Kintsugi
 
 The language spec is a single executable file:
 
-**[`examples/full-spec.ktg`](examples/full-spec.ktg)** (~1,800 lines)
+**[`examples/full-spec.ktg`](examples/full-spec.ktg)** (~2,180 lines)
 
-It covers everything: types, functions, control flow, dialects, objects, error handling, modules, preprocessing, macros, and the compilation model. Because it's `.ktg`, it's tested — if the docs are wrong, the tests fail.
-
+It covers everything: types, functions, control flow, dialects, objects, error handling, modules, preprocessing, templates, the `@game` dialect, and the compilation model. Because it's `.ktg`, it's tested -- if the docs are wrong, the tests fail.
