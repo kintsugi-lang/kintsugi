@@ -252,6 +252,38 @@ which desugars in the preprocessor to:
 
 **Why:** A game dialect that pretends to hide the target makes every game worse on every target. `@game` only hides what's the same across targets — structure — and leaves surface concerns alone. Most game code is structure, so most game code is portable. The parts that are not portable are where the dev would have made a platform-specific decision anyway. The dialect respects that by not lying. Components, destroy, and collision override all follow the same pattern: the common case is built in, the uncommon case gets an escape hatch, and neither the dialect nor the runtime grows machinery to hide the difference.
 
+### `@game` Deferred: Scenes and Archetypes
+
+Two features have committed designs but no implementation. They are known gaps, not hidden gaps. When a real game demands them, they get built to the designs below.
+
+**Scene grouping (deferred).** `scene 'name [<entities>]` as a compile-time grouping primitive that tags its contained entities with the scene's name and participates in an auto-generated `set-scene` function. Today `scene` is parsed as a no-op container with its name discarded and `go 'name` consumed as two tokens and dropped. The decided shape:
+
+- `scene 'menu [<entities>]` strips its wrapper; each contained entity gains an implicit tag matching the scene name. Scene-less entities (declared outside any `scene`) are always-alive globals.
+- A compile-time map `{ menu: [cursor, title], playing: [player, ball], gameover: [prompt] }` is collected.
+- `go 'menu` becomes "initial scene" — entities in the named scene start `_alive: true`, entities in other scenes start `_alive: false`, scene-less entities are unaffected.
+- The dialect emits one generated function: `set-scene(name)` whose body is a flat match on name, assigning `_alive` for every scene-tagged entity. Unrolled. No runtime tag map.
+- `set-scene` only emits when more than one scene is declared — single-scene games don't get dead code.
+- Calling `set-scene 'unknown` errors at runtime (not compile time, because scene names might be computed).
+- Transitions are user code: call `set-scene 'target`, then manually reset per-scene state as needed. `@game` doesn't opinionate on cleanup or state restoration.
+- Multiple-scene membership (an entity in both menu and playing) uses manual `tags [menu playing]` rather than nested `scene` blocks. The `scene` form gates exactly one scene per entity by containment.
+
+**Why deferred.** Single-scene games don't need it. Multi-scene games can model the same pattern today with `state [game-phase: 'menu]` plus manual `_alive` toggling in `on-update`. The sugar is real but saves boilerplate, not capability. Pong doesn't need it. Build when a game wants it.
+
+**Runtime entity spawn/despawn via `@archetype` (deferred).** Today every `entity` is a compile-time singleton: one instance, top-level local, unrolled update/draw. There is no way to create entities at runtime. The decided shape for when that changes:
+
+- **`@archetype name [<body>]`** declares a template. Body grammar matches `entity` exactly (`pos`, `rect`, `color`, `field`, `update`, `draw`, `tags`, components). Unlike `entity`, it does not emit a singleton instance — it emits a set of per-archetype functions and a per-archetype instance table.
+- **`spawn 'name [<init-set-words>]`** creates a new instance at runtime. The init block holds set-word overrides (`x: 100  vx: 500`) that get applied after the archetype's defaults. Returns the new instance reference. Unknown field names are compile-time errors.
+- **Allocation strategy: free-list, not swap-and-pop.** Dead slots stay at their index; spawning scans for the first dead slot and reuses it. Instance references stay valid across the instance's lifetime even if other instances are created or destroyed. The cost (slight fragmentation, linear free-slot scan) is worth the reference stability for game-like workloads.
+- **`destroy self`** inside an archetype update sets `_alive = false`. The slot is reused on the next spawn into that archetype. No `table.remove`.
+- **Main update/draw loops gain per-archetype iteration sections.** Static entities stay unrolled (current behavior); each archetype adds a `for i = 1, <name>_count` loop that skips dead slots. Generated Lua is still clean and direct — static and dynamic sections are clearly separated.
+- **Collision supports mixed archetype + entity.** `collide <a> '<tag> [body]` where one or both sides are archetypes emits a single-loop (archetype vs static) or nested-loop (archetype vs archetype) AABB check. Broadphase (quadtree, spatial hash) is a later optimization, not required for v1.
+- **Pools are a later optimization.** `@archetype name [max 256] [...]` as an optional fixed-size hint, important for Playdate where allocation is expensive, unnecessary for LOVE2D in most cases. v1 ships with dynamic allocation; pools come when a game feels the cost.
+- **Ref stability:** dangling references to destroyed instances are inert. Users check `ref/_alive` before acting on a stored reference. Free-list allocation means the slot's identity is stable for the instance's lifetime even though the `_alive` flag flips; a reference captured during instance A's life will still point to the same slot if instance A is destroyed and later a new instance B is spawned into that slot, but the `_alive` state will have cycled false then true, which a reference-holder can detect.
+
+**Why deferred.** `@archetype` is the feature that pressures `@game` toward runtime machinery — instance tables, per-archetype functions, iteration loops in the main callbacks. It's a real architectural commitment: ~200-300 lines in the dialect, a second emission pattern in the Lua output, new categories of tests. Without a concrete game demanding it, we'd be guessing at the design decisions that matter (swap-and-pop vs free-list? pools required or optional? collision broadphase?). Build it when a real game — Chronodistort's unit spawns, or a shooter's bullets — makes the pain concrete and informs the unknowns.
+
+**What unifies both deferrals:** neither blocks current game development. Today's `@game` handles fixed-entity, single-scene games cleanly. Both deferred features extend that toward richer game shapes, and both have committed designs so the extension is known-shape, not guess-work.
+
 ---
 
 ## Object Protocol
