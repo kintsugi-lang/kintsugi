@@ -362,7 +362,27 @@ Emitted Lua has no external requires. Prelude helpers are tree-shaken — only h
 
 ### Interpreter-Only Features
 
-`@parse` raises a compile error in the emitter — PEG parsing requires runtime evaluation that can't be statically compiled. All other features compile.
+`@parse` raises a compile error in the emitter — PEG parsing requires runtime evaluation that can't be statically compiled. `@compose` raises a compile error outside of `@template` and `@preprocess` (it's a compile-time primitive, not a runtime operation). Seven interpreter-only natives raise compile errors with specific hints when referenced from compiled code: `read`, `write`, `save`, `dir?`, `file?` (filesystem IO), `exit` (not portable across targets), and `charset` (only exists for `@parse`). Everything else compiles.
+
+### Value Types in Emitted Lua
+
+A value type with operator overloading needs a metatable shim so the emitted Lua can use `+`, `-`, `*`, `/`, unary `-`, `==` on it. Today, only `pair!` qualifies. It emits via a `_pair(x, y)` helper that attaches a shared `_pair_mt` metatable; the 15-line prelude is gated on pair usage and only appears when the source references a pair literal or result.
+
+The other value types lower trivially without shims:
+
+| Type | Lua shape | Needs metatable? |
+|------|-----------|------------------|
+| `integer!` | Lua number | No |
+| `float!` | Lua number | No |
+| `money!` | Lua integer (cents) | No — `+`/`-`/`*` work directly on cents |
+| `pair!` | `{x, y}` table | **Yes** — `_pair_mt` provides componentwise ops |
+| `tuple!` | `{v1, v2, v3}` table | No — tuples have no operator overloads |
+| `date!` | `{year, month, day}` table | No — no operator overloads |
+| `time!` | `{hour, minute, second}` table | No — no operator overloads |
+| `string!` | Lua string | No — Lua handles `..` natively |
+| `block!` | Lua table | No — operator-free |
+
+**The contract:** if you add a new value type with operators that should work in compiled code, you must either (a) ensure it lowers to a Lua type with matching native operators, or (b) ship a metatable prelude gated on its usage, following the `PreludePair` pattern in `src/emit/lua.nim`. Without one of these, the operators will emit as raw Lua operators on tables and fail at runtime with "attempt to perform arithmetic on a table value."
 
 ### Type Checking in Compiled Output
 
