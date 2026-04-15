@@ -192,7 +192,7 @@ A dialect is a block where words change meaning. `loop [for [x] in series do [bo
 3. **Parse** — PEG-style parsing with backtracking (interpreter-only)
 4. **Object** — Frozen objects with typed fields, auto-constructors, `make`
 5. **Attempt** — Resilient pipelines with `source`, `then`, `when`, `catch`, `fallback`, `retries`
-6. **Game** — Scene/entity/state structure, update/draw/frame loop wiring, collision, `self/` substitution. Compile-time only.
+6. **Game** — Compile-time EC; user supplies S. Scenes, entities, components (via `@macro`), collision, update/draw wiring, destroy/`_alive`. Compile-time only.
 
 **Why:** These are the essential abstractions. Loops, pattern matching, parsing, objects, error handling, and games. Everything else is built from these.
 
@@ -202,9 +202,17 @@ A dialect is a block where words change meaning. `loop [for [x] in series do [bo
 
 **Why:** Explicit data flow. Visible, testable, composable.
 
-### `@game` Is Pure Structure, Not Cross-Platform API
+### `@game` Is Compile-Time EC; You Supply the S
 
-`@game` is the dialect for writing games. It handles scenes, entities, state, collision, the update/draw/frame loop, and `self/<field>` substitution inside entity update bodies. It does not provide a cross-platform input API. It does not abstract target-specific graphics primitives beyond the auto-rect default for an entity.
+`@game` is the dialect for writing games. In ECS terms: **Entities and Components are handled by the dialect at compile time; Systems are ordinary user code that runs at runtime.**
+
+The dialect knows about entities, expands components, and unrolls the update/draw loop into direct per-entity Lua. There is no runtime entity registry, no component dispatcher, no query system, no archetype table. The generated Lua reads `player.x = player.x + player.vx * dt` directly, not `for e in entities do ... end`. Systems are not a dialect concern: if you want a "movement system" you write `update [self/x: self/x + self/vx * dt]` inside a component or an entity body, and the composed update body *is* the system. The user is the scheduler.
+
+This split is the axis of responsibility. The dialect owns plumbing - how entities declare, how components compose, how callbacks wrap into target-required shapes, how `self/<field>` substitution works, how collision enumerates pairs. The user owns logic - what happens when things update, what collisions mean, what draws look like. Neither side intrudes on the other.
+
+**Consequence: no runtime entity registry is needed until something demands a dynamic entity count.** Traditional ECS needs a registry because systems iterate entities at runtime and must know which ones have which components. Kintsugi's registry is the compile pass - each entity already knows which update bodies apply to it because macro composition decided at parse time. The system runs as unrolled inline code per entity per frame. Zero lookup, zero dispatch, zero indirection. If you eventually want spawn / despawn / dynamic counts (bullet hell, runtime enemy pools), you pay for a registry and a runtime iteration loop, and the dialect will need a second output mode; until then, every game you write gets compile-time ECS composition with hand-written performance.
+
+`@game` handles scenes, entities, state, collision, the update/draw/frame loop, and `self/<field>` substitution inside entity update bodies. It does not provide a cross-platform input API. It does not abstract target-specific graphics primitives beyond the auto-rect default for an entity.
 
 **Target is a compile flag, not a source field.** `kintsugi -c pong.ktg --target=love2d`. The source contains `@game [...]` with no target declaration. A missing `--target` is a compile error; the REPL and interpret mode also error on `@game`, because `@game` is a compile-time-only dialect.
 
