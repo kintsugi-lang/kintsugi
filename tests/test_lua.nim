@@ -32,6 +32,16 @@ suite "lua emitter":
     let code = emitLua(parseSource("""print "hello" """))
     check """print("hello")""" in code
 
+  test "pair literal emits via _pair helper with metatable prelude":
+    let code = emitLua(parseSource("p: 10x20"))
+    check "_pair(10, 20)" in code
+    check "_pair_mt.__add" in code
+    check "_pair_mt.__mul" in code
+
+  test "pair prelude is gated on pair use":
+    let code = emitLua(parseSource("x: 42"))
+    check "_pair_mt" notin code
+
 suite "binding tracking":
   test "path access is not a function call":
     let code = emitLua(parseSource("""

@@ -138,8 +138,7 @@ love/update: function [dt] [
     if cpu/pos/y > (SCREEN-H - PADDLE-H) [cpu/pos/y: SCREEN-H - PADDLE-H]
 
     ; --- Ball movement ---
-    ball/pos/x: ball/pos/x + (ball/vel/x * ball/speed * dt)
-    ball/pos/y: ball/pos/y + (ball/vel/y * ball/speed * dt)
+    ball/pos: ball/pos + (ball/vel * ball/speed * dt)
 
     ; Top/bottom bounce
     if ball/pos/y < 0 [

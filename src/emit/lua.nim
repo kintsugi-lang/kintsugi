@@ -1094,7 +1094,7 @@ proc emitPath(name: string): string =
 # Emit a single literal value as a Lua expression string
 # ---------------------------------------------------------------------------
 
-proc emitLiteral(val: KtgValue): string =
+proc emitLiteral(e: var LuaEmitter, val: KtgValue): string =
   case val.kind
   of vkInteger:
     $val.intVal
@@ -1110,8 +1110,9 @@ proc emitLiteral(val: KtgValue): string =
     # Emit as integer cents
     $val.cents
   of vkPair:
-    # Emit as {x=N, y=M}
-    "{x=" & pairComp(val.px) & ", y=" & pairComp(val.py) & "}"
+    # Emit via metatable helper so arithmetic ops work
+    e.useHelper("_pair")
+    "_pair(" & pairComp(val.px) & ", " & pairComp(val.py) & ")"
   of vkTuple:
     # Emit as {v1, v2, v3, ...}
     var parts: seq[string] = @[]
@@ -1489,7 +1490,7 @@ proc buildPatternMatch(e: var LuaEmitter, pattern: seq[KtgValue], valueExpr: str
     let p = pattern[0]
     case p.kind
     of vkInteger, vkFloat, vkString, vkLogic, vkNone, vkMoney:
-      conditions.add(valueExpr & " == " & emitLiteral(p))
+      conditions.add(valueExpr & " == " & emitLiteral(e, p))
     of vkType:
       let luaType = case p.typeName
         of "integer!": "\"number\""
@@ -1527,7 +1528,7 @@ proc buildPatternMatch(e: var LuaEmitter, pattern: seq[KtgValue], valueExpr: str
       let elemExpr = valueExpr & "[" & $(i + 1) & "]"
       case p.kind
       of vkInteger, vkFloat, vkString, vkLogic, vkNone, vkMoney:
-        conditions.add(elemExpr & " == " & emitLiteral(p))
+        conditions.add(elemExpr & " == " & emitLiteral(e, p))
       of vkType:
         let luaType = case p.typeName
           of "integer!": "\"number\""
@@ -2091,7 +2092,7 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
 
   # --- Literals ---
   of vkInteger, vkFloat, vkString, vkLogic, vkNone, vkMoney, vkPair, vkTuple:
-    result = emitLiteral(val)
+    result = emitLiteral(e, val)
 
   # --- Block: emit as Lua table ---
   of vkBlock:
@@ -2698,7 +2699,7 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
   of vkMap:
     var parts: seq[string] = @[]
     for k, v in val.mapEntries:
-      parts.add(luaName(k) & " = " & emitLiteral(v))
+      parts.add(luaName(k) & " = " & emitLiteral(e, v))
     result = "{" & parts.join(", ") & "}"
 
   of vkSet:
@@ -2710,13 +2711,13 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
   of vkContext:
     var parts: seq[string] = @[]
     for k, v in val.ctx.entries:
-      parts.add(luaName(k) & " = " & emitLiteral(v))
+      parts.add(luaName(k) & " = " & emitLiteral(e, v))
     result = "{" & parts.join(", ") & "}"
 
   of vkObject:
     var parts: seq[string] = @[]
     for k, v in val.obj.entries:
-      parts.add(luaName(k) & " = " & emitLiteral(v))
+      parts.add(luaName(k) & " = " & emitLiteral(e, v))
     result = "{" & parts.join(", ") & "}"
 
   of vkFunction, vkNative:
@@ -3617,6 +3618,23 @@ const PreludeDeepCopy = """local function _deep_copy(t)
 end
 """
 
+const PreludePair = """local _pair_mt = {}
+_pair_mt.__add = function(a, b) return setmetatable({x=a.x+b.x, y=a.y+b.y}, _pair_mt) end
+_pair_mt.__sub = function(a, b) return setmetatable({x=a.x-b.x, y=a.y-b.y}, _pair_mt) end
+_pair_mt.__mul = function(a, b)
+  if type(a) == "number" then return setmetatable({x=a*b.x, y=a*b.y}, _pair_mt) end
+  if type(b) == "number" then return setmetatable({x=a.x*b, y=a.y*b}, _pair_mt) end
+  return setmetatable({x=a.x*b.x, y=a.y*b.y}, _pair_mt)
+end
+_pair_mt.__div = function(a, b)
+  if type(b) == "number" then return setmetatable({x=a.x/b, y=a.y/b}, _pair_mt) end
+  return setmetatable({x=a.x/b.x, y=a.y/b.y}, _pair_mt)
+end
+_pair_mt.__unm = function(a) return setmetatable({x=-a.x, y=-a.y}, _pair_mt) end
+_pair_mt.__eq  = function(a, b) return a.x == b.x and a.y == b.y end
+local function _pair(x, y) return setmetatable({x=x, y=y}, _pair_mt) end
+"""
+
 
 const PreludeCapture = """local function _capture(data, specs)
   local keywords, spec_map = {}, {}
@@ -3794,6 +3812,8 @@ proc buildPrelude(e: LuaEmitter): string =
     parts.add(PreludeNone.strip)
   if "_deep_copy" in e.usedHelpers:
     parts.add(PreludeDeepCopy.strip)
+  if "_pair" in e.usedHelpers:
+    parts.add(PreludePair.strip)
   if "_capture" in e.usedHelpers:
     parts.add(PreludeCapture.strip)
   if "_equals" in e.usedHelpers:
