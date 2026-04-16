@@ -1055,21 +1055,33 @@ proc matchesCustomType*(eval: Evaluator, value: KtgValue, ct: CustomType, ctx: K
           let guardCtx = ctx.child
           guardCtx.set("it", value)
           let guardResult = eval.evalBlock(ct.guard, guardCtx)
-          return isTruthy(guardResult)
+          if guardResult.kind != vkLogic:
+            raise KtgError(kind: "type",
+              msg: "where guard must return logic!, got " & typeName(guardResult),
+              data: guardResult)
+          return guardResult.boolVal
         return true
       if typeMatchesBuiltin(actual, tn):
         if ct.guard.len > 0:
           let guardCtx = ctx.child
           guardCtx.set("it", value)
           let guardResult = eval.evalBlock(ct.guard, guardCtx)
-          return isTruthy(guardResult)
+          if guardResult.kind != vkLogic:
+            raise KtgError(kind: "type",
+              msg: "where guard must return logic!, got " & typeName(guardResult),
+              data: guardResult)
+          return guardResult.boolVal
         return true
       if eval.matchesCustomTypeByName(value, tn, ctx):
         if ct.guard.len > 0:
           let guardCtx = ctx.child
           guardCtx.set("it", value)
           let guardResult = eval.evalBlock(ct.guard, guardCtx)
-          return isTruthy(guardResult)
+          if guardResult.kind != vkLogic:
+            raise KtgError(kind: "type",
+              msg: "where guard must return logic!, got " & typeName(guardResult),
+              data: guardResult)
+          return guardResult.boolVal
         return true
     return false
 
