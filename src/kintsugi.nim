@@ -39,71 +39,6 @@ proc stripHeader(source: string): string =
         return source[i+1 .. ^1]
   source
 
-proc loadStdlib(eval: Evaluator) =
-  ## Load stdlib modules under std/math, std/collections.
-  let stdCtx = newContext()
-  let libDir = getAppDir() / "lib"
-  # Fallback: try relative to CWD
-  let searchDirs = [libDir, getCurrentDir() / "lib"]
-
-  for dir in searchDirs:
-    let mathPath = dir / "math.ktg"
-    let collectionsPath = dir / "collections.ktg"
-    if fileExists(mathPath) and fileExists(collectionsPath):
-      # Load math
-      let mathSource = stripHeader(readFile(mathPath))
-      let mathCtx = newContext(eval.global)
-      mathCtx.localOnly = true
-      discard eval.evalBlock(parseSource(mathSource), mathCtx)
-      stdCtx.set("math", KtgValue(kind: vkContext, ctx: mathCtx, line: 0))
-
-      # Load collections
-      let colSource = stripHeader(readFile(collectionsPath))
-      let colCtx = newContext(eval.global)
-      colCtx.localOnly = true
-      discard eval.evalBlock(parseSource(colSource), colCtx)
-      stdCtx.set("collections", KtgValue(kind: vkContext, ctx: colCtx, line: 0))
-      break
-
-  eval.global.set("std", KtgValue(kind: vkContext, ctx: stdCtx, line: 0))
-
-proc applyUsing(eval: Evaluator, names: seq[KtgValue]) =
-  ## Unwrap std modules into global scope.
-  for name in names:
-    if name.kind == vkWord and name.wordKind == wkWord:
-      let moduleName = name.wordName
-      if eval.global.has("std"):
-        let std = eval.global.get("std")
-        if std.kind == vkContext and std.ctx.has(moduleName):
-          let module = std.ctx.get(moduleName)
-          if module.kind == vkContext:
-            for key, val in module.ctx.entries.pairs:
-              eval.global.set(key, val)
-
-proc parseHeader(source: string): (string, seq[KtgValue]) =
-  ## Extract using block from Kintsugi [...] header.
-  ## Returns (body-after-header, using-names).
-  let trimmed = source.strip
-  if not trimmed.startsWith("Kintsugi"):
-    return (source, @[])
-
-  # Parse the header block
-  let ast = parseSource(source)
-  var usingNames: seq[KtgValue] = @[]
-  if ast.len >= 2 and ast[0].kind == vkWord and ast[0].wordName == "Kintsugi" and
-     ast[1].kind == vkBlock:
-    let header = ast[1].blockVals
-    var i = 0
-    while i < header.len:
-      if header[i].kind == vkWord and header[i].wordKind == wkSetWord and
-         header[i].wordName == "using":
-        i += 1
-        if i < header.len and header[i].kind == vkBlock:
-          usingNames = header[i].blockVals
-      i += 1
-
-  (stripHeader(source), usingNames)
-
 proc setupEval(): Evaluator =
   let eval = newEvaluator()
   eval.registerNatives()
@@ -112,7 +47,6 @@ proc setupEval(): Evaluator =
   eval.registerObjectDialect()
   eval.registerAttempt()
   eval.registerParse()
-  eval.loadStdlib()
   eval
 
 proc repl() =
@@ -214,11 +148,8 @@ proc runSingleFile(path: string, eval: Evaluator = nil) =
     echo "Error: file not found: " & path
     quit(1)
 
-  let rawSource = readFile(path)
-  let (source, usingNames) = parseHeader(rawSource)
+  let source = stripHeader(readFile(path))
   let e = if eval != nil: eval else: setupEval()
-  if usingNames.len > 0:
-    applyUsing(e, usingNames)
 
   try:
     discard e.evalString(source)
@@ -254,7 +185,7 @@ proc compileOne(path: string, outPath: string = "", target: string = "") =
 
   let content = readFile(path)
   let isEntrypoint = hasHeader(content)
-  let source = applyUsingHeader(content)
+  let source = stripHeader(content)
   let ast = parseSource(source)
   let eval = setupEval()
   let processed = eval.preprocess(ast, forCompilation = true, target = target)
@@ -292,7 +223,7 @@ proc dryRunPath(path: string, target: string = "") =
     for f in collectKtgFiles(path):
       let content = readFile(f)
       let isEntrypoint = hasHeader(content)
-      let source = applyUsingHeader(content)
+      let source = stripHeader(content)
       let ast = parseSource(source)
       let eval = setupEval()
       let processed = eval.preprocess(ast, forCompilation = true, target = target)
@@ -305,7 +236,7 @@ proc dryRunPath(path: string, target: string = "") =
   else:
     let content = readFile(path)
     let isEntrypoint = hasHeader(content)
-    let source = applyUsingHeader(content)
+    let source = stripHeader(content)
     let ast = parseSource(source)
     let eval = setupEval()
     let processed = eval.preprocess(ast, forCompilation = true, target = target)

@@ -305,3 +305,53 @@ suite "freeze":
       caught = e.msg
     check "make" in caught
     check "mutable context" in caught
+
+suite "set-path type enforcement":
+  test "set-path enforces field type on typed object":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("""
+        Point: object [
+          field/optional [x [integer!] 0]
+          field/optional [y [integer!] 0]
+        ]
+        p: make Point [x: 10 y: 20]
+        p/x: "not an integer"
+      """)
+
+  test "set-path allows correct type on typed object":
+    let eval = makeEval()
+    let result = eval.evalString("""
+      Point: object [
+        field/optional [x [integer!] 0]
+        field/optional [y [integer!] 0]
+      ]
+      p: make Point [x: 10 y: 20]
+      p/x: 999
+      p/x
+    """)
+    check $result == "999"
+
+  test "set-path allows correct type on string field":
+    let eval = makeEval()
+    let result = eval.evalString("""
+      Box: object [
+        field/optional [contents [string!] "empty"]
+      ]
+      b: make Box []
+      b/contents: "anything"
+      b/contents
+    """)
+    check $result == "anything"
+
+  test "set-path enforces custom type on field":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("""
+        direction!: @type/enum ['north | 'south | 'east | 'west]
+        Ship: object [
+          field/required [heading [direction!]]
+        ]
+        s: make Ship [heading: 'north]
+        s/heading: "invalid"
+      """)

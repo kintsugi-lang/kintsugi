@@ -44,7 +44,7 @@ Nothing below blocks on any of this. But this is the foundation everything else 
 
 ---
 
-## Phase 1 — Minimal `@game` skeleton
+## Phase 1 — Minimal `@game` skeleton **[DONE]**
 
 Build the smallest thing that can take a `@game` block and produce a runnable Kintsugi program. No handlers yet, no collision, no input. Just entity layout + love callback shells.
 
@@ -77,7 +77,7 @@ Build the smallest thing that can take a `@game` block and produce a runnable Ki
 
 ---
 
-## Phase 2 — Handlers and state
+## Phase 2 — Handlers and state **[DONE]**
 
 Add the imperative escape-hatch blocks that make the dialect useful for a real game.
 
@@ -106,7 +106,7 @@ scene 'name [
 
 ---
 
-## Phase 3 — The `self` substitution pass
+## Phase 3 — The `self` substitution pass **[DONE]**
 
 This is the one genuinely novel piece of machinery the dialect needs. Every other dialect feature is straightforward block-walking + `@compose`. This one requires rewriting references.
 
@@ -124,7 +124,7 @@ This is the one genuinely novel piece of machinery the dialect needs. Every othe
 
 ---
 
-## Phase 4 — Tag-based collision enumeration
+## Phase 4 — Tag-based collision enumeration **[DONE]**
 
 Tags make the dialect composable. Users write `collide ball 'paddle [...]` once; the dialect expands it to one AABB-check block per tagged entity at compile time.
 
@@ -151,7 +151,7 @@ collide ball 'paddle [
 
 ---
 
-## Phase 5 — Second backend
+## Phase 5 — Second backend **[DONE]**
 
 Stay in `@game [target: 'love2d]` through Phases 1-4. At Phase 5, add one more backend to prove target-swappability is structural, not a one-off.
 
@@ -165,7 +165,7 @@ Stay in `@game [target: 'love2d]` through Phases 1-4. At Phase 5, add one more b
 
 ---
 
-## Phase 6 — Breakout as the validation game
+## Phase 6 — Breakout as the validation game **[NOT STARTED]**
 
 Once Pong runs on both targets, Breakout is the stress test. Breakout has things Pong doesn't:
 - Many dynamic entities (bricks) — tests tag-based collision enumeration at scale.

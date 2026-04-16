@@ -3,7 +3,17 @@ when not defined(js):
   import std/os
 import ../core/types
 import ../parse/parser
-import dialect, evaluator
+import dialect, evaluator, stdlib_registry
+
+proc resolveStdlibModule*(eval: Evaluator, moduleName: string): KtgContext =
+  if moduleName notin stdlibModules:
+    raise KtgError(kind: "import", msg: "unknown module: " & moduleName, data: nil)
+  let source = stripModuleHeader(stdlibModules[moduleName])
+  let moduleCtx = newContext(eval.global)
+  moduleCtx.localOnly = true
+  let ast = parseSource(source)
+  discard eval.evalBlock(ast, moduleCtx)
+  moduleCtx
 
 proc native(ctx: KtgContext, name: string, arity: int, fn: NativeFnProc) =
   ctx.set(name, KtgValue(kind: vkNative,
@@ -308,20 +318,63 @@ proc registerIoNatives*(eval: Evaluator) =
       ktgNone()
     )
 
-  when not defined(js):
-    # --- Import (module loading) ---
+  # --- Import (stdlib via lit-words, works on all backends) ---
 
-    block:
-      let importNative = KtgNative(
-        name: "import",
-        arity: 1,
-        refinements: @[RefinementSpec(name: "fresh", params: @[])],
-        fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-          let eval = getEvaluator(ep)
+  block:
+    var importRefinements = @[
+      RefinementSpec(name: "using", params: @[ParamSpec(name: "symbols")])
+    ]
+    when not defined(js):
+      importRefinements.add(RefinementSpec(name: "fresh", params: @[]))
+
+    let importNative = KtgNative(
+      name: "import",
+      arity: 1,
+      refinements: importRefinements,
+      fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
+        let eval = getEvaluator(ep)
+
+        # --- Lit-word: import 'math ---
+        if args[0].kind == vkWord and args[0].wordKind == wkLitWord:
+          let moduleName = args[0].wordName
+          let moduleCtx = resolveStdlibModule(eval, moduleName)
+          if "using" in eval.currentRefinements:
+            let symbols = args[1]
+            if symbols.kind != vkBlock:
+              raise KtgError(kind: "type", msg: "import/using expects block! of symbols", data: nil)
+            for sym in symbols.blockVals:
+              if sym.kind != vkWord:
+                raise KtgError(kind: "type", msg: "import/using expects words in symbol list", data: nil)
+              let name = sym.wordName
+              if not moduleCtx.has(name):
+                raise KtgError(kind: "import",
+                  msg: "module '" & moduleName & "' has no export: " & name, data: nil)
+              eval.currentCtx.set(name, moduleCtx.get(name))
+            return ktgNone()
+          let moduleVal = KtgValue(kind: vkContext, ctx: moduleCtx, line: 0)
+          eval.currentCtx.set(moduleName, moduleVal)
+          return moduleVal
+
+        # --- Block of lit-words: import ['math 'collections] ---
+        if args[0].kind == vkBlock:
+          var lastVal: KtgValue = ktgNone()
+          for item in args[0].blockVals:
+            if item.kind != vkWord or item.wordKind != wkLitWord:
+              raise KtgError(kind: "type",
+                msg: "import block expects lit-words, got " & $item, data: nil)
+            let moduleName = item.wordName
+            let moduleCtx = resolveStdlibModule(eval, moduleName)
+            let moduleVal = KtgValue(kind: vkContext, ctx: moduleCtx, line: 0)
+            eval.currentCtx.set(moduleName, moduleVal)
+            lastVal = moduleVal
+          return lastVal
+
+        when not defined(js):
+          # --- File path: import %path (native only, needs filesystem) ---
           let rawPath = case args[0].kind
             of vkString: args[0].strVal
             of vkFile: args[0].filePath
-            else: raise KtgError(kind: "type", msg: "import expects string! or file!", data: nil)
+            else: raise KtgError(kind: "type", msg: "import expects lit-word!, block!, string! or file!", data: nil)
 
           let resolvedPath = if rawPath.isAbsolute: rawPath else: getCurrentDir() / rawPath
 
@@ -366,15 +419,17 @@ proc registerIoNatives*(eval: Evaluator) =
 
             eval.moduleLoading.excl(resolvedPath)
             eval.moduleCache[resolvedPath] = res
-            res
+            return res
           except KtgError:
             eval.moduleLoading.excl(resolvedPath)
             raise
           except CatchableError:
             eval.moduleLoading.excl(resolvedPath)
             raise
-      )
-      ctx.set("import", KtgValue(kind: vkNative, nativeFn: importNative, line: 0))
+        else:
+          raise KtgError(kind: "type", msg: "import expects lit-word! or block! on this backend", data: nil)
+    )
+    ctx.set("import", KtgValue(kind: vkNative, nativeFn: importNative, line: 0))
 
   # --- Exports ---
 

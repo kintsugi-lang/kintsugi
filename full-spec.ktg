@@ -2100,6 +2100,29 @@ fib: function [n] [
 
 probe fib 10                            ; 0 1 1 2 3 5 8 13 21 34
 
+; --- Subset Types with Where Guards ---
+; @type/where [base-type!] [guard] creates a type that
+; checks the base type first, then evaluates the guard with
+; `it` bound to the value.
+
+positive!: @type/where [integer!] [it > 0]
+percentage!: @type/where [float!] [it >= 0.0 and it <= 1.0]
+
+print is? positive! 42                  ; true
+print is? positive! -5                  ; false
+print is? percentage! 0.75             ; true
+print is? percentage! 1.5              ; false
+
+; where guards compose with union types
+score!: @type/where [integer! | float!] [it >= 0]
+print is? score! 100                    ; true
+print is? score! -1                     ; false
+
+; subset types work in function parameter validation
+clamp-positive: function [n [positive!]] [n]
+print clamp-positive 42                 ; 42
+; clamp-positive -5                     ; Error [type]: n expects positive!, got integer!
+
 ; --- State Machine ---
 ; Objects with match for state transitions.
 

@@ -12,7 +12,7 @@ The emitter should not replicate the interpreter's internal operations. It shoul
 
 ---
 
-## Phase 1: Remove Unnecessary Wrapping
+## Phase 1: Remove Unnecessary Wrapping **[DONE]**
 
 ### 1.1 Kill defensive `tostring()` in rejoin
 
@@ -50,7 +50,7 @@ Only emit `_add` when one operand could be money or float.
 
 ---
 
-## Phase 2: Idiomatic Lua Patterns
+## Phase 2: Idiomatic Lua Patterns **[DONE]**
 
 ### 2.1 Method calls via `:` syntax
 
@@ -92,7 +92,7 @@ Lua strings have methods. Use them.
 
 ---
 
-## Phase 3: Erase Kintsugi Completely
+## Phase 3: Erase Kintsugi Completely **[DONE]**
 
 ### 3.1 No prelude for simple programs
 
@@ -123,7 +123,7 @@ Already done for `@type`. Function parameter types are already erased. Object fi
 
 ---
 
-## Phase 4: Output Quality Metrics
+## Phase 4: Output Quality Metrics **[DONE]**
 
 How to measure progress:
 

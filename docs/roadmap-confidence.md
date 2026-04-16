@@ -2,7 +2,7 @@
 
 ## Context
 
-The question isn't rhetorical. There are 9,000 lines of compiler, 1,300+ tests, clean Lua output, type inference, five dialects, and a principled design bible. That's a lot of evidence the language works. So why does it still feel like it might not?
+The question isn't rhetorical. There are 12,000 lines of compiler, 1,344+ tests, clean Lua output, type inference, six dialects, and a principled design bible. That's a lot of evidence the language works. So why does it still feel like it might not?
 
 The causes:
 1. **Nothing real has shipped in it.**
@@ -36,7 +36,9 @@ Candidates, ranked by signal:
 - **Asteroids** — vector math (pair arithmetic), wrapping, spawner logic. Stresses the pair type and math stdlib hard.
 - **Match-3** — grid, `loop/collect`, `match` for piece types, score accumulation. Exercises the collection ops we just added parity for.
 
-Recommendation: **Breakout**. Smallest scope, broadest language surface. Target LÖVE2D; bindings already exist in `lib/love2d.ktg`.
+Recommendation: **Breakout**. Smallest scope, broadest language surface. Target LOVE2D; bindings already exist in `lib/love2d.ktg`.
+
+**Update 2026-04-15:** The @game dialect (phases 1-5 of roadmap-game-dialect.md) is complete. Pong runs on both LOVE2D and Playdate targets. 648 LOC across game_dialect.nim, game_backend.nim, game_playdate.nim. 38+ tests passing. Breakout has not been started yet.
 
 ### 2. Feature freeze on the language itself
 

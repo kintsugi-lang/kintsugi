@@ -114,16 +114,16 @@ suite "merge":
 suite "std namespace (via CLI)":
   const kintsugi = "bin/kintsugi"
 
-  test "std/math accessible":
-    let (output, _) = execCmdEx(kintsugi & " -e \"print std/math/clamp 15 0 10\"")
+  test "import math accessible":
+    let (output, _) = execCmdEx(kintsugi & " -e \"import 'math\nprint math/clamp 15 0 10\"")
     check output.strip == "10"
 
-  test "std/collections accessible":
-    let (output, _) = execCmdEx(kintsugi & " -e \"probe std/collections/range 1 5\"")
+  test "import collections accessible":
+    let (output, _) = execCmdEx(kintsugi & " -e \"import 'collections\nprobe collections/range 1 5\"")
     check "[1 2 3 4 5]" in output
 
-  test "header using unwraps":
-    writeFile("/tmp/_ktg_test_using.ktg", "Kintsugi [name: 'test using: [math]]\nprint clamp 15 0 10\n")
+  test "import/using unwraps":
+    writeFile("/tmp/_ktg_test_using.ktg", "import/using 'math [clamp]\nprint clamp 15 0 10\n")
     let (output, _) = execCmdEx(kintsugi & " /tmp/_ktg_test_using.ktg")
     check output.strip == "10"
 

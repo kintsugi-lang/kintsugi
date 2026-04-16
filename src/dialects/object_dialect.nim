@@ -239,6 +239,7 @@ proc registerObjectDialect*(eval: Evaluator) =
       ## report it as the user-declared type instead of bare `context!`.
       if source.kind == vkObject and source.obj.name.len > 0:
         instance.instanceOf = source.obj.name
+        instance.fieldSpecs = source.obj.fieldSpecs
 
       # Step 1: Shallow copy all entries from source
       for key, val in sourceEntries:

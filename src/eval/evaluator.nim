@@ -1,7 +1,7 @@
 import std/[strutils, tables, math, sets]
 import ../core/[types, equality]
 import ../parse/parser
-import dialect
+import dialect, stdlib_registry
 import ../dialects/game_dialect
 
 export Evaluator
@@ -469,6 +469,9 @@ proc parsePath*(word: string): (string, seq[string]) =
   (parts[0], parts[1..^1])
 
 
+# --- Forward declarations for type checking ---
+proc typeMatches*(eval: Evaluator, actual, expected: string, value: KtgValue, ctx: KtgContext): bool
+
 # --- Core evaluation ---
 
 proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
@@ -677,7 +680,17 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
                 raise KtgError(kind: "type",
                   msg: "block index must be integer!", data: idx)
             elif current.kind == vkContext:
-              current.ctx.set($idx, rhs)
+              let dynKey = $idx
+              if current.ctx.fieldSpecs.len > 0:
+                for fs in current.ctx.fieldSpecs:
+                  if fs.name == dynKey and fs.typeName != "":
+                    let actual = typeName(rhs)
+                    if not eval.typeMatches(actual, fs.typeName, rhs, ctx):
+                      raise KtgError(kind: "type",
+                        msg: "field '" & dynKey & "' expects " & fs.typeName & ", got " & actual,
+                        data: rhs, line: val.line)
+                    break
+              current.ctx.set(dynKey, rhs)
             elif current.kind == vkMap:
               current.mapEntries[$idx] = rhs
             elif current.kind == vkObject:
@@ -688,6 +701,15 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
               raise KtgError(kind: "type",
                 msg: "cannot set on " & typeName(current), data: current)
           elif current.kind == vkContext:
+            if current.ctx.fieldSpecs.len > 0:
+              for fs in current.ctx.fieldSpecs:
+                if fs.name == lastSeg and fs.typeName != "":
+                  let actual = typeName(rhs)
+                  if not eval.typeMatches(actual, fs.typeName, rhs, ctx):
+                    raise KtgError(kind: "type",
+                      msg: "field '" & lastSeg & "' expects " & fs.typeName & ", got " & actual,
+                      data: rhs, line: val.line)
+                  break
             current.ctx.set(lastSeg, rhs)
           elif current.kind == vkMap:
             current.mapEntries[lastSeg] = rhs
@@ -1248,6 +1270,10 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue],
                       "template", "template/deep", "template/only"]:
       hasWork = true
       break
+    if forCompilation and v.kind == vkWord and v.wordKind == wkWord and
+       v.wordName in ["import", "import/using"]:
+      hasWork = true
+      break
   # Also check for macro calls from prior passes
   if not hasWork and eval.macros.len > 0:
     for v in ast:
@@ -1381,6 +1407,40 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue],
       let expanded = game_dialect.expand(ast[i + 1].blockVals, target, expander)
       for v in expanded:
         result.add(v)
+      i += 2
+
+    # import/using 'module [symbols] - splice only needed functions
+    elif forCompilation and ast[i].kind == vkWord and ast[i].wordKind == wkWord and
+       ast[i].wordName == "import/using" and i + 2 < ast.len and
+       ast[i + 1].kind == vkWord and ast[i + 1].wordKind == wkLitWord and
+       ast[i + 2].kind == vkBlock:
+      let moduleName = ast[i + 1].wordName
+      if moduleName in stdlibModules:
+        var symbols: seq[string]
+        for v in ast[i + 2].blockVals:
+          if v.kind == vkWord:
+            symbols.add(v.wordName)
+        let selected = spliceSelectedFunctions(moduleName, symbols)
+        for v in selected:
+          result.add(v)
+      else:
+        raise KtgError(kind: "import",
+          msg: "unknown module: " & moduleName, data: nil)
+      i += 3
+
+    # import 'module - splice stdlib source for compilation
+    elif forCompilation and ast[i].kind == vkWord and ast[i].wordKind == wkWord and
+       ast[i].wordName == "import" and i + 1 < ast.len and
+       ast[i + 1].kind == vkWord and ast[i + 1].wordKind == wkLitWord:
+      let moduleName = ast[i + 1].wordName
+      if moduleName in stdlibModules:
+        let source = stripModuleHeader(stdlibModules[moduleName])
+        let moduleAst = parseSource(source)
+        for v in moduleAst:
+          result.add(v)
+      else:
+        raise KtgError(kind: "import",
+          msg: "unknown module: " & moduleName, data: nil)
       i += 2
 
     else:

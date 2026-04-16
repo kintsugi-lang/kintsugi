@@ -83,6 +83,7 @@ type
     localOnly*: bool  ## when true, setThrough behaves like set (for context builders)
     instanceOf*: string  ## non-empty when `make <Type>` built this context,
                          ## holds the object type name (e.g., "Enemy")
+    fieldSpecs*: seq[FieldSpec]
 
   FieldSpec* = object
     name*: string

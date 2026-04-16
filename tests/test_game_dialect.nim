@@ -979,14 +979,14 @@ proc gameSetupEval(): Evaluator =
   result.registerNatives()
 
 proc dryExpand(src, target: string): string =
-  let source = applyUsingHeader(src)
+  let source = src
   let ast = parseSource(source)
   let eval = gameSetupEval()
   let expanded = eval.preprocess(ast, forCompilation = true, target = target)
   prettyPrintBlock(expanded)
 
 proc compileGameKtg(src, sourceDir, target: string): string =
-  let source = applyUsingHeader(src)
+  let source = src
   let ast = parseSource(source)
   let eval = gameSetupEval()
   let processed = eval.preprocess(ast, forCompilation = true, target = target)

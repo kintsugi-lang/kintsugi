@@ -1,6 +1,6 @@
 # Rough Edges Roadmap
 
-An honest audit of the rough edges in Kintsugi as of 2026-04-15, triaged by ROI. The XS and S items are fixed. The items below were triaged as M or larger and deferred until a trigger condition justifies the work.
+An honest audit of the rough edges in Kintsugi as of 2026-04-15, triaged by ROI. The XS and S items are fixed. The lean-lua output work (all 4 phases, 20 tasks) shipped 2026-04-13: IIFE elimination, tostring cleanup, ipairs/pairs discrimination, match tightening, @method colon syntax, string.sub emission, none-as-nil inference, prelude gating, _make fallback elimination. Verified by 18 metric tests and golden output suite. The items below were triaged as M or larger and deferred until a trigger condition justifies the work.
 
 ## Philosophy
 

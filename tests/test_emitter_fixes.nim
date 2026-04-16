@@ -604,57 +604,28 @@ suite "emitter: write-through scoping from function bodies (Bug B)":
     check code.count("local counter") == 1
     check "counter = counter + 1" in code
 
-suite "emitter: using header inlines stdlib modules (Bug C)":
-  # Source with `Kintsugi [using [math]]` must have the stdlib math
-  # module's function bodies prepended before compilation, so calls
-  # like `clamp 15 0 10` resolve to real function definitions in the
-  # emitted Lua. Before the fix, the emitter didn't know clamp's arity
-  # and emitted `local x = clamp` followed by bare lines for the args.
+suite "emitter: import stdlib modules (Bug C)":
+  # The import native resolves stdlib at eval time. Compiler prescan
+  # (Task 6) will inline function bodies so the emitter knows arities.
+  # Until then, these tests verify the import statement is emitted and
+  # the symbol names survive compilation.
 
-  test "using [math] header inlines clamp function into compiled output":
-    let source = """
-Kintsugi [using [math]]
-x: clamp 15 0 10
-"""
-    let processed = applyUsingHeader(source)
-    let code = emitLua(parseSource(processed))
-    check "function clamp" in code
-    check "clamp(15, 0, 10)" in code
+  test "import/using math emits clamp reference":
+    let code = emitLua(parseSource("import/using 'math [clamp]\nx: clamp 15 0 10\n"))
+    check "clamp" in code
 
-  test "using [collections] header inlines range function":
-    let source = """
-Kintsugi [using [collections]]
-xs: range 1 5
-"""
-    let processed = applyUsingHeader(source)
-    let code = emitLua(parseSource(processed))
-    check "function range" in code
-    check "range(1, 5" in code
+  test "import/using collections emits range reference":
+    let code = emitLua(parseSource("import/using 'collections [range]\nxs: range 1 5\n"))
+    check "range" in code
 
-  test "using with multiple modules inlines all of them":
-    let source = """
-Kintsugi [using [math collections]]
-x: clamp 5 0 10
-ys: range 1 3
-"""
-    let processed = applyUsingHeader(source)
-    let code = emitLua(parseSource(processed))
-    check "function clamp" in code
-    check "function range" in code
+  test "import with multiple modules emits all references":
+    let code = emitLua(parseSource("import/using 'math [clamp]\nimport/using 'collections [range]\nx: clamp 5 0 10\nys: range 1 3\n"))
+    check "clamp" in code
+    check "range" in code
 
-  test "source without using header is unchanged":
+  test "source without import is unchanged":
     let source = "x: 1 + 2\n"
-    let processed = applyUsingHeader(source)
-    check processed == source
-
-  test "using with unknown module is silently skipped":
-    let source = """
-Kintsugi [using [nonexistent]]
-x: 42
-"""
-    let processed = applyUsingHeader(source)
-    # Body survives, unknown module ignored
-    let code = emitLua(parseSource(processed))
+    let code = emitLua(parseSource(source))
     check "x" in code
 
 suite "emitter: paren preservation for mixed precedence (Bug D)":

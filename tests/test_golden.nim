@@ -36,8 +36,7 @@ proc compileKtg(ktgPath: string): string =
   ## Mirrors src/kintsugi.nim's compileOne without file IO for the output.
   let content = readFile(ktgPath)
   let isEntrypoint = hasHeader(content)
-  let source = applyUsingHeader(content)
-  let ast = parseSource(source)
+  let ast = parseSource(content)
   let eval = setupEvalForTest()
   let processed = eval.preprocess(ast, forCompilation = true)
   let sourceDir = parentDir(absolutePath(ktgPath))
