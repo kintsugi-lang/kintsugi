@@ -8,7 +8,7 @@
    version="1.1"
    id="svg1"
    sodipodi:docname="logo-full.svg"
-   inkscape:export-filename="logo-full.png"
+   inkscape:export-filename="logo-full.svg"
    inkscape:export-xdpi="96"
    inkscape:export-ydpi="96"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
@@ -107,12 +107,13 @@
   </defs>
   <g
      id="layer1"
-     transform="translate(10.583333,-32.370355)">
+     transform="translate(10.583333,-32.370355)"
+     style="fill:#ffffff">
     <text
        xml:space="preserve"
        transform="matrix(0.26458333,0,0,0.26458333,-21.210693,13.273194)"
        id="text2"
-       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:341.333px;font-family:'Noto Sans';-inkscape-font-specification:'Noto Sans';writing-mode:lr-tb;direction:ltr;white-space:pre;shape-inside:url(#rect2);fill:#1a1a1a"><tspan
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:341.333px;font-family:'Noto Sans';-inkscape-font-specification:'Noto Sans';writing-mode:lr-tb;direction:ltr;white-space:pre;shape-inside:url(#rect2);fill:#ffffff"><tspan
          x="767.89258"
          y="460.04504"
          id="tspan4"><tspan
