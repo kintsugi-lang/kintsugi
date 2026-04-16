@@ -220,26 +220,6 @@ suite "import compilation":
     """))
     check "exports" notin code or "return {x = x}" in code
 
-suite "tic-tac-toe compilation":
-  test "graphical main compiles without known bug patterns":
-    let source = readFile("examples/tic-tac-toe/graphical/main.ktg")
-    let code = emitLua(parseSource(source))
-    # B1/B2/B3: no spurious () on value access
-    check "board.cells()" notin code
-    check "state.full()" notin code
-    check "state.choice()" notin code
-    # Correct patterns
-    check "board.cells" in code
-    check "ipairs(board.cells)" in code
-    check "function cell_at(pos)" in code
-    check "board.cells[pos]" in code
-
-  test "terminal main compiles without known bug patterns":
-    let source = readFile("examples/tic-tac-toe/terminal/main.ktg")
-    let code = emitLua(parseSource(source))
-    check "board.cells()" notin code
-    check "board.cells" in code
-
 suite "series operation emission":
   test "first emits [1] index":
     let code = emitLua(parseSource("x: first [1 2 3]"))

@@ -16,7 +16,7 @@ proc makeEval(): Evaluator =
   eval.registerParse()
   eval
 
-let specPath = currentSourcePath().parentDir / ".." / "examples" / "full-spec.ktg"
+let specPath = currentSourcePath().parentDir / ".." / "full-spec.ktg"
 var src = readFile(specPath)
 
 # Strip the header if present (Kintsugi [...] at the top)
