@@ -1051,15 +1051,20 @@ proc matchesCustomType*(eval: Evaluator, value: KtgValue, ct: CustomType, ctx: K
     let actual = typeName(value)
     for tn in typeNames:
       if actual == tn:
-        # Base type matches, now check guard
         if ct.guard.len > 0:
           let guardCtx = ctx.child
           guardCtx.set("it", value)
           let guardResult = eval.evalBlock(ct.guard, guardCtx)
           return isTruthy(guardResult)
         return true
-      # Check if tn is a built-in union type
       if typeMatchesBuiltin(actual, tn):
+        if ct.guard.len > 0:
+          let guardCtx = ctx.child
+          guardCtx.set("it", value)
+          let guardResult = eval.evalBlock(ct.guard, guardCtx)
+          return isTruthy(guardResult)
+        return true
+      if eval.matchesCustomTypeByName(value, tn, ctx):
         if ct.guard.len > 0:
           let guardCtx = ctx.child
           guardCtx.set("it", value)
