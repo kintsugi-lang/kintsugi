@@ -28,7 +28,7 @@ proc kintsugiCompile*(source: cstring, target: cstring): cstring {.exportc.} =
   try:
     let ast = parseSource($source)
     let eval = setupEval()
-    let processed = eval.preprocess(ast, forCompilation = true)
+    let processed = eval.preprocess(ast, forCompilation = true, target = $target)
     cstring(emitLua(processed, $target))
   except KtgError as e:
     cstring("-- Error [" & e.kind & "]: " & e.msg)
