@@ -52,4 +52,4 @@ kintsugi -c file.ktg --target=<love2d|playdate> --dry-run    # compile to Lua an
 
 ## Learn Kintsugi in Y Minutes
 
-The language spec is a single executable file, found [here](examples/full-spec.ktg).
+The language spec is a single executable file, found [here](/full-spec.ktg).
