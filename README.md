@@ -1,4 +1,4 @@
-<img src="/assets/logo-full.svg" width="500" height="250" />
+<img src="/assets/logo-full.png" width="500" height="250" />
 
 Kintsugi is a homoiconic programming language with rich built-in datatypes, preprocessing, and a number of useful facilities powered by DSLs called "dialects". Influenced by REBOL, Red, Ren-C, Common Lisp, D, Python, Kotlin, and Raku.
 
