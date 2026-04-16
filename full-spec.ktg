@@ -2123,6 +2123,19 @@ clamp-positive: function [n [positive!]] [n]
 print clamp-positive 42                 ; 42
 ; clamp-positive -5                     ; Error [type]: n expects positive!, got integer!
 
+; match works inside where guards for type dispatch
+valid-score!: @type/where [integer! | string!] [
+  match it [
+    [integer!] [(it >= 0) and (it <= 100)]
+    [string!]  [it = "N/A"]
+    default    [false]
+  ]
+]
+print is? valid-score! 85               ; true
+print is? valid-score! -5               ; false
+print is? valid-score! "N/A"            ; true
+print is? valid-score! "bad"            ; false
+
 ; where guards must be valid for ALL members of a union.
 ; If a guard doesn't apply to every type in the union, split it:
 positive!: @type/where [integer!] [it > 0]
