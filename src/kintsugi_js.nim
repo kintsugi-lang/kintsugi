@@ -8,7 +8,7 @@
 ##
 ## Stdlib is available via `import 'math` / `import/using 'math [clamp]`.
 
-import core/types
+import core/[types, version]
 import parse/parser
 import eval/[dialect, evaluator, natives]
 import emit/lua
@@ -49,4 +49,7 @@ proc kintsugiRun*(source: cstring): cstring {.exportc.} =
     cstring("Error: " & e.msg)
 
 proc kintsugiVersion*(): cstring {.exportc.} =
-  cstring("0.4.0")
+  cstring(VERSION)
+
+proc kintsugiCodename*(): cstring {.exportc.} =
+  cstring(CODENAME)

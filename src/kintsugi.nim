@@ -14,8 +14,7 @@ import parse/parser
 import eval/[dialect, evaluator, natives]
 import emit/lua
 import dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect, parse_dialect]
-
-const VERSION = "0.4.0"
+import core/version
 
 proc hasHeader(source: string): bool =
   source.strip.startsWith("Kintsugi")
