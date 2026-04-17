@@ -1,3 +1,44 @@
+-- Kintsugi runtime support
+local function _prettify_inner(v)
+  if v == nil then return "nil" end
+  local t = type(v)
+  if t == "string" then
+    return '"' .. v:gsub('\\', '\\\\'):gsub('"', '\\"') .. '"'
+  end
+  if t == "number" or t == "boolean" then return tostring(v) end
+  if t ~= "table" then return tostring(v) end
+  local mt = getmetatable(v)
+  if mt ~= nil and mt.__tostring ~= nil then return tostring(v) end
+  local n = #v
+  local kc, isArray = 0, true
+  for k, _ in pairs(v) do
+    kc = kc + 1
+    if type(k) ~= "number" or k ~= math.floor(k) or k < 1 or k > n then
+      isArray = false
+    end
+  end
+  if isArray and kc == n then
+    local parts = {}
+    for i = 1, n do parts[i] = _prettify_inner(v[i]) end
+    return "{" .. table.concat(parts, ", ") .. "}"
+  end
+  local parts = {}
+  for k, val in pairs(v) do
+    local ks
+    if type(k) == "string" and k:match("^[%a_][%w_]*$") then
+      ks = k
+    else
+      ks = "[" .. _prettify_inner(k) .. "]"
+    end
+    parts[#parts + 1] = ks .. " = " .. _prettify_inner(val)
+  end
+  return "{" .. table.concat(parts, ", ") .. "}"
+end
+local function _prettify(v)
+  if type(v) == "string" then return v end
+  return _prettify_inner(v)
+end
+
 local function max_of(a, b)
   if a > b then
     return a
@@ -50,9 +91,9 @@ end
 local function greeting(name, count)
   return "Hello, " .. name .. "! Count: " .. count .. " (doubled: " .. (count * 2) .. ")"
 end
-print(max_of(3, 7))
-print(abs_of(-5))
-print(squares_up_to(5))
-print(split_even_odd({1, 2, 3, 4, 5}))
-print(classify(-3))
-print(greeting("Kintsugi", 42))
+print(_prettify(max_of(3, 7)))
+print(_prettify(abs_of(-5)))
+print(_prettify(squares_up_to(5)))
+print(_prettify(split_even_odd({1, 2, 3, 4, 5})))
+print(_prettify(classify(-3)))
+print(_prettify(greeting("Kintsugi", 42)))

@@ -274,19 +274,22 @@ suite "refinement lexer":
 # --- = none compilation ---
 
 suite "none comparison compilation":
-  test "= none compiles to == nil":
+  test "= none compiles to _is_none":
     let code = emitLua(parseSource("""
       x: 42
       if x = none [print "nil"]
     """))
-    check "x == nil" in code
+    # Routes through _is_none so both Lua nil (from native bindings or
+    # missing fields) and the _NONE sentinel (Kintsugi's first-class none)
+    # register as none on either side of the comparison.
+    check "_is_none(x)" in code
 
-  test "<> none compiles to ~= nil":
+  test "<> none compiles to negated _is_none":
     let code = emitLua(parseSource("""
       x: 42
       if x <> none [print "exists"]
     """))
-    check "x ~= nil" in code
+    check "(not _is_none(x))" in code
 
 # --- Math/trig ---
 

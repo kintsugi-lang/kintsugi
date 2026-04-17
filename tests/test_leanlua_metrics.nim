@@ -170,15 +170,18 @@ suite "lean-lua metrics":
     check not lua.contains("math.randomseed")
     check not lua.contains("local unpack")
 
-  test "program without none? emits nil not _NONE":
-    let src = "Kintsugi [name: 'nil-test]\nx: none\nprint x\n"
+  test "program with none always emits _NONE sentinel":
+    # Kintsugi none is a first-class value distinct from Lua nil. Without
+    # this, `[1 none 3]` would compile to `{1, nil, 3}` which Lua treats
+    # as a sparse table - length, ipairs, table.concat all break.
+    let src = "Kintsugi [name: 'sentinel-test]\nx: none\nprint x\n"
     let ast = parseSource(src)
     let eval = setupEvalForTest()
     let processed = eval.preprocess(ast, forCompilation = true)
     let lua = emitLua(processed, "")
-    check countOccurrences(lua, "_NONE") == 0
+    check countOccurrences(lua, "_NONE") >= 1
 
-  test "program with none? emits _NONE sentinel":
+  test "program with none in block emits _NONE sentinel":
     let src = "Kintsugi [name: 'sentinel-test]\n" &
               "items: [1 none 3]\nif none? items/2 [print \"empty\"]\n"
     let ast = parseSource(src)
@@ -186,6 +189,14 @@ suite "lean-lua metrics":
     let processed = eval.preprocess(ast, forCompilation = true)
     let lua = emitLua(processed, "")
     check countOccurrences(lua, "_NONE") >= 1
+
+  test "program without any none reference omits _NONE prelude":
+    let src = "Kintsugi [name: 'no-none]\nx: 42\nprint x\n"
+    let ast = parseSource(src)
+    let eval = setupEvalForTest()
+    let processed = eval.preprocess(ast, forCompilation = true)
+    let lua = emitLua(processed, "")
+    check countOccurrences(lua, "_NONE") == 0
 
   test "goldens never hit the _make fallback":
     for name in ["hello", "pong", "combat", "playdate", "leanlua_stress"]:
@@ -196,28 +207,29 @@ suite "lean-lua metrics":
 
   test "exit gate: hello.lua is strictly lean":
     let lua = compileGolden("hello")
-    # Hello uses _copy and _append for qsort, so it needs a small helper
-    # prelude. Bound at 20 lines - enough for _copy+_append, tight enough
-    # to catch bloat regressions.
-    check preludeLineCount(lua) <= 20
+    # Hello uses _copy and _append for qsort plus _prettify for printing
+    # blocks (squares, qsort result). Cap accounts for prettify (28 lines)
+    # plus other helpers; keeps bloat in check.
+    check preludeLineCount(lua) <= 60
     check countOccurrences(lua, "(function()") == 0
-    # Two allowed tostring calls - both wrap block-returning expressions
-    # (squares, qsort(...)) where string formatting is user-visible output.
-    # Dropping them would require block __tostring metatables, out of scope.
-    check countOccurrences(lua, "tostring(") <= 2
+    # _prettify replaces tostring for user-visible output. Block-valued
+    # expressions (squares, qsort(...)) flow through it.
+    check countOccurrences(lua, "_prettify(") <= 6
 
   test "exit gate: pong.lua is lean":
     let lua = compileGolden("pong")
-    # pong uses random, so it retains math.randomseed (2-line prelude).
-    # Cap at a small upper bound to catch regression bloat.
-    check preludeLineCount(lua) <= 3
+    # pong uses random + _NONE sentinel for none semantics. Cap at small
+    # bound to catch regression bloat.
+    check preludeLineCount(lua) <= 6
     check countOccurrences(lua, "_make(") == 0
-    check countOccurrences(lua, "_NONE") == 0
     check countOccurrences(lua, "(function()") == 0
 
   test "exit gate: combat.lua prelude is bounded":
     let lua = compileGolden("combat")
-    check preludeLineCount(lua) <= 10
+    # combat prints rejoined messages with object fields, pulling in
+    # _prettify for unknown-typed paths. Cap covers prettify + small
+    # helpers without leaving slack for runaway bloat.
+    check preludeLineCount(lua) <= 50
 
   test "exit gate: script-type goldens run in LuaJIT":
     # Executes compiled output with luajit. Any runtime error -

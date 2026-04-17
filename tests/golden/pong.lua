@@ -1,5 +1,7 @@
 -- Kintsugi runtime support
 math.randomseed(os.time())
+local _NONE = setmetatable({}, {__tostring = function() return "nil" end})
+local function _is_none(v) return v == nil or v == _NONE end
 
 local lg = love.graphics
 local le = love.event
@@ -14,7 +16,7 @@ local BALL_SIZE = 8
 local BALL_SPEED = 300
 local game = {
   paused = true,
-  font = nil
+  font = _NONE
 }
 local player = {
   x = 20,

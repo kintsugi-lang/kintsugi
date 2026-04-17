@@ -728,14 +728,31 @@ exprHandlers["is?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int)
   ## Single outer paren so `not is? ...` and tight-binding callers stay safe.
   "(" & e.emitAnyTypeCheck(typeName, valExpr) & ")"
 
+proc wrapForPrint(e: var LuaEmitter, expr: string): string =
+  ## Lua's print/tostring on a table returns "table: 0x...". Wrap any
+  ## expression that isn't a syntactically obvious string/number/bool
+  ## literal in `_prettify(...)` so blocks, contexts, pairs, and maps
+  ## print like the interpreter does.
+  if expr.startsWith("\""):
+    return expr
+  if expr.len > 0 and (expr[0] in {'0'..'9'} or
+      (expr[0] == '-' and expr.len > 1 and expr[1] in {'0'..'9'})):
+    return expr
+  if expr == "true" or expr == "false" or expr == "nil":
+    return expr
+  e.useHelper("_prettify")
+  "_prettify(" & expr & ")"
+
 # --- print ---
 exprHandlers["print"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  "print(" & e.emitExpr(vals, pos) & ")"
+  let arg = e.emitExpr(vals, pos)
+  "print(" & wrapForPrint(e, arg) & ")"
 
 # --- probe (returns value) ---
 exprHandlers["probe"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   let arg = e.emitExpr(vals, pos)
-  "(function() local _v = " & arg & "; print(_v); return _v end)()"
+  let printed = wrapForPrint(e, "_v")
+  "(function() local _v = " & arg & "; print(" & printed & "); return _v end)()"
 
 # --- not ---
 exprHandlers["not"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
@@ -1333,7 +1350,8 @@ proc emitLiteral(e: var LuaEmitter, val: KtgValue): string =
   of vkLogic:
     if val.boolVal: "true" else: "false"
   of vkNone:
-    "nil"
+    e.useHelper("_NONE")
+    "_NONE"
   of vkMoney:
     # Emit as integer cents
     $val.cents
@@ -2433,6 +2451,14 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
     of wkWord:
       let name = val.wordName
 
+      # `none` word: bind to the _NONE sentinel so blocks containing none
+      # round-trip correctly (Lua nil terminates a contiguous table; _NONE
+      # is a real value that survives length, ipairs, table.concat, etc.).
+      if name == "none":
+        e.useHelper("_NONE")
+        result = "_NONE"
+        return
+
       # --- Dispatch table lookup (handlers registered above) ---
       # Skip if the name has been user-assigned as a value (prescan found name: expr)
       let userAssigned = name in e.bindings and
@@ -2748,7 +2774,8 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
             if elem.startsWith("\""):
               parts.add(elem)
             else:
-              parts.add("tostring(" & elem & ")")
+              e.useHelper("_prettify")
+              parts.add("_prettify(" & elem & ")")
           result = "table.concat({" & parts.join(", ") & "}, " & delim & ")"
         else:
           let arg = e.emitExpr(vals, pos)
@@ -2802,7 +2829,8 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
               (elem.len > 0 and elem[0] in {'0'..'9', '-'})  # number literal
             )
             if needsWrap:
-              parts.add("tostring(" & elem & ")")
+              e.useHelper("_prettify")
+              parts.add("_prettify(" & elem & ")")
             else:
               parts.add(elem)
           # Merge adjacent string literals
@@ -3003,18 +3031,25 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
       let prec = luaPrec(opStr)
       pos += 1
       let right = e.emitExpr(vals, pos, primary = true)
-      # Special case: = none / <> none -> == nil / ~= nil
-      if right == "nil" and opStr == "==":
-        result = "(" & result & " == nil)"
+      # Special case: comparing to none. Routes to _is_none which accepts
+      # both Kintsugi's _NONE sentinel and raw Lua nil (from native bindings,
+      # missing table fields, etc.) so the comparison works regardless of
+      # which side of the boundary the absent value came from.
+      if right == "_NONE" and opStr == "==":
+        e.useHelper("_is_none")
+        result = "_is_none(" & result & ")"
         lastPrec = prec
-      elif right == "nil" and opStr == "~=":
-        result = "(" & result & " ~= nil)"
+      elif right == "_NONE" and opStr == "~=":
+        e.useHelper("_is_none")
+        result = "(not _is_none(" & result & "))"
         lastPrec = prec
-      elif result == "nil" and opStr == "==":
-        result = "(" & right & " == nil)"
+      elif result == "_NONE" and opStr == "==":
+        e.useHelper("_is_none")
+        result = "_is_none(" & right & ")"
         lastPrec = prec
-      elif result == "nil" and opStr == "~=":
-        result = "(" & right & " ~= nil)"
+      elif result == "_NONE" and opStr == "~=":
+        e.useHelper("_is_none")
+        result = "(not _is_none(" & right & "))"
         lastPrec = prec
       else:
         # Wrap left side only when this op binds tighter in Lua than the
@@ -3928,7 +3963,7 @@ proc emitBody(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
 
 const PreludeUnpack = "local unpack = unpack or table.unpack\n"
 
-const PreludeNone = """local _NONE = setmetatable({}, {__tostring = function() return "none" end})
+const PreludeNone = """local _NONE = setmetatable({}, {__tostring = function() return "nil" end})
 local function _is_none(v) return v == nil or v == _NONE end
 """
 
@@ -3952,7 +3987,49 @@ _pair_mt.__div = function(a, b)
 end
 _pair_mt.__unm = function(a) return setmetatable({x=-a.x, y=-a.y}, _pair_mt) end
 _pair_mt.__eq  = function(a, b) return a.x == b.x and a.y == b.y end
+_pair_mt.__tostring = function(a) return "{x = " .. tostring(a.x) .. ", y = " .. tostring(a.y) .. "}" end
 local function _pair(x, y) return setmetatable({x=x, y=y}, _pair_mt) end
+"""
+
+const PreludePrettify = """local function _prettify_inner(v)
+  if v == nil then return "nil" end
+  local t = type(v)
+  if t == "string" then
+    return '"' .. v:gsub('\\', '\\\\'):gsub('"', '\\"') .. '"'
+  end
+  if t == "number" or t == "boolean" then return tostring(v) end
+  if t ~= "table" then return tostring(v) end
+  local mt = getmetatable(v)
+  if mt ~= nil and mt.__tostring ~= nil then return tostring(v) end
+  local n = #v
+  local kc, isArray = 0, true
+  for k, _ in pairs(v) do
+    kc = kc + 1
+    if type(k) ~= "number" or k ~= math.floor(k) or k < 1 or k > n then
+      isArray = false
+    end
+  end
+  if isArray and kc == n then
+    local parts = {}
+    for i = 1, n do parts[i] = _prettify_inner(v[i]) end
+    return "{" .. table.concat(parts, ", ") .. "}"
+  end
+  local parts = {}
+  for k, val in pairs(v) do
+    local ks
+    if type(k) == "string" and k:match("^[%a_][%w_]*$") then
+      ks = k
+    else
+      ks = "[" .. _prettify_inner(k) .. "]"
+    end
+    parts[#parts + 1] = ks .. " = " .. _prettify_inner(val)
+  end
+  return "{" .. table.concat(parts, ", ") .. "}"
+end
+local function _prettify(v)
+  if type(v) == "string" then return v end
+  return _prettify_inner(v)
+end
 """
 
 
@@ -4220,6 +4297,8 @@ proc buildPrelude(e: var LuaEmitter): string =
     parts.add(PreludeRemove.strip)
   if "_make" in e.usedHelpers:
     parts.add(PreludeMake.strip)
+  if "_prettify" in e.usedHelpers:
+    parts.add(PreludePrettify.strip)
   for tp in typePreds:
     parts.add(tp)
   parts.join("\n") & "\n\n"
@@ -4629,6 +4708,9 @@ proc collectModuleNames(vals: seq[KtgValue]): HashSet[string] =
     if v.kind == vkWord and v.wordKind == wkSetWord and not v.wordName.contains('/'):
       result.incl(luaName(v.wordName))
 
+proc scanTypeChecks(e: var LuaEmitter, vals: seq[KtgValue])
+proc scanNoneUsage(e: var LuaEmitter, vals: seq[KtgValue])
+
 proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
                     compiling: HashSet[string] = initHashSet[string]()): string =
   ## Compile a Kintsugi module to Lua. Emits exports as return statement.
@@ -4645,6 +4727,8 @@ proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
   e.prescanBlock(ast)
   e.inferBindings(ast)
   e.validateAllGuards()
+  e.scanTypeChecks(ast)
+  e.scanNoneUsage(ast)
   e.emitBlock(ast)
 
   # Emit exports return
@@ -4656,7 +4740,11 @@ proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
       parts.add(lua & " = " & lua)
     e.ln("return {" & parts.join(", ") & "}")
 
-  e.output
+  # Modules carry their own helpers - they may be `require`d by code that
+  # doesn't itself use the same helpers (e.g., a module that prints blocks
+  # but is required by a script that only does arithmetic). Each chunk's
+  # locals are scoped to its file, so duplicate prelude lines are harmless.
+  e.buildPrelude() & e.output
 
 proc scanTypeChecks(e: var LuaEmitter, vals: seq[KtgValue]) =
   ## Scan AST for is? usage with custom type names.

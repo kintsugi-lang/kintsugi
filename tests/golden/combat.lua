@@ -1,5 +1,46 @@
 -- Kintsugi runtime support
 math.randomseed(os.time())
+local _NONE = setmetatable({}, {__tostring = function() return "nil" end})
+local function _is_none(v) return v == nil or v == _NONE end
+local function _prettify_inner(v)
+  if v == nil then return "nil" end
+  local t = type(v)
+  if t == "string" then
+    return '"' .. v:gsub('\\', '\\\\'):gsub('"', '\\"') .. '"'
+  end
+  if t == "number" or t == "boolean" then return tostring(v) end
+  if t ~= "table" then return tostring(v) end
+  local mt = getmetatable(v)
+  if mt ~= nil and mt.__tostring ~= nil then return tostring(v) end
+  local n = #v
+  local kc, isArray = 0, true
+  for k, _ in pairs(v) do
+    kc = kc + 1
+    if type(k) ~= "number" or k ~= math.floor(k) or k < 1 or k > n then
+      isArray = false
+    end
+  end
+  if isArray and kc == n then
+    local parts = {}
+    for i = 1, n do parts[i] = _prettify_inner(v[i]) end
+    return "{" .. table.concat(parts, ", ") .. "}"
+  end
+  local parts = {}
+  for k, val in pairs(v) do
+    local ks
+    if type(k) == "string" and k:match("^[%a_][%w_]*$") then
+      ks = k
+    else
+      ks = "[" .. _prettify_inner(k) .. "]"
+    end
+    parts[#parts + 1] = ks .. " = " .. _prettify_inner(val)
+  end
+  return "{" .. table.concat(parts, ", ") .. "}"
+end
+local function _prettify(v)
+  if type(v) == "string" then return v end
+  return _prettify_inner(v)
+end
 
 local slash = {
   name = "Slash",
@@ -103,7 +144,7 @@ local function pick_enemy(enemies)
   end
   local living = _collect_r
   if (#living == 0) then
-    return nil
+    return _NONE
   end
   return living[math.random(#living)]
 end
@@ -116,7 +157,7 @@ local function pick_wounded(allies)
   end
   local wounded = _collect_r
   if (#wounded == 0) then
-    return nil
+    return _NONE
   end
   return wounded[math.random(#wounded)]
 end
@@ -125,7 +166,7 @@ local function pick_action(unit, allies, enemies)
   for _, x in ipairs(unit.abilities) do if x == "heal" then _has_r = true; break end end
   if _has_r then
     local w = pick_wounded(allies)
-    if (w ~= nil) then
+    if (not _is_none(w)) then
       return {
         ability = heal,
         target = w
@@ -134,8 +175,8 @@ local function pick_action(unit, allies, enemies)
   end
   local ability_name = unit.abilities[math.random(#unit.abilities)]
   local target = pick_enemy(enemies)
-  if (target == nil) then
-    return nil
+  if _is_none(target) then
+    return _NONE
   end
   if ability_name == "slash" then
     return {
@@ -187,7 +228,7 @@ local function name_of(unit)
   return unit.name
 end
 local function print_team(label, team)
-  print(label .. name_of(team[1]) .. ", " .. name_of(team[2]) .. ", " .. name_of(team[#team]))
+  print(_prettify(label .. name_of(team[1]) .. ", " .. name_of(team[2]) .. ", " .. name_of(team[#team])))
 end
 print("=== BATTLE START ===")
 print_team("Team A: ", team_a)
@@ -215,10 +256,10 @@ while true do
       end
       if count_alive(enemies) > 0 then
         local action = pick_action(unit, allies, enemies)
-        if (action ~= nil) then
+        if (not _is_none(action)) then
           apply_ability(unit, action.ability, action.target)
           if not (is_alive(action.target)) then
-            print("  ** " .. tostring(action.target.name) .. " is knocked out! **")
+            print("  ** " .. _prettify(action.target.name) .. " is knocked out! **")
           end
         end
       end

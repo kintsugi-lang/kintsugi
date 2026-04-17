@@ -1,9 +1,13 @@
+-- Kintsugi runtime support
+local _NONE = setmetatable({}, {__tostring = function() return "nil" end})
+local function _is_none(v) return v == nil or v == _NONE end
+
 import "CoreLibs/object"
 import "CoreLibs/graphics"
 import "CoreLibs/sprites"
 import "CoreLibs/timer"
 local gfx = playdate.graphics
-local playerSprite = nil
+local playerSprite = _NONE
 local function myGameSetUp()
   local playerImage = gfx.image.new("Images/playerImage")
   assert(playerImage)

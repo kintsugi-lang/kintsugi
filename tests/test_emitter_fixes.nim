@@ -176,8 +176,8 @@ suite "emitter: match without IIFE":
     check "(function()" notin code
     check "r = " in code
 
-suite "emitter: field-aware tostring in rejoin":
-  test "typed integer field skips tostring":
+suite "emitter: field-aware _prettify in rejoin":
+  test "typed integer field skips _prettify":
     let code = emitLua(parseSource("""
       Unit: object [
         field/required [hp [integer!]]
@@ -186,10 +186,10 @@ suite "emitter: field-aware tostring in rejoin":
       u: make Unit [hp: 50]
       print rejoin ["HP: " u/hp]
     """))
-    check "tostring(u.hp)" notin code
+    check "_prettify(u.hp)" notin code
     check "u.hp" in code
 
-  test "typed string field skips tostring":
+  test "typed string field skips _prettify":
     let code = emitLua(parseSource("""
       Unit: object [
         field/required [name [string!]]
@@ -197,10 +197,10 @@ suite "emitter: field-aware tostring in rejoin":
       u: make Unit [name: "hero"]
       print rejoin ["Name: " u/name]
     """))
-    check "tostring(u.name)" notin code
+    check "_prettify(u.name)" notin code
     check "u.name" in code
 
-  test "untyped field still gets tostring":
+  test "untyped field gets _prettify":
     let code = emitLua(parseSource("""
       Bag: object [
         field/required [contents [block!]]
@@ -208,15 +208,15 @@ suite "emitter: field-aware tostring in rejoin":
       b: make Bag [contents: [1 2 3]]
       print rejoin ["Contents: " b/contents]
     """))
-    check "tostring(b.contents)" in code
+    check "_prettify(b.contents)" in code
 
-  test "unknown variable still gets tostring":
+  test "unknown variable gets _prettify":
     let code = emitLua(parseSource("""
       print rejoin ["Value: " x]
     """))
-    check "tostring(x)" in code
+    check "_prettify(x)" in code
 
-  test "typed function param skips tostring in rejoin":
+  test "typed function param skips _prettify in rejoin":
     let code = emitLua(parseSource("""
       Unit: object [
         field/required [name [string!]]
@@ -226,12 +226,12 @@ suite "emitter: field-aware tostring in rejoin":
         print rejoin ["Name: " u/name " HP: " u/hp]
       ]
     """))
-    check "tostring(u.name)" notin code
-    check "tostring(u.hp)" notin code
+    check "_prettify(u.name)" notin code
+    check "_prettify(u.hp)" notin code
     check "u.name" in code
     check "u.hp" in code
 
-  test "untyped function param still gets tostring":
+  test "untyped function param gets _prettify":
     let code = emitLua(parseSource("""
       Unit: object [
         field/required [name [string!]]
@@ -240,7 +240,7 @@ suite "emitter: field-aware tostring in rejoin":
         print rejoin ["Name: " u/name]
       ]
     """))
-    check "tostring(u.name)" in code
+    check "_prettify(u.name)" in code
 
 suite "emitter: loop/collect without IIFE":
   test "loop/collect assignment hoists without IIFE":

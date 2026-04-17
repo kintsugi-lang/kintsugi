@@ -12,6 +12,45 @@ local function _append(t, v)
   end
   return t
 end
+local function _prettify_inner(v)
+  if v == nil then return "nil" end
+  local t = type(v)
+  if t == "string" then
+    return '"' .. v:gsub('\\', '\\\\'):gsub('"', '\\"') .. '"'
+  end
+  if t == "number" or t == "boolean" then return tostring(v) end
+  if t ~= "table" then return tostring(v) end
+  local mt = getmetatable(v)
+  if mt ~= nil and mt.__tostring ~= nil then return tostring(v) end
+  local n = #v
+  local kc, isArray = 0, true
+  for k, _ in pairs(v) do
+    kc = kc + 1
+    if type(k) ~= "number" or k ~= math.floor(k) or k < 1 or k > n then
+      isArray = false
+    end
+  end
+  if isArray and kc == n then
+    local parts = {}
+    for i = 1, n do parts[i] = _prettify_inner(v[i]) end
+    return "{" .. table.concat(parts, ", ") .. "}"
+  end
+  local parts = {}
+  for k, val in pairs(v) do
+    local ks
+    if type(k) == "string" and k:match("^[%a_][%w_]*$") then
+      ks = k
+    else
+      ks = "[" .. _prettify_inner(k) .. "]"
+    end
+    parts[#parts + 1] = ks .. " = " .. _prettify_inner(val)
+  end
+  return "{" .. table.concat(parts, ", ") .. "}"
+end
+local function _prettify(v)
+  if type(v) == "string" then return v end
+  return _prettify_inner(v)
+end
 
 print("Hello, Kintsugi!")
 local function add(a, b)
@@ -23,7 +62,7 @@ for n = 1, 5 do
   _collect_r[#_collect_r+1] = n * n
 end
 local squares = _collect_r
-print("Squares: " .. tostring(squares))
+print("Squares: " .. _prettify(squares))
 local function qsort(blk)
   if #blk <= 1 then
     return blk
@@ -49,4 +88,4 @@ local function qsort(blk)
   end
   return result
 end
-print("Sorted: " .. tostring(qsort({3, 1, 4, 1, 5, 9, 2, 6})))
+print("Sorted: " .. _prettify(qsort({3, 1, 4, 1, 5, 9, 2, 6})))
