@@ -350,9 +350,33 @@ No prototype chains. No diamond problem. Just data flowing into a new context.
 
 ### Type Erasure
 
-The interpreter enforces types at runtime. In compiled Lua, `@type` definitions are erased. Built-in type checks (`integer?`, `string?`, `is? integer! x`) emit Lua `type()` checks. Custom type checks (`is? person! x`) emit `_type` tag checks — `make` stamps instances with a `_type` string field.
+Three orthogonal concerns:
 
-**Why:** Trust the programmer for what Lua can't verify. Let Lua verify what it can.
+| Concern | Purpose | Where enforced |
+|---|---|---|
+| **Annotation** | `x [positive!]` on params, `field/required [name [type!]]`, `return: [type!]` | Interpreter only. Lua erases. |
+| **Predicate** | `is? T! x` and `match` on `[T!]`. `@type T!` auto-synthesizes `_T_p` in compiled Lua. | Emitted in Lua prelude on demand. |
+| **Dispatcher** | `is?`, `match` patterns | Sugar; both route to predicate (custom) or `type()` (built-in). |
+
+The interpreter enforces param + return type annotations at call sites. The Lua target erases annotations entirely - no assertions, no decorators, no build-mode flag. The compiled output is indistinguishable from hand-written Lua.
+
+For runtime branching on shape (input validation, sum-type dispatch), `@type T!` declarations auto-synthesize a `_T_p(it)` predicate function in the prelude when the source uses `is? T!` or `match` on `[T!]`. Predicates compose: a `@type X` referencing `Y` calls `_Y_p(it)` and is emitted in topological order.
+
+**Why:** Kintsugi-side responsibility ends at the Lua artifact. Annotations communicate intent and catch dev-time errors loudly. Compiled Lua stays clean and reads like hand-written code; predicate functions appear only where the program would otherwise duplicate `type()` checks anyway.
+
+### Compileability Promise: `@type/guard`
+
+A user function that may appear inside a `@type` where-guard body must be declared with `@type/guard`:
+
+```
+positive?: @type/guard [x] [x > 0]
+non-empty?: @type/guard [s] [(length s) > 0]
+adult!: @type [person!] where [(positive? it/age) and it/age >= 18]
+```
+
+The emitter validates each `@type/guard` body locally: every head-position word must resolve to a built-in compileable native or another `@type/guard`-marked user fn. Validation is single-hop; transitivity is induction. Errors surface at the `@type/guard` declaration with the exact offending word and line - never at the consumer @type. Built-in natives carry a `compilable` flag (false for `read`, `write`, `save`, `dir?`, `file?`, `exit`, `charset`).
+
+**Why:** Without `@type/guard`, where-guard bodies could silently call interpreter-only natives, breaking compilation. With opt-in marking, the emitter guarantees that any guard which compiles in the source also compiles in Lua, with errors local to the edit point.
 
 ### Zero-Dependency Lua Output
 
@@ -362,7 +386,9 @@ Emitted Lua has no external requires. Prelude helpers are tree-shaken — only h
 
 ### Interpreter-Only Features
 
-`@parse` raises a compile error in the emitter — PEG parsing requires runtime evaluation that can't be statically compiled. `@compose` raises a compile error outside of `@template` and `@preprocess` (it's a compile-time primitive, not a runtime operation). Seven interpreter-only natives raise compile errors with specific hints when referenced from compiled code: `read`, `write`, `save`, `dir?`, `file?` (filesystem IO), `exit` (not portable across targets), and `charset` (only exists for `@parse`). Everything else compiles.
+`@parse` raises a compile error in the emitter — PEG parsing requires runtime evaluation that can't be statically compiled. `@compose` raises a compile error outside of `@template` and `@preprocess` (it's a compile-time primitive, not a runtime operation). `@enter` and `@exit` raise compile errors at expression position — block-scoped lifecycle hooks are interpreter-only; place pre/post code at the top/bottom of the function body instead. Seven interpreter-only natives raise compile errors with specific hints when referenced from compiled code: `read`, `write`, `save`, `dir?`, `file?` (filesystem IO), `exit` (not portable across targets), and `charset` (only exists for `@parse`). Everything else compiles.
+
+**Why the IO + exit natives are uncompileable despite having Lua analogues:** The analogues are not portable across our three targets. LOVE2D sandboxes filesystem access through `love.filesystem`; Playdate uses `playdate.file`; standalone Lua uses `io`/`os`. Rather than silently emit a target-specific form that breaks on the other two, the emitter refuses and the user binds the right target API explicitly via the `bindings [...]` escape hatch. The same logic applies to `exit` (LOVE2D = `love.event.quit`, Playdate = no exit). Both `InterpreterOnlyNatives` in `src/emit/lua.nim` and the `compilable: false` flag on the corresponding `KtgNative` registrations in `src/eval/natives*.nim` enforce this; the two lists must agree.
 
 ### Value Types in Emitted Lua
 
@@ -386,7 +412,7 @@ The other value types lower trivially without shims:
 
 ### Type Checking in Compiled Output
 
-Built-in type checks (`is? integer! x`, `integer?`, `string?`, etc.) emit Lua `type()` checks — Lua can verify these natively. Custom type checks (`is? person! x`, `person?`) emit `_type` tag checks — `make` stamps instances with a `_type` string field, and `is?` checks it. `@type` definitions are erased (they define interpreter-only custom types), but `object`-based type tags work at both levels. `freeze` is a no-op in compiled output (returns its argument unchanged). `frozen?` always returns `false` in compiled output (Lua tables are always mutable).
+Built-in type checks (`is? integer! x`, `integer?`, `string?`, etc.) emit Lua `type()` checks — Lua can verify these natively. `@type`-declared custom type checks (`is? positive! x`, `match` patterns on `[positive!]`) route through synthesized `_positive_p(x)` functions emitted in the prelude on demand. `object!` instance checks (e.g., `is? Person p` against an `object`-based type) emit `_type` tag checks — `make` stamps instances with a `_type` string field. `@type` and `object!` are independent today; unification deferred. `freeze` is a no-op in compiled output (returns its argument unchanged). `frozen?` always returns `false` in compiled output (Lua tables are always mutable).
 
 ### AST Is the IR
 
@@ -402,10 +428,11 @@ The `@` sigil means "the language is doing something structural here." A word th
 
 | Sigil | Shape | What it does |
 |-------|-------|--------------|
-| `@type` | `@type name: [rule]` | Define a custom type (rule block like `[string! \| none!]`). |
-| `@type/enum` | `@type/enum name: ['a \| 'b]` | Define an enum over lit-words. |
-| `@type/where` | `@type/where name: [spec] [guard]` | Define a type with a validation guard expression. |
-| `@const` | `@const name: value` | Bind a constant. The binding may not be reassigned. |
+| `@type` | `name!: @type [rule]` | Define a custom type (rule block like `[string! \| none!]`). |
+| `@type/enum` | `name!: @type/enum ['a \| 'b]` | Define an enum over lit-words. |
+| `@type/where` | `name!: @type/where [spec] [guard]` | Define a type with a validation guard expression. |
+| `@type/guard` | `name?: @type/guard [params] [body]` | Construct a function eligible to be called inside `@type` where-guard bodies. Compiler validates body for compileability. |
+| `@const` | `name: @const value` | Bind a constant. The binding may not be reassigned. Lua emits with the `<const>` attribute. |
 | `@compose` | `@compose [body]` | Evaluate parens inside the block and splice their results. Used to build block values with interpolated data. |
 | `@compose/deep` | `@compose/deep [body]` | Recurse into nested blocks while composing. |
 | `@compose/only` | `@compose/only [body]` | Insert each paren result as a single value instead of splicing block contents. |

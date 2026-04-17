@@ -2,9 +2,11 @@ import std/[strutils, math]
 import ../core/types
 import dialect
 
-proc native(ctx: KtgContext, name: string, arity: int, fn: NativeFnProc) =
+proc native(ctx: KtgContext, name: string, arity: int, fn: NativeFnProc,
+            compilable = true) =
   ctx.set(name, KtgValue(kind: vkNative,
-    nativeFn: KtgNative(name: name, arity: arity, fn: fn),
+    nativeFn: KtgNative(name: name, arity: arity, fn: fn,
+                        compilable: compilable),
     line: 0))
 
 proc registerConvertNatives*(eval: Evaluator) =

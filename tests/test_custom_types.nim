@@ -328,3 +328,93 @@ suite "Custom types in match":
         [_]       ["other"]
       ]
     """) == "other"
+
+# =============================================================================
+# Native compilable flag (Step 1 of type-erasure plan)
+# =============================================================================
+
+suite "native compilable flag":
+  test "interpreter-only natives are tagged non-compilable":
+    let eval = makeEval()
+    for name in ["read", "write", "save", "dir?", "file?",
+                 "exit", "charset"]:
+      let val = eval.global.get(name)
+      check val.kind == vkNative
+      check val.nativeFn.compilable == false
+
+  test "computational natives are compilable by default":
+    let eval = makeEval()
+    for name in ["length", "empty?", "first", "append", "min", "max",
+                 "abs", "sqrt", "sin", "cos", "is?", "if", "either",
+                 "join", "rejoin", "trim", "uppercase", "lowercase",
+                 "all?", "any?", "starts-with?", "ends-with?",
+                 "odd?", "even?"]:
+      let val = eval.global.get(name)
+      check val.kind == vkNative
+      check val.nativeFn.compilable == true
+
+# =============================================================================
+# @type/guard fn constructor (Step 2 of type-erasure plan)
+# =============================================================================
+
+suite "@type/guard fn constructor":
+  test "constructs a function value with isGuard flag":
+    let eval = makeEval()
+    discard eval.evalString("""positive?: @type/guard [x] [x > 0]""")
+    let val = eval.evalString(""":positive?""")
+    check val.kind == vkFunction
+    check val.fn.isGuard == true
+    check val.fn.params.len == 1
+    check val.fn.params[0].name == "x"
+
+  test "@type/guard fn returns expected results when called":
+    let eval = makeEval()
+    discard eval.evalString("""positive?: @type/guard [x] [x > 0]""")
+    check $eval.evalString("""positive? 5""") == "true"
+    check $eval.evalString("""positive? -3""") == "false"
+    check $eval.evalString("""positive? 0""") == "false"
+
+  test "@type/guard requires two blocks":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("""bad: @type/guard 5 [body]""")
+    expect KtgError:
+      discard eval.evalString("""bad: @type/guard [params] 5""")
+
+  test "function-constructed and @type/guard-constructed differ only in flag":
+    let eval = makeEval()
+    discard eval.evalString("""plain?: function [x] [x > 0]""")
+    discard eval.evalString("""guarded?: @type/guard [x] [x > 0]""")
+    check eval.evalString(""":plain?""").fn.isGuard == false
+    check eval.evalString(""":guarded?""").fn.isGuard == true
+    check $eval.evalString("""plain? 5""") == $eval.evalString("""guarded? 5""")
+
+# =============================================================================
+# Return-type enforcement (Step 7 of type-erasure plan)
+# Pre-existing behavior - lock it in.
+# =============================================================================
+
+suite "function return-type enforcement":
+  test "return type matches: ok":
+    let eval = makeEval()
+    discard eval.evalString("""f: function [x return: [integer!]] [x]""")
+    check $eval.evalString("""f 5""") == "5"
+
+  test "return type mismatch raises":
+    let eval = makeEval()
+    discard eval.evalString("""f: function [x return: [integer!]] [x]""")
+    expect KtgError:
+      discard eval.evalString("""f "hello" """)
+
+  test "no return type means no enforcement":
+    let eval = makeEval()
+    discard eval.evalString("""g: function [x] [x]""")
+    check $eval.evalString("""g "hello" """) == "hello"
+
+  test "return type custom @type":
+    let eval = makeEval()
+    discard eval.evalString("""positive!: @type/where [integer!] [it > 0]""")
+    discard eval.evalString("""abs-val: function [x return: [positive!]] [either x < 0 [0 - x] [x]]""")
+    check $eval.evalString("""abs-val -5""") == "5"
+    expect KtgError:
+      discard eval.evalString("""abs-val 0""")

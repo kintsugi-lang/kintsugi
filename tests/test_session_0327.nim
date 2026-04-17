@@ -67,29 +67,33 @@ suite "dynamic paths":
 
 # --- @const prefix ---
 
-suite "@const prefix":
-  test "@const binds value":
+suite "@const annotation":
+  test "@const binds value via post-set-word form":
     let eval = makeEval()
     let r = eval.evalString("""
-      @const x: 42
+      x: @const 42
       x
     """)
     check $r == "42"
 
   test "@const compiles with <const> annotation":
     let code = emitLua(parseSource("""
-      @const x: 42
+      x: @const 42
     """))
     check "local x <const> = 42" in code
 
-  test "old syntax x: @const does not work":
+  test "legacy pre-set-word form raises in interpreter":
     let eval = makeEval()
-    let r = eval.evalString("""
-      x: @const
-      type x
-    """)
-    # @const without set-word returns the meta-word itself
-    check $r == "meta-word!"
+    expect KtgError:
+      discard eval.evalString("""
+        @const x: 42
+      """)
+
+  test "legacy pre-set-word form errors in emitter":
+    expect EmitError:
+      discard emitLua(parseSource("""
+        @const x: 42
+      """))
 
 # --- @inline [] block splicing ---
 

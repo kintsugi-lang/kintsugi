@@ -1,5 +1,6 @@
 # Package
-version       = "0.3.0"
+include "src/core/version"
+version       = VERSION
 author        = "Ray Perry"
 description   = "The Kintsugi Programming Language"
 license       = "MIT"

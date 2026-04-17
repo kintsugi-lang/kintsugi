@@ -86,6 +86,32 @@ type
     ## Set if the program contains any `none?` usage; when false, `none`
     ## emits as `nil` and the _NONE sentinel helper is skipped.
     programUsesNoneCheck: bool
+    ## @type-declared custom type rules. Keyed by base name (no trailing !).
+    customTypeRules: Table[string, CustomTypeRule]
+    ## Base names for which a predicate function has already been emitted.
+    emittedTypePredicates: HashSet[string]
+    ## User fns declared as `name: @type/guard [params] [body]`. Eligible
+    ## for use inside @type/guard bodies and @type where-guard bodies.
+    guardFuncs: HashSet[string]
+    ## Stored guard fn bodies + param names, validated after all of
+    ## prescan to support mutually-recursive guards.
+    guardFuncBodies: Table[string,
+      tuple[body: seq[KtgValue], paramNames: HashSet[string], line: int]]
+
+  CustomTypeKind* = enum
+    ctUnion       ## @type [t! | t!]
+    ctWhere       ## @type/where [t!] [guard]
+    ctEnum        ## @type/enum ['a | 'b]
+
+  CustomTypeRule* = object
+    case kind*: CustomTypeKind
+    of ctUnion:
+      unionTypes*: seq[string]      ## base type names (e.g. "integer!", "string!")
+    of ctWhere:
+      whereTypes*: seq[string]      ## base type names ANDed with guard
+      guardBody*: seq[KtgValue]     ## body block using `it`
+    of ctEnum:
+      enumMembers*: seq[string]     ## lit-word names (case-sensitive)
 
   SeqType* = enum
     stUnknown
@@ -113,6 +139,17 @@ const BuiltinTypePredicates = ["integer?", "float?", "number?", "string?",
 ## Natives that exist in the interpreter but cannot be compiled to Lua.
 ## Calling any of these from compiled code is a hard compile error instead of
 ## silently emitting a call to a nonexistent Lua function.
+##
+## The IO + exit natives have direct Lua analogues (`io.read`, `io.open`,
+## `os.exit`), but those analogues are not portable across our three targets:
+## LOVE2D sandboxes filesystem access through `love.filesystem`, Playdate
+## exposes `playdate.file`, and standalone Lua uses `io`/`os`. Rather than
+## pick one and silently break the others, the emitter refuses and points
+## users at target-native bindings via the `bindings [...]` escape hatch.
+## `charset` exists only for the @parse dialect, which is interpreter-only.
+##
+## The `compilable: false` flag on the corresponding KtgNative registrations
+## in `src/eval/natives*.nim` mirrors this list; both must agree.
 const InterpreterOnlyNatives = [
   "read", "write", "save", "dir?", "file?",
   "exit", "charset",
@@ -300,6 +337,68 @@ proc compileError(feature, hint: string, line: int) =
          (if line > 0: " @ line " & $line else: "") & "\n" &
          "  hint: " & hint
   )
+
+proc guardValidationError(fnName, offendingWord, reason: string, line: int) =
+  raise EmitError(
+    msg: "======== COMPILE ERROR ========\n" &
+         "@type/guard body not compileable\n" &
+         "@type/guard '" & fnName & "' calls '" & offendingWord & "'" &
+         (if line > 0: " @ line " & $line else: "") & "\n" &
+         "  reason: " & reason & "\n" &
+         "  hint: mark '" & offendingWord &
+         "' as @type/guard, or use a compileable alternative."
+  )
+
+## Names of every built-in native, computed once from natives_shared.
+let allNativeNames {.global.} = block:
+  var s = initHashSet[string]()
+  for (n, _) in nativeArities:
+    s.incl(n)
+  for n in typePredNames:
+    s.incl(n & "?")
+  s
+
+proc validateGuardBody(e: var LuaEmitter, fnName: string,
+                        body: seq[KtgValue], paramNames: HashSet[string]) =
+  ## Walk a @type/guard fn body's AST. Every wkWord in head position must
+  ## resolve to (a) a param name, (b) a built-in compileable native, or
+  ## (c) another @type/guard fn. Anything else is a compile error.
+  ##
+  ## "It" is allowed unconditionally - it's the standard guard binding.
+  ## Path words (containing '/') are field/module access, not calls.
+  for v in body:
+    case v.kind
+    of vkBlock:
+      e.validateGuardBody(fnName, v.blockVals, paramNames)
+    of vkParen:
+      e.validateGuardBody(fnName, v.parenVals, paramNames)
+    of vkWord:
+      if v.wordKind == wkWord:
+        let name = v.wordName
+        if name == "it" or name in paramNames:
+          continue
+        if '/' in name:
+          continue
+        if name in allNativeNames:
+          if name in InterpreterOnlyNatives:
+            guardValidationError(fnName, name,
+              "'" & name & "' is a built-in native marked interpreter-only.",
+              v.line)
+          continue
+        if name in e.guardFuncs:
+          continue
+        guardValidationError(fnName, name,
+          "'" & name & "' is neither a compileable built-in nor a " &
+          "@type/guard-marked user fn.",
+          v.line)
+    else:
+      discard
+
+proc validateAllGuards(e: var LuaEmitter) =
+  ## Run after prescan: validate every registered @type/guard fn body.
+  ## Late-running so mutually-recursive guards can resolve each other.
+  for fnName, info in e.guardFuncBodies:
+    e.validateGuardBody(fnName, info.body, info.paramNames)
 
 # ---------------------------------------------------------------------------
 # Handler factories
@@ -500,30 +599,134 @@ exprHandlers["system/platform"] = proc(e: var LuaEmitter, vals: seq[KtgValue], p
 exprHandlers["now"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   "os.time()"
 
+proc primitiveTypeCheck(typeName, valExpr: string): string =
+  ## Lua expression testing a primitive type against valExpr. Unparenthesized —
+  ## the caller adds grouping when the surrounding precedence needs it.
+  ## Returns empty string when typeName is not a recognized primitive.
+  case typeName
+  of "integer": "type(" & valExpr & ") == \"number\" and math.floor(" & valExpr & ") == " & valExpr
+  of "float": "type(" & valExpr & ") == \"number\" and math.floor(" & valExpr & ") ~= " & valExpr
+  of "number": "type(" & valExpr & ") == \"number\""
+  of "string": "type(" & valExpr & ") == \"string\""
+  of "logic": "type(" & valExpr & ") == \"boolean\""
+  of "function", "native": "type(" & valExpr & ") == \"function\""
+  of "block", "context", "map", "object": "type(" & valExpr & ") == \"table\""
+  of "none": valExpr & " == nil"
+  else: ""
+
+proc emitCustomTypeCheck(e: var LuaEmitter, typeName, valExpr: string): string
+
+proc customTypePredicateName(typeName: string): string =
+  ## Lua name for a synthesized custom-type predicate.
+  "_" & typeName.replace("-", "_") & "_p"
+
+proc emitAnyTypeCheck(e: var LuaEmitter, typeName, valExpr: string): string =
+  ## Dispatch: primitive first, then user-declared custom type (synthesized
+  ## predicate call), else fall back to the object-auto-gen _type tag.
+  ## Result may contain bare `and`/`or`; callers that compose with further
+  ## `and`/`or` should paren.
+  let prim = primitiveTypeCheck(typeName, valExpr)
+  if prim.len > 0: return prim
+  if typeName in e.customTypeRules:
+    # Predicate is synthesized in the prelude; emit a call. Mark used.
+    e.usedTypeChecks.incl(typeName)
+    return customTypePredicateName(typeName) & "(" & valExpr & ")"
+  valExpr & " ~= nil and type(" & valExpr & ") == \"table\" and " &
+    valExpr & "._type == \"" & typeName & "\""
+
+proc emitCustomTypeCheck(e: var LuaEmitter, typeName, valExpr: string): string =
+  ## Inline predicate for a @type-declared custom type.
+  let rule = e.customTypeRules[typeName]
+  case rule.kind
+  of ctUnion:
+    if rule.unionTypes.len == 0: return "false"
+    var parts: seq[string]
+    for t in rule.unionTypes:
+      let base = if t.endsWith("!"): t[0 ..< t.len - 1] else: t
+      parts.add(e.emitAnyTypeCheck(base, valExpr))
+    if parts.len == 1: parts[0]
+    else: parts.join(" or ")
+  of ctWhere:
+    let savedIndent = e.indent
+    e.indent += 1
+    let guardBody = withCapture(e, e.emitBlock(rule.guardBody, asReturn = true))
+    e.indent = savedIndent
+    let guardCall = "(function(it)\n" & guardBody & e.pad & "end)(" & valExpr & ")"
+    if rule.whereTypes.len == 0:
+      return guardCall
+    var parts: seq[string]
+    for t in rule.whereTypes:
+      let base = if t.endsWith("!"): t[0 ..< t.len - 1] else: t
+      parts.add(e.emitAnyTypeCheck(base, valExpr))
+    let baseCheck =
+      if parts.len == 1: parts[0]
+      else: "(" & parts.join(" or ") & ")"
+    baseCheck & " and " & guardCall
+  of ctEnum:
+    if rule.enumMembers.len == 0: return "false"
+    var parts: seq[string]
+    for m in rule.enumMembers:
+      parts.add(valExpr & " == \"" & m & "\"")
+    parts.join(" or ")
+
+proc emitCustomTypePredicateDecl(e: var LuaEmitter, typeName: string): string =
+  ## Build a Lua function declaration for the synthesized predicate of a
+  ## @type. The body uses `it` as the value parameter so where-guard bodies
+  ## (which already bind `it`) compile transparently.
+  let rule = e.customTypeRules[typeName]
+  let fnName = customTypePredicateName(typeName)
+
+  proc baseCheckExpr(e: var LuaEmitter, t: string): string =
+    let base = if t.endsWith("!"): t[0 ..< t.len - 1] else: t
+    let prim = primitiveTypeCheck(base, "it")
+    if prim.len > 0: return "(" & prim & ")"
+    if base in e.customTypeRules:
+      return customTypePredicateName(base) & "(it)"
+    # Unknown / object-nominal type — fall back to _type-tag check.
+    "(type(it) == \"table\" and it._type == \"" & base & "\")"
+
+  case rule.kind
+  of ctUnion:
+    var parts: seq[string]
+    for t in rule.unionTypes:
+      parts.add(e.baseCheckExpr(t))
+    let body = if parts.len == 0: "false" else: parts.join(" or ")
+    "local function " & fnName & "(it)\n  return " & body & "\nend"
+
+  of ctEnum:
+    var parts: seq[string]
+    for m in rule.enumMembers:
+      parts.add("it == \"" & m & "\"")
+    let body = if parts.len == 0: "false" else: parts.join(" or ")
+    "local function " & fnName & "(it)\n  return " & body & "\nend"
+
+  of ctWhere:
+    var baseParts: seq[string]
+    for t in rule.whereTypes:
+      baseParts.add(e.baseCheckExpr(t))
+    let baseCheck =
+      if baseParts.len == 0: "true"
+      elif baseParts.len == 1: baseParts[0]
+      else: "(" & baseParts.join(" or ") & ")"
+
+    let savedIndent = e.indent
+    e.indent = 1
+    let guardBody = withCapture(e, e.emitBlock(rule.guardBody, asReturn = true))
+    e.indent = savedIndent
+
+    "local function " & fnName & "(it)\n" &
+      "  if not " & baseCheck & " then return false end\n" &
+      guardBody.strip(chars = {'\n'}) & "\nend"
+
 # --- is? — unified type checking ---
 exprHandlers["is?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  # First arg is a type name (vkType), second is the value
   let typeExpr = e.emitExpr(vals, pos, primary = true)
   let valExpr = e.emitExpr(vals, pos, primary = true)
-  # typeExpr is emitted as a string literal like "integer!"
-  # Strip quotes and ! to get the base name
   var typeName = typeExpr.strip(chars = {'"'})
   if typeName.endsWith("!"):
     typeName = typeName[0..^2]
-  # Built-in type checks that Lua can verify
-  case typeName
-  of "integer": "(type(" & valExpr & ") == \"number\" and math.floor(" & valExpr & ") == " & valExpr & ")"
-  of "float": "(type(" & valExpr & ") == \"number\" and math.floor(" & valExpr & ") ~= " & valExpr & ")"
-  of "number": "(type(" & valExpr & ") == \"number\")"
-  of "string": "(type(" & valExpr & ") == \"string\")"
-  of "logic": "(type(" & valExpr & ") == \"boolean\")"
-  of "function", "native": "(type(" & valExpr & ") == \"function\")"
-  of "block", "context", "map", "object": "(type(" & valExpr & ") == \"table\")"
-  of "none":
-    "(" & valExpr & " == nil)"
-  else:
-    # Custom type — check _type tag
-    "(" & valExpr & " ~= nil and type(" & valExpr & ") == \"table\" and " & valExpr & "._type == \"" & typeName & "\")"
+  ## Single outer paren so `not is? ...` and tight-binding callers stay safe.
+  "(" & e.emitAnyTypeCheck(typeName, valExpr) & ")"
 
 # --- print ---
 exprHandlers["print"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
@@ -1517,15 +1720,23 @@ proc buildPatternMatch(e: var LuaEmitter, pattern: seq[KtgValue], valueExpr: str
     of vkInteger, vkFloat, vkString, vkLogic, vkNone, vkMoney:
       conditions.add(valueExpr & " == " & emitLiteral(e, p))
     of vkType:
-      let luaType = case p.typeName
-        of "integer!": "\"number\""
-        of "float!": "\"number\""
-        of "string!": "\"string\""
-        of "logic!": "\"boolean\""
-        of "none!": "\"nil\""
-        of "block!": "\"table\""
-        else: "\"" & p.typeName & "\""
-      conditions.add("type(" & valueExpr & ") == " & luaType)
+      let base = if p.typeName.endsWith("!"):
+                   p.typeName[0 ..< p.typeName.len - 1] else: p.typeName
+      let kebab = base.toLower.replace("_", "-")
+      if kebab in e.customTypeRules:
+        # User-declared @type: route through synthesized predicate.
+        e.usedTypeChecks.incl(kebab)
+        conditions.add(customTypePredicateName(kebab) & "(" & valueExpr & ")")
+      else:
+        let luaType = case p.typeName
+          of "integer!": "\"number\""
+          of "float!": "\"number\""
+          of "string!": "\"string\""
+          of "logic!": "\"boolean\""
+          of "none!": "\"nil\""
+          of "block!": "\"table\""
+          else: "\"" & p.typeName & "\""
+        conditions.add("type(" & valueExpr & ") == " & luaType)
     of vkWord:
       if p.wordKind == wkWord and p.wordName == "_":
         discard  # wildcard — always matches
@@ -1555,13 +1766,20 @@ proc buildPatternMatch(e: var LuaEmitter, pattern: seq[KtgValue], valueExpr: str
       of vkInteger, vkFloat, vkString, vkLogic, vkNone, vkMoney:
         conditions.add(elemExpr & " == " & emitLiteral(e, p))
       of vkType:
-        let luaType = case p.typeName
-          of "integer!": "\"number\""
-          of "float!": "\"number\""
-          of "string!": "\"string\""
-          of "logic!": "\"boolean\""
-          else: "\"table\""
-        conditions.add("type(" & elemExpr & ") == " & luaType)
+        let base = if p.typeName.endsWith("!"):
+                     p.typeName[0 ..< p.typeName.len - 1] else: p.typeName
+        let kebab = base.toLower.replace("_", "-")
+        if kebab in e.customTypeRules:
+          e.usedTypeChecks.incl(kebab)
+          conditions.add(customTypePredicateName(kebab) & "(" & elemExpr & ")")
+        else:
+          let luaType = case p.typeName
+            of "integer!": "\"number\""
+            of "float!": "\"number\""
+            of "string!": "\"string\""
+            of "logic!": "\"boolean\""
+            else: "\"table\""
+          conditions.add("type(" & elemExpr & ") == " & luaType)
       of vkWord:
         if p.wordKind == wkWord and p.wordName == "_":
           discard
@@ -2181,12 +2399,36 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
       result = "\"" & val.wordName & "\""
 
     of wkMetaWord:
-      if val.wordName == "parse":
-        compileError("@parse", "the parse dialect is interpreter-only; restructure to avoid it in compiled code", val.line)
-      if val.wordName == "compose" or val.wordName.startsWith("compose/"):
-        compileError("@compose", "@compose is a compile-time feature; use it inside @template or @preprocess", val.line)
-      # Other meta-words (@type, etc.) are erased in compiled output
-      result = "nil"
+      let metaName = val.wordName
+      # Interpreter-only dialect machinery: hard error.
+      if metaName == "parse" or metaName.startsWith("parse/"):
+        compileError("@parse",
+          "the parse dialect is interpreter-only; restructure to avoid it in compiled code",
+          val.line)
+      if metaName == "compose" or metaName.startsWith("compose/"):
+        compileError("@compose",
+          "@compose is a compile-time feature; use it inside @template or @preprocess",
+          val.line)
+      # @enter / @exit are interpreter-only lifecycle hooks. Compiling code
+      # that reaches them at expression position means they escaped a block
+      # the emitter doesn't model — refuse rather than silently dropping.
+      if metaName == "enter" or metaName == "exit":
+        compileError("@" & metaName,
+          "@" & metaName & " is interpreter-only; place pre/post code at " &
+          "the top/bottom of the function body instead.",
+          val.line)
+      # Type-system meta-words are consumed by prescan (`name!: @type ...`,
+      # `name: @type/guard ...`). Reaching them at expression position means
+      # the form was malformed (e.g. an `@type` not in a set-word RHS). Emit
+      # nothing rather than `nil` — predicates are looked up by name.
+      if metaName == "type" or metaName.startsWith("type/"):
+        result = ""
+      elif metaName == "const":
+        result = ""
+      else:
+        # Unknown meta-words (@template, @inline, @preprocess) - silently
+        # erase. Compile-time machinery handles these elsewhere.
+        result = ""
 
     of wkWord:
       let name = val.wordName
@@ -3192,20 +3434,13 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
         e.ln(resolvedLua)
         continue
 
-    # --- @const prefix: @const x: value ---
+    # --- Legacy `@const x: value` form is a hard error. The canonical form
+    # is `x: @const value`, parallel to other meta-word RHS decorations.
     if val.kind == vkWord and val.wordKind == wkMetaWord and val.wordName == "const":
-      pos += 1
-      if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkSetWord:
-        let rawName = vals[pos].wordName
-        let name = luaName(rawName)
-        pos += 1
-        let prefix = if name in e.locals: "" else: "local "
-        e.locals.incl(name)
-        let expr = e.emitExprWithChain(vals, pos)
-        e.ln(prefix & name & " <const> = " & expr)
-        continue
-      # @const without set-word — skip
-      continue
+      compileError("@const",
+        "@const must follow the set-word: write 'name: @const value', " &
+        "not '@const name: value'.",
+        val.line)
 
     # --- Set-word at statement level ---
     if val.kind == vkWord and val.wordKind == wkSetWord:
@@ -3229,6 +3464,64 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
       # Track this as a local declaration (unless it's a path)
       if not isPath:
         e.locals.incl(name)
+
+      # @type/guard [params] [body] — emit as a regular Lua function. The
+      # compileability check already ran in prescan (validateAllGuards).
+      # Emission is identical to `function`; the isGuard flag is interpreter
+      # state with no Lua representation.
+      if pos < vals.len and vals[pos].kind == vkWord and
+         vals[pos].wordKind == wkMetaWord and vals[pos].wordName == "type/guard":
+        pos += 1
+        if pos + 1 < vals.len and vals[pos].kind == vkBlock and
+           vals[pos + 1].kind == vkBlock:
+          let specBlock = vals[pos].blockVals
+          let bodyBlock = vals[pos + 1].blockVals
+          pos += 2
+          let spec = parseFuncSpec(specBlock)
+          let params = spec.allLuaParams()
+          if isPath or isBound:
+            e.ln(name & " = function(" & params.join(", ") & ")")
+          else:
+            e.ln(prefix & "function " & name & "(" & params.join(", ") & ")")
+          let savedLocals = e.locals
+          e.locals = savedLocals
+          for n in e.moduleNames:
+            e.locals.incl(n)
+          for p in params:
+            e.locals.incl(p)
+            if p notin e.bindings:
+              e.bindings[p] = BindingInfo(arity: -1, isFunction: false,
+                                           isUnknown: true, isParam: true,
+                                           returnArity: -1)
+          e.indent += 1
+          e.emitBody(bodyBlock, asReturn = not (isPath or isBound))
+          e.indent -= 1
+          e.locals = savedLocals
+          e.ln("end")
+          continue
+
+      # @const value — emit binding with <const> annotation.
+      if pos < vals.len and vals[pos].kind == vkWord and
+         vals[pos].wordKind == wkMetaWord and vals[pos].wordName == "const":
+        pos += 1
+        let expr = e.emitExprWithChain(vals, pos)
+        e.ln(prefix & name & " <const> = " & expr)
+        continue
+
+      # @type / @type/where / @type/enum — declarations are verification-only.
+      # Emit nothing. Rules live in the prescan table; is? inlines them at
+      # call sites.
+      if pos < vals.len and vals[pos].kind == vkWord and
+         vals[pos].wordKind == wkMetaWord and
+         (vals[pos].wordName == "type" or vals[pos].wordName.startsWith("type/")):
+        let metaName = vals[pos].wordName
+        pos += 1
+        if pos < vals.len and vals[pos].kind == vkBlock:
+          pos += 1
+          if metaName == "type/where" and pos < vals.len and
+             vals[pos].kind == vkBlock:
+            pos += 1
+        continue
 
       # Check if RHS is a function definition
       if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkWord and
@@ -3827,8 +4120,68 @@ const PreludeMake = """local function _make(proto, overrides, typeName)
 end
 """
 
-proc buildPrelude(e: LuaEmitter): string =
-  if e.usedHelpers.len == 0 and not e.usedRandom and not e.usedVariadicUnpack:
+proc closeTypeUsageTransitively(e: var LuaEmitter) =
+  ## Predicate bodies for composite @types reference other predicates by
+  ## name. Walk the rules of every used type and pull in any custom-type
+  ## reference, until fixpoint. Without this, a `union [a! | b!]` predicate
+  ## emits `_b_p(it)` while `_b_p` is missing from the prelude.
+  var changed = true
+  while changed:
+    changed = false
+    var added: seq[string]
+    for typeName in e.usedTypeChecks:
+      if typeName notin e.customTypeRules: continue
+      let rule = e.customTypeRules[typeName]
+      let refs = case rule.kind
+        of ctUnion: rule.unionTypes
+        of ctWhere: rule.whereTypes
+        of ctEnum: @[]
+      for t in refs:
+        let base = if t.endsWith("!"): t[0 ..< t.len - 1] else: t
+        if base in e.customTypeRules and base notin e.usedTypeChecks:
+          added.add(base)
+    for n in added:
+      e.usedTypeChecks.incl(n)
+      changed = true
+
+proc topoSortTypes(e: LuaEmitter, names: seq[string]): seq[string] =
+  ## Order @type names so that dependencies come before dependents.
+  ## A type referencing another in its rule must follow that other in
+  ## the prelude. Ties broken by declaration order.
+  var visited: HashSet[string]
+  proc visit(name: string, acc: var seq[string]) =
+    if name in visited: return
+    visited.incl(name)
+    if name notin e.customTypeRules: return
+    let rule = e.customTypeRules[name]
+    let refs = case rule.kind
+      of ctUnion: rule.unionTypes
+      of ctWhere: rule.whereTypes
+      of ctEnum: @[]
+    for t in refs:
+      let base = if t.endsWith("!"): t[0 ..< t.len - 1] else: t
+      if base in e.customTypeRules and base != name:
+        visit(base, acc)
+    acc.add(name)
+  for n in names:
+    visit(n, result)
+
+proc buildPrelude(e: var LuaEmitter): string =
+  ## Build the runtime support prelude. Includes helper functions for any
+  ## natives that need them, plus synthesized predicates for every @type
+  ## declaration referenced in source by `is?` or match patterns.
+  e.closeTypeUsageTransitively()
+  var predTypeNames: seq[string]
+  for typeName in e.customTypeRules.keys:
+    if typeName in e.usedTypeChecks:
+      predTypeNames.add(typeName)
+  let ordered = e.topoSortTypes(predTypeNames)
+  var typePreds: seq[string]
+  for typeName in ordered:
+    typePreds.add(e.emitCustomTypePredicateDecl(typeName))
+
+  if e.usedHelpers.len == 0 and not e.usedRandom and not e.usedVariadicUnpack and
+      typePreds.len == 0:
     return ""
   var parts: seq[string] = @["-- Kintsugi runtime support"]
   if e.usedRandom:
@@ -3867,6 +4220,8 @@ proc buildPrelude(e: LuaEmitter): string =
     parts.add(PreludeRemove.strip)
   if "_make" in e.usedHelpers:
     parts.add(PreludeMake.strip)
+  for tp in typePreds:
+    parts.add(tp)
   parts.join("\n") & "\n\n"
 
 proc prescanBindings(e: var LuaEmitter, blk: seq[KtgValue]) =
@@ -4099,6 +4454,68 @@ proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
         else:
           i += 2
         continue
+      # name: @type/guard [params] [body] — register fn binding + mark
+      # name as @type/guard-eligible. Body is captured for late validation
+      # (after all prescan completes, so mutually-recursive guards work).
+      elif i + 1 < vals.len and vals[i + 1].kind == vkWord and
+           vals[i + 1].wordKind == wkMetaWord and
+           vals[i + 1].wordName == "type/guard":
+        if i + 3 < vals.len and vals[i + 2].kind == vkBlock and
+           vals[i + 3].kind == vkBlock:
+          let spec = parseFuncSpec(vals[i + 2].blockVals)
+          var refInfos: seq[RefinementInfo] = @[]
+          for r in spec.refinements:
+            refInfos.add(RefinementInfo(name: r.name, paramCount: r.params.len))
+          e.bindings[name] = bindingFunc(spec.params.len, refInfos, -1)
+          e.guardFuncs.incl(name)
+          var paramNames: HashSet[string]
+          for p in spec.params: paramNames.incl(p.name)
+          e.guardFuncBodies[name] = (
+            body: vals[i + 3].blockVals,
+            paramNames: paramNames,
+            line: vals[i + 1].line
+          )
+          e.prescanBlock(vals[i + 3].blockVals)
+          i += 4
+          continue
+      # name!: @type / @type/where / @type/enum — record rule, skip emission
+      elif i + 1 < vals.len and vals[i + 1].kind == vkWord and
+           vals[i + 1].wordKind == wkMetaWord and
+           (vals[i + 1].wordName == "type" or vals[i + 1].wordName.startsWith("type/")):
+        let metaName = vals[i + 1].wordName
+        let baseName = if name.endsWith("!"): name[0 ..< name.len - 1] else: name
+        e.bindings[name] = bindingVal()  # erase emission; value not referenced
+        if i + 2 < vals.len and vals[i + 2].kind == vkBlock:
+          let ruleBlk = vals[i + 2].blockVals
+          if metaName == "type/enum":
+            var members: seq[string]
+            for rv in ruleBlk:
+              if rv.kind == vkWord and rv.wordKind == wkLitWord:
+                members.add(rv.wordName)
+            e.customTypeRules[baseName] =
+              CustomTypeRule(kind: ctEnum, enumMembers: members)
+            i += 3
+            continue
+          if metaName == "type/where" and i + 3 < vals.len and
+             vals[i + 3].kind == vkBlock:
+            var bases: seq[string]
+            for rv in ruleBlk:
+              if rv.kind == vkType: bases.add(rv.typeName)
+            e.customTypeRules[baseName] =
+              CustomTypeRule(kind: ctWhere, whereTypes: bases,
+                             guardBody: vals[i + 3].blockVals)
+            i += 4
+            continue
+          # Plain @type: union of built-in or custom type names
+          var bases: seq[string]
+          for rv in ruleBlk:
+            if rv.kind == vkType: bases.add(rv.typeName)
+          e.customTypeRules[baseName] =
+            CustomTypeRule(kind: ctUnion, unionTypes: bases)
+          i += 3
+          continue
+        i += 2
+        continue
       # name: require %path — prescan the dependency's exports
       elif i + 1 < vals.len and vals[i + 1].kind == vkWord and
            vals[i + 1].wordKind == wkWord and vals[i + 1].wordName == "import":
@@ -4227,6 +4644,7 @@ proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
   )
   e.prescanBlock(ast)
   e.inferBindings(ast)
+  e.validateAllGuards()
   e.emitBlock(ast)
 
   # Emit exports return
@@ -4284,6 +4702,7 @@ proc emitLua*(ast: seq[KtgValue], sourceDir: string = ""): string =
   )
   e.prescanBlock(ast)
   e.inferBindings(ast)
+  e.validateAllGuards()
   e.scanTypeChecks(ast)
   e.scanNoneUsage(ast)
   e.emitBlock(ast)

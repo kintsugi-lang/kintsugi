@@ -154,7 +154,8 @@ proc newEvaluator*(): Evaluator =
     callStack: @[],
     dialects: @[],
     moduleCache: initTable[string, KtgValue](),
-    moduleLoading: initHashSet[string]()
+    moduleLoading: initHashSet[string](),
+    typeEnv: initTable[string, CustomType]()
   )
 
 proc registerDialect*(eval: Evaluator, d: Dialect) =
@@ -602,6 +603,14 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
           msg: "cannot rebind self",
           data: nil)
 
+      # Phantom types: `name!: @type ...` registers the rule in typeEnv and
+      # does NOT bind the name as a runtime value. `name!` tokens lex as
+      # vkType literals, so `is? name! v` picks up the rule via typeEnv.
+      if rhs.kind == vkType and rhs.customType != nil and
+         val.wordName.endsWith("!") and not val.wordName.contains('/'):
+        eval.typeEnv[val.wordName] = rhs.customType
+        return rhs
+
       # set-path: word/field/field: value
       if val.wordName.contains('/'):
         let (head, segments) = parsePath(val.wordName)
@@ -801,6 +810,28 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
       return val
 
     of wkMetaWord:
+      # @type/guard — function constructor that flags the resulting fn as
+      # eligible for use inside @type where-guard bodies. Two-block form
+      # parallel to `function [params] [body]`. Compiler validates that
+      # the body's reachable calls all resolve to compileable natives or
+      # other @type/guard fns.
+      if val.wordName == "type/guard":
+        let paramsArg = eval.evalNext(vals, pos, ctx)
+        let bodyArg = eval.evalNext(vals, pos, ctx)
+        if paramsArg.kind != vkBlock or bodyArg.kind != vkBlock:
+          raise KtgError(kind: "type",
+            msg: "@type/guard expects [params] [body]", data: nil)
+        let spec = parseFuncSpec(paramsArg.blockVals)
+        let fn = KtgFunc(
+          params: spec.params,
+          refinements: spec.refinements,
+          returnType: spec.returnType,
+          body: bodyArg.blockVals,
+          closure: ctx,
+          isGuard: true
+        )
+        return KtgValue(kind: vkFunction, fn: fn, line: val.line)
+
       # @type — custom type creation
       if val.wordName == "type" or val.wordName.startsWith("type/"):
         let ruleBlock = eval.evalNext(vals, pos, ctx)
@@ -851,14 +882,20 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
         typeVal.customType = ct
         return typeVal
 
-      # @const x: value — compile-time annotation, interpreter treats as normal assignment
+      # @const value — annotate following expression as a constant binding.
+      # New canonical form is `name: @const value`; the legacy form
+      # `@const name: value` is a hard error to migrate uniformly with the
+      # other meta-words (type, type/guard, type/where, type/enum, compose,
+      # template, parse) which all follow the set-word.
       if val.wordName == "const":
         if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkSetWord:
-          let setWord = vals[pos]
-          pos += 1
+          raise KtgError(kind: "syntax",
+            msg: "@const must follow the set-word, not precede it. " &
+                 "Use 'name: @const value' instead of '@const name: value'.",
+            data: nil)
+        if pos < vals.len:
           var rhs = eval.evalNext(vals, pos, ctx)
           eval.applyInfix(rhs, vals, pos, ctx)
-          ctx.set(setWord.wordName, rhs)
           return rhs
         return val
 
@@ -1106,8 +1143,11 @@ proc typeMatchesBuiltin*(actual, expected: string): bool =
   else: false
 
 proc matchesCustomTypeByName*(eval: Evaluator, value: KtgValue, typeName: string, ctx: KtgContext): bool =
-  ## Look up a custom type by name in context and check if value matches.
-  # Try to find the type with a customType object
+  ## Phantom type lookup. typeEnv is authoritative. Legacy fallbacks handle
+  ## object auto-gen (predicate function) and pre-phantom code that still
+  ## stores a customType as a value.
+  if typeName in eval.typeEnv:
+    return eval.matchesCustomType(value, eval.typeEnv[typeName], ctx)
   if ctx.has(typeName):
     let typeVal = ctx.get(typeName)
     if typeVal.customType != nil:

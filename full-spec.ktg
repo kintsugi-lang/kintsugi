@@ -2,7 +2,6 @@ Kintsugi [
   name: 'full-spec
   date: 2026-03-29
   file: %script-spec.ktg
-  version: 0.4.0
 ]
 
 ; ============================================================
@@ -841,9 +840,9 @@ combined: union vowels consonants
 ; --- @const annotation ---
 ; @const marks a binding as constant. In Script mode, it behaves
 ; as a normal assignment. In Lua 5.4, it emits the <const> attribute.
-;   @const MAX-SPEED: 100
+;   MAX-SPEED: @const 100
 ;   ; In Lua 5.4: local MAX_SPEED <const> = 100
-@const MAX-SPEED: 100
+MAX-SPEED: @const 100
 print MAX-SPEED                          ; 100
 
 ; --- Introspection ---

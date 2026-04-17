@@ -117,6 +117,8 @@ type
     returnType*: string   ## "" = untyped
     body*: seq[KtgValue]
     closure*: KtgContext  ## captured scope
+    isGuard*: bool        ## true if constructed via @type/guard;
+                          ## emitter validates body for compileability
 
   NativeFnProc* = proc(args: seq[KtgValue], eval: pointer): KtgValue
 
@@ -125,6 +127,8 @@ type
     arity*: int
     fn*: NativeFnProc
     refinements*: seq[RefinementSpec]
+    compilable*: bool = true    ## false = interpreter-only; emitter rejects
+                                 ## use inside @type/guard fn bodies
 
   StackFrame* = object
     name*: string

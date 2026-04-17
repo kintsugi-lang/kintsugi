@@ -3,9 +3,11 @@ import ../core/[types, equality]
 import dialect, evaluator
 import natives_math, natives_io, natives_convert
 
-proc native(ctx: KtgContext, name: string, arity: int, fn: NativeFnProc) =
+proc native(ctx: KtgContext, name: string, arity: int, fn: NativeFnProc,
+            compilable = true) =
   ctx.set(name, KtgValue(kind: vkNative,
-    nativeFn: KtgNative(name: name, arity: arity, fn: fn),
+    nativeFn: KtgNative(name: name, arity: arity, fn: fn,
+                        compilable: compilable),
     line: 0))
 
 proc deepCopyValue*(val: KtgValue): KtgValue =
@@ -195,6 +197,10 @@ proc registerNatives*(eval: Evaluator) =
 
       let tn = typeArg.typeName
 
+      # Phantom custom type: look in typeEnv first.
+      if tn in eval.typeEnv:
+        return ktgLogic(eval.matchesCustomType(value, eval.typeEnv[tn], eval.currentCtx))
+
       # Built-in type: direct match
       if tn in builtinTypes:
         return ktgLogic(typeName(value) == tn)
@@ -208,7 +214,8 @@ proc registerNatives*(eval: Evaluator) =
         return ktgLogic(value.kind in {vkInteger, vkFloat, vkPair, vkTuple,
                                         vkDate, vkTime, vkMoney})
 
-      # Custom type: look up in context first (for @type-defined types)
+      # Custom type: look up in context first (for legacy code that still
+      # binds the type value directly)
       if eval.currentCtx.has(tn):
         let typeVal = eval.currentCtx.get(tn)
         if typeVal.customType != nil:
@@ -1057,7 +1064,7 @@ proc registerNatives*(eval: Evaluator) =
     for c in args[0].strVal:
       members.incl($c)
     KtgValue(kind: vkSet, setMembers: members, line: 0)
-  )
+  , compilable = false)
 
   # --- Set operations ---
 

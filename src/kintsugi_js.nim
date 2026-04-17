@@ -53,3 +53,6 @@ proc kintsugiVersion*(): cstring {.exportc.} =
 
 proc kintsugiCodename*(): cstring {.exportc.} =
   cstring(CODENAME)
+
+proc kintsugiBuildDate*(): cstring {.exportc.} =
+  cstring(BUILD_DATE)

@@ -15,9 +15,11 @@ proc resolveStdlibModule*(eval: Evaluator, moduleName: string): KtgContext =
   discard eval.evalBlock(ast, moduleCtx)
   moduleCtx
 
-proc native(ctx: KtgContext, name: string, arity: int, fn: NativeFnProc) =
+proc native(ctx: KtgContext, name: string, arity: int, fn: NativeFnProc,
+            compilable = true) =
   ctx.set(name, KtgValue(kind: vkNative,
-    nativeFn: KtgNative(name: name, arity: arity, fn: fn),
+    nativeFn: KtgNative(name: name, arity: arity, fn: fn,
+                        compilable: compilable),
     line: 0))
 
 proc registerIoNatives*(eval: Evaluator) =
@@ -46,6 +48,7 @@ proc registerIoNatives*(eval: Evaluator) =
       let readNative = KtgNative(
         name: "read",
         arity: 1,
+        compilable: false,
         refinements: @[
           RefinementSpec(name: "dir", params: @[]),
           RefinementSpec(name: "lines", params: @[]),
@@ -106,7 +109,7 @@ proc registerIoNatives*(eval: Evaluator) =
         raise KtgError(kind: "type", msg: "write expects string! as content", data: nil)
       writeFile(path, args[1].strVal)
       ktgNone()
-    )
+    , compilable = false)
 
   when not defined(js):
     ctx.native("dir?", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
@@ -116,7 +119,7 @@ proc registerIoNatives*(eval: Evaluator) =
         else:
           raise KtgError(kind: "type", msg: "dir? expects string! or file!", data: nil)
       ktgLogic(dirExists(path))
-    )
+    , compilable = false)
 
   when not defined(js):
     ctx.native("file?", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
@@ -126,14 +129,14 @@ proc registerIoNatives*(eval: Evaluator) =
         else:
           raise KtgError(kind: "type", msg: "file? expects string! or file!", data: nil)
       ktgLogic(fileExists(path))
-    )
+    , compilable = false)
 
   ctx.native("exit", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     let code = case args[0].kind
       of vkInteger: int(args[0].intVal)
       else: 0
     raise ExitSignal(code: code)
-  )
+  , compilable = false)
 
   # --- Time ---
 
@@ -316,7 +319,7 @@ proc registerIoNatives*(eval: Evaluator) =
 
       writeFile(path, serialize(args[1]))
       ktgNone()
-    )
+    , compilable = false)
 
   # --- Import (stdlib via lit-words, works on all backends) ---
 

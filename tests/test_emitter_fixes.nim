@@ -46,9 +46,13 @@ suite "emitter: last":
 
 suite "emitter: @const":
   test "const emits <const> annotation":
-    let code = emitLua(parseSource("@const x: 42"))
+    let code = emitLua(parseSource("x: @const 42"))
     check "<const>" in code
     check "= 42" in code
+
+  test "legacy pre-set-word form is a compile error":
+    expect EmitError:
+      discard emitLua(parseSource("@const x: 42"))
 
 suite "emitter: inline make":
   test "make inlines defaults with overrides":
@@ -686,4 +690,169 @@ suite "emitter: paren preservation for mixed precedence (Bug D)":
     """))
     check "((g" notin code
     check "g(x)" in code
+
+# =============================================================================
+# @type/guard compileability validation (Step 3 of type-erasure plan)
+# =============================================================================
+
+suite "emitter: @type/guard validation":
+  test "guard fn with only compileable natives compiles":
+    discard emitLua(parseSource("""
+      positive?: @type/guard [x] [x > 0]
+    """))
+
+  test "guard fn calling another guard fn compiles":
+    discard emitLua(parseSource("""
+      positive?: @type/guard [x] [x > 0]
+      pair-pos?: @type/guard [a b] [(positive? a) (positive? b)]
+    """))
+
+  test "guard fn calling interpreter-only native errors":
+    expect EmitError:
+      discard emitLua(parseSource("""
+        bad?: @type/guard [x] [read x]
+      """))
+
+  test "guard fn calling non-guard user fn errors":
+    expect EmitError:
+      discard emitLua(parseSource("""
+        helper: function [x] [x + 1]
+        bad?: @type/guard [x] [helper x]
+      """))
+
+  test "mutually-recursive guard fns validate":
+    discard emitLua(parseSource("""
+      a?: @type/guard [x] [b? x]
+      b?: @type/guard [x] [a? x]
+    """))
+
+  test "guard fn allows it and path access":
+    discard emitLua(parseSource("""
+      pos-x?: @type/guard [pt] [pt/x > 0]
+    """))
+
+  test "error message names the offending word":
+    try:
+      discard emitLua(parseSource("""
+        bad?: @type/guard [x] [charset x]
+      """))
+      check false  # should have raised
+    except EmitError as e:
+      check "charset" in e.msg
+      check "@type/guard" in e.msg
+      check "bad?" in e.msg
+
+# =============================================================================
+# Synthesized custom-type predicates in prelude (Step 4 of type-erasure plan)
+# =============================================================================
+
+suite "emitter: synthesized type predicates":
+  test "where-guarded type emits named predicate when used":
+    let code = emitLua(parseSource("""
+      positive!: @type/where [integer!] [it > 0]
+      if is? positive! 5 [print "ok"]
+    """))
+    check "local function _positive_p(it)" in code
+    check "_positive_p(5)" in code
+
+  test "predicate not emitted when not used":
+    let code = emitLua(parseSource("""
+      positive!: @type/where [integer!] [it > 0]
+      print "no usage"
+    """))
+    check "_positive_p" notin code
+
+  test "union type emits named predicate":
+    let code = emitLua(parseSource("""
+      sn!: @type [string! | none!]
+      if is? sn! "x" [print "yes"]
+    """))
+    check "local function _sn_p(it)" in code
+
+  test "enum type emits named predicate":
+    let code = emitLua(parseSource("""
+      dir!: @type/enum ['n | 's | 'e | 'w]
+      if is? dir! 'n [print "yes"]
+    """))
+    check "local function _dir_p(it)" in code
+    check "it == \"n\"" in code
+
+  test "transitive composition pulls in dependency predicates":
+    let code = emitLua(parseSource("""
+      positive!: @type/where [integer!] [it > 0]
+      mixed!: @type [positive! | string!]
+      if is? mixed! 5 [print "ok"]
+    """))
+    check "local function _positive_p(it)" in code
+    check "local function _mixed_p(it)" in code
+    # positive must come before mixed (topological order).
+    let posIdx = code.find("_positive_p(it)")
+    let mixIdx = code.find("_mixed_p(it)")
+    check posIdx >= 0 and mixIdx >= 0
+    check posIdx < mixIdx
+
+  test "predicate-call semantics work end-to-end":
+    let code = emitLua(parseSource("""
+      positive!: @type/where [integer!] [it > 0]
+      print is? positive! 5
+      print is? positive! -3
+    """))
+    check "_positive_p(5)" in code
+    check "_positive_p(-3)" in code
+
+  test "match pattern on @type routes through synthesized predicate":
+    let code = emitLua(parseSource("""
+      positive!: @type/where [integer!] [it > 0]
+      r: match 5 [
+        [positive!] ["yes"]
+        [_]         ["no"]
+      ]
+    """))
+    check "_positive_p(5)" in code
+    check "local function _positive_p" in code
+
+  test "match pattern on built-in type still uses primitive type check":
+    let code = emitLua(parseSource("""
+      r: match 5 [
+        [integer!] ["yes"]
+        [_]        ["no"]
+      ]
+    """))
+    check "type(5) == \"number\"" in code
+
+# =============================================================================
+# Clean meta-word emission (Step 6 of type-erasure plan)
+# =============================================================================
+
+suite "emitter: meta-word emission":
+  test "@type declaration produces no Lua at decl site":
+    let code = emitLua(parseSource("""
+      positive!: @type/where [integer!] [it > 0]
+      print "ok"
+    """))
+    # No "nil" should appear from the type declaration; no "positive" leakage.
+    check "positive!" notin code
+    check "= nil" notin code
+    check "print(\"ok\")" in code
+
+  test "@type/guard set-word emits a real Lua function":
+    let code = emitLua(parseSource("""
+      pos?: @type/guard [x] [x > 0]
+      print pos? 5
+    """))
+    check "local function" in code
+    check "function" in code
+    check "x > 0" in code
+
+  test "@enter at expression position is a compile error":
+    expect EmitError:
+      discard emitLua(parseSource("""
+        @enter [print "x"]
+      """))
+
+  test "@exit at expression position is a compile error":
+    expect EmitError:
+      discard emitLua(parseSource("""
+        @exit [print "x"]
+      """))
 

@@ -10,17 +10,16 @@ Premature XL work on a pre-1.0 language with zero external users is the single m
 
 ---
 
-## 1. Type annotations enforced (M + L)
+## 1. Type annotations enforced (PARTIALLY DONE — 2026-04-17)
 
-**What**: Field-type annotations like `pos [pair!] 0x0` in `object [...]` declarations, and parameter types in `function` specs, are parsed but not enforced at assignment or call time. Writing a float to `pos.x` after declaring it `pair!` does not error. The compiler's emitter has its own ad-hoc type-tracking tables (`objectFields`, `varTypes`, `varSeqTypes`, `contextVars`, `funcReturnTypes` in `src/emit/lua.nim`) that duplicate what an enforced type system would already know.
+**Resolved (Lua target)**: `@type` declarations now auto-synthesize predicate functions in compiled Lua when referenced by `is?` or `match`. `@type/guard` is the opt-in compileability marker for user fns usable in where-guards. Param + return type annotations are enforced in the interpreter; erased in Lua. See `docs/design-bible.md` "Type Erasure" section.
 
-**Split**:
-- **1a (M, ~1 week)**: Interpreter-side field-type validation in set-word/set-path on objects and contexts with declared field specs. Validate template parameter types at expansion. Leave the compiler alone.
-- **1b (L, 2-3 weeks)**: Consolidate the emitter's five tracking tables into one type environment. Touches every emit handler in a 4300-line file. High blast radius for existing cross-mode tests.
+**Still open (interpreter)**:
+- **Field-type validation in set-word/set-path on `object`-based instances**. Writing a float to `pos.x` after declaring it `pair!` still does not error in the interpreter. The path: extend set-word/set-path eval to consult `KtgContext.fieldSpecs` and validate before the set.
+- **Template parameter type validation at expansion time**.
 
-**Revisit when**: someone writes a 500+ line game in Kintsugi and refactors a field name. If silently-wrong type drift bites them, 1a becomes urgent. 1b can wait until 1a's field type errors are being worked around by developers who then complain that the emitter doesn't know the types either.
-
-**Do not**: start with 1b. The emitter refactor without 1a first is mechanical churn. The enforcement has to come before the consolidation.
+**Still open (emitter cleanup)**:
+- Consolidating the emitter's tracking tables (`objectFields`, `varTypes`, `varSeqTypes`, `contextVars`, `funcReturnTypes` in `src/emit/lua.nim`) into one type environment. This is now optimization work rather than a correctness gap — emission already produces correct erased Lua. Defer until the tables become a maintenance burden.
 
 ## 5. Hygienic templates with call-site context (XL)
 
