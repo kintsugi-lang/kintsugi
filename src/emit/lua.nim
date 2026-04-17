@@ -19,6 +19,7 @@ when not defined(js):
   import std/os
 import ../core/[types, natives_shared]
 import ../parse/parser
+import ../eval/stdlib_registry
 
 type
   BindingKind* = enum
@@ -97,6 +98,13 @@ type
     ## prescan to support mutually-recursive guards.
     guardFuncBodies: Table[string,
       tuple[body: seq[KtgValue], paramNames: HashSet[string], line: int]]
+    ## Stdlib modules referenced by `import 'name` or
+    ## `import/using 'name [...]`. Whole-module imports use sentinel
+    ## "*" in the symbol set; selective imports list explicit names.
+    ## expandStdlibIntoPrelude turns these into Lua code stored in
+    ## stdlibPreludeLua, which buildPrelude emits.
+    usedStdlibSymbols: Table[string, HashSet[string]]
+    stdlibPreludeLua: string
 
   CustomTypeKind* = enum
     ctUnion       ## @type [t! | t!]
@@ -321,6 +329,9 @@ proc emitAttemptExpr(e: var LuaEmitter, blk: seq[KtgValue]): string
 proc emitEitherExpr(e: var LuaEmitter, cond: string, trueBlock, falseBlock: seq[KtgValue]): string
 proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
                     compiling: HashSet[string] = initHashSet[string]()): string
+proc emitLuaModuleEx(ast: seq[KtgValue], sourceDir: string,
+                     compiling: HashSet[string]):
+    tuple[lua: string, e: LuaEmitter]
 proc findExports(ast: seq[KtgValue]): seq[string]
 proc emitContextBlock(e: var LuaEmitter, vals: seq[KtgValue]): string
 proc inferSeqType(e: LuaEmitter, vals: seq[KtgValue], pos: int): SeqType
@@ -691,14 +702,14 @@ proc emitCustomTypePredicateDecl(e: var LuaEmitter, typeName: string): string =
     for t in rule.unionTypes:
       parts.add(e.baseCheckExpr(t))
     let body = if parts.len == 0: "false" else: parts.join(" or ")
-    "local function " & fnName & "(it)\n  return " & body & "\nend"
+    "function " & fnName & "(it)\n  return " & body & "\nend"
 
   of ctEnum:
     var parts: seq[string]
     for m in rule.enumMembers:
       parts.add("it == \"" & m & "\"")
     let body = if parts.len == 0: "false" else: parts.join(" or ")
-    "local function " & fnName & "(it)\n  return " & body & "\nend"
+    "function " & fnName & "(it)\n  return " & body & "\nend"
 
   of ctWhere:
     var baseParts: seq[string]
@@ -714,7 +725,7 @@ proc emitCustomTypePredicateDecl(e: var LuaEmitter, typeName: string): string =
     let guardBody = withCapture(e, e.emitBlock(rule.guardBody, asReturn = true))
     e.indent = savedIndent
 
-    "local function " & fnName & "(it)\n" &
+    "function " & fnName & "(it)\n" &
       "  if not " & baseCheck & " then return false end\n" &
       guardBody.strip(chars = {'\n'}) & "\nend"
 
@@ -2908,8 +2919,27 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
           result = "nil"
 
       # --- require: compile dependency and emit Lua require() ---
-      elif name == "import":
+      elif name == "import" or name == "import/using":
         if pos < vals.len:
+          # Stdlib import (lit-word): route module + symbol set into the
+          # prelude. The actual fns live in prelude.lua as globals; this
+          # call site emits nothing.
+          if vals[pos].kind == vkWord and vals[pos].wordKind == wkLitWord:
+            let moduleName = vals[pos].wordName
+            pos += 1
+            if moduleName notin e.usedStdlibSymbols:
+              e.usedStdlibSymbols[moduleName] = initHashSet[string]()
+            if name == "import/using" and pos < vals.len and
+               vals[pos].kind == vkBlock:
+              for sym in vals[pos].blockVals:
+                if sym.kind == vkWord:
+                  e.usedStdlibSymbols[moduleName].incl(sym.wordName)
+              pos += 1
+            else:
+              # Whole-module import - sentinel "*" tells buildPrelude to
+              # pull every exported fn.
+              e.usedStdlibSymbols[moduleName].incl("*")
+            return ""
           when defined(js):
             discard vals[pos]
             pos += 1
@@ -2942,8 +2972,21 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
               var childCompiling = e.compiling
               childCompiling.incl(absPath)
               let depDir = parentDir(absPath)
-              let depLua = emitLuaModule(depAst, depDir, childCompiling)
+              let (depLua, depE) = emitLuaModuleEx(depAst, depDir, childCompiling)
               writeFile(outPath, depLua)
+              # Merge module's used set into parent's prelude scope.
+              for h in depE.usedHelpers: e.usedHelpers.incl(h)
+              for t in depE.usedTypeChecks: e.usedTypeChecks.incl(t)
+              for k, v in depE.customTypeRules:
+                if k notin e.customTypeRules:
+                  e.customTypeRules[k] = v
+              for k, v in depE.usedStdlibSymbols:
+                if k notin e.usedStdlibSymbols:
+                  e.usedStdlibSymbols[k] = initHashSet[string]()
+                for s in v: e.usedStdlibSymbols[k].incl(s)
+              if depE.usedRandom: e.usedRandom = true
+              if depE.usedVariadicUnpack: e.usedVariadicUnpack = true
+              if depE.programUsesNoneCheck: e.programUsesNoneCheck = true
             result = "require(\"" & moduleName & "\")"
         else:
           result = "nil"
@@ -3961,19 +4004,19 @@ proc emitBody(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
 # Public API
 # ---------------------------------------------------------------------------
 
-const PreludeUnpack = "local unpack = unpack or table.unpack\n"
+const PreludeUnpack = "unpack = unpack or table.unpack\n"
 
-const PreludeNone = """local _NONE = setmetatable({}, {__tostring = function() return "nil" end})
-local function _is_none(v) return v == nil or v == _NONE end
+const PreludeNone = """_NONE = setmetatable({}, {__tostring = function() return "nil" end})
+function _is_none(v) return v == nil or v == _NONE end
 """
 
-const PreludeDeepCopy = """local function _deep_copy(t)
+const PreludeDeepCopy = """function _deep_copy(t)
   if type(t) ~= "table" then return t end
   local r = {}; for k, v in pairs(t) do r[k] = _deep_copy(v) end; return r
 end
 """
 
-const PreludePair = """local _pair_mt = {}
+const PreludePair = """_pair_mt = {}
 _pair_mt.__add = function(a, b) return setmetatable({x=a.x+b.x, y=a.y+b.y}, _pair_mt) end
 _pair_mt.__sub = function(a, b) return setmetatable({x=a.x-b.x, y=a.y-b.y}, _pair_mt) end
 _pair_mt.__mul = function(a, b)
@@ -3988,52 +4031,34 @@ end
 _pair_mt.__unm = function(a) return setmetatable({x=-a.x, y=-a.y}, _pair_mt) end
 _pair_mt.__eq  = function(a, b) return a.x == b.x and a.y == b.y end
 _pair_mt.__tostring = function(a) return "{x = " .. tostring(a.x) .. ", y = " .. tostring(a.y) .. "}" end
-local function _pair(x, y) return setmetatable({x=x, y=y}, _pair_mt) end
+function _pair(x, y) return setmetatable({x=x, y=y}, _pair_mt) end
 """
 
-const PreludePrettify = """local function _prettify_inner(v)
+const PreludePrettify = """function _prettify(v, inner)
   if v == nil then return "nil" end
   local t = type(v)
-  if t == "string" then
-    return '"' .. v:gsub('\\', '\\\\'):gsub('"', '\\"') .. '"'
-  end
-  if t == "number" or t == "boolean" then return tostring(v) end
+  if t == "string" then return inner and ('"'..v:gsub('"', '\\"')..'"') or v end
   if t ~= "table" then return tostring(v) end
-  local mt = getmetatable(v)
-  if mt ~= nil and mt.__tostring ~= nil then return tostring(v) end
-  local n = #v
-  local kc, isArray = 0, true
-  for k, _ in pairs(v) do
+  local mt = getmetatable(v); if mt and mt.__tostring then return tostring(v) end
+  local n, kc, parts = #v, 0, {}
+  for k in pairs(v) do
     kc = kc + 1
-    if type(k) ~= "number" or k ~= math.floor(k) or k < 1 or k > n then
-      isArray = false
-    end
+    if type(k) ~= "number" or k ~= math.floor(k) or k < 1 or k > n then kc = -1 end
   end
-  if isArray and kc == n then
-    local parts = {}
-    for i = 1, n do parts[i] = _prettify_inner(v[i]) end
-    return "{" .. table.concat(parts, ", ") .. "}"
+  if kc == n then
+    for i = 1, n do parts[i] = _prettify(v[i], true) end
+    return "{"..table.concat(parts, ", ").."}"
   end
-  local parts = {}
   for k, val in pairs(v) do
-    local ks
-    if type(k) == "string" and k:match("^[%a_][%w_]*$") then
-      ks = k
-    else
-      ks = "[" .. _prettify_inner(k) .. "]"
-    end
-    parts[#parts + 1] = ks .. " = " .. _prettify_inner(val)
+    local ks = (type(k) == "string" and k:match("^[%a_][%w_]*$")) and k or "["..tostring(k).."]"
+    parts[#parts+1] = ks.." = ".._prettify(val, true)
   end
-  return "{" .. table.concat(parts, ", ") .. "}"
-end
-local function _prettify(v)
-  if type(v) == "string" then return v end
-  return _prettify_inner(v)
+  return "{"..table.concat(parts, ", ").."}"
 end
 """
 
 
-const PreludeCapture = """local function _capture(data, specs)
+const PreludeCapture = """function _capture(data, specs)
   local keywords, spec_map = {}, {}
   for _, s in ipairs(specs) do
     local name, exact = s, -1
@@ -4072,7 +4097,7 @@ const PreludeCapture = """local function _capture(data, specs)
 end
 """
 
-const PreludeEquals = """local function _equals(a, b)
+const PreludeEquals = """function _equals(a, b)
   if a == b then return true end
   if type(a) ~= "table" or type(b) ~= "table" then return false end
   if #a ~= #b then return false end
@@ -4081,13 +4106,13 @@ const PreludeEquals = """local function _equals(a, b)
 end
 """
 
-const PreludeHas = """local function _has(t, v)
+const PreludeHas = """function _has(t, v)
   for _, x in ipairs(t) do if _equals(x, v) then return true end end
   return false
 end
 """
 
-const PreludeReplace = """local function _replace(s, old, new)
+const PreludeReplace = """function _replace(s, old, new)
   local i, j = s:find(old, 1, true)
   if not i then return s end
   local r = {}
@@ -4103,7 +4128,7 @@ const PreludeReplace = """local function _replace(s, old, new)
 end
 """
 
-const PreludeSelect = """local function _select(t, key)
+const PreludeSelect = """function _select(t, key)
   if type(t) == "table" and t[key] ~= nil then return t[key] end
   if type(t) == "table" then
     for i = 1, #t - 1 do if _equals(t[i], key) then return t[i + 1] end end
@@ -4112,7 +4137,7 @@ const PreludeSelect = """local function _select(t, key)
 end
 """
 
-const PreludeCopy = """local function _copy(t)
+const PreludeCopy = """function _copy(t)
   local r = {}
   for k, v in pairs(t) do r[k] = v end
   return r
@@ -4120,7 +4145,7 @@ end
 """
 
 
-const PreludeAppend = """local function _append(t, v)
+const PreludeAppend = """function _append(t, v)
   if type(v) == "table" then
     for i = 1, #v do t[#t+1] = v[i] end
   else
@@ -4130,7 +4155,7 @@ const PreludeAppend = """local function _append(t, v)
 end
 """
 
-const PreludeSplit = """local function _split(s, d)
+const PreludeSplit = """function _split(s, d)
   local r = {}
   if d == "" then
     for i = 1, #s do r[#r+1] = s:sub(i, i) end
@@ -4147,7 +4172,7 @@ const PreludeSplit = """local function _split(s, d)
 end
 """
 
-const PreludeInsert = """local function _insert(x, v, i)
+const PreludeInsert = """function _insert(x, v, i)
   if type(x) == "string" then
     return x:sub(1, i - 1) .. v .. x:sub(i)
   end
@@ -4156,7 +4181,7 @@ const PreludeInsert = """local function _insert(x, v, i)
 end
 """
 
-const PreludeRemove = """local function _remove(x, i)
+const PreludeRemove = """function _remove(x, i)
   if type(x) == "string" then
     return x:sub(1, i - 1) .. x:sub(i + 1)
   end
@@ -4165,7 +4190,7 @@ const PreludeRemove = """local function _remove(x, i)
 end
 """
 
-const PreludeSort = """local function _sort(x)
+const PreludeSort = """function _sort(x)
   if type(x) == "string" then
     local t = {}
     for i = 1, #x do t[i] = x:sub(i, i) end
@@ -4177,7 +4202,7 @@ const PreludeSort = """local function _sort(x)
 end
 """
 
-const PreludeSubset = """local function _subset(x, s, n)
+const PreludeSubset = """function _subset(x, s, n)
   if type(x) == "string" then
     return string.sub(x, s, s + n - 1)
   end
@@ -4188,7 +4213,7 @@ const PreludeSubset = """local function _subset(x, s, n)
 end
 """
 
-const PreludeMake = """local function _make(proto, overrides, typeName)
+const PreludeMake = """function _make(proto, overrides, typeName)
   local inst = {}
   for k, v in pairs(proto) do inst[k] = v end
   if overrides then for k, v in pairs(overrides) do inst[k] = v end end
@@ -4257,10 +4282,19 @@ proc buildPrelude(e: var LuaEmitter): string =
   for typeName in ordered:
     typePreds.add(e.emitCustomTypePredicateDecl(typeName))
 
+  # Stdlib expansion happens out-of-line in expandStdlibIntoPrelude
+  # (called from emitLua/emitLuaSplit after main emit) and stashed on
+  # the emitter. Read the cached chunk here.
+  let stdlibLua = e.stdlibPreludeLua
+
   if e.usedHelpers.len == 0 and not e.usedRandom and not e.usedVariadicUnpack and
-      typePreds.len == 0:
+      typePreds.len == 0 and stdlibLua.len == 0:
     return ""
-  var parts: seq[string] = @["-- Kintsugi runtime support"]
+  var parts: seq[string] = @[
+    "-- Kintsugi runtime support",
+    "-- Reserved global names: _-prefixed helpers + stdlib fns. " &
+      "Kintsugi user code must not shadow these.",
+  ]
   if e.usedRandom:
     parts.add("math.randomseed(os.time())")
   if e.usedVariadicUnpack:
@@ -4301,6 +4335,8 @@ proc buildPrelude(e: var LuaEmitter): string =
     parts.add(PreludePrettify.strip)
   for tp in typePreds:
     parts.add(tp)
+  if stdlibLua.len > 0:
+    parts.add(stdlibLua.strip)
   parts.join("\n") & "\n\n"
 
 proc prescanBindings(e: var LuaEmitter, blk: seq[KtgValue]) =
@@ -4711,9 +4747,14 @@ proc collectModuleNames(vals: seq[KtgValue]): HashSet[string] =
 proc scanTypeChecks(e: var LuaEmitter, vals: seq[KtgValue])
 proc scanNoneUsage(e: var LuaEmitter, vals: seq[KtgValue])
 
-proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
-                    compiling: HashSet[string] = initHashSet[string]()): string =
-  ## Compile a Kintsugi module to Lua. Emits exports as return statement.
+proc emitLuaModuleEx(ast: seq[KtgValue], sourceDir: string,
+                     compiling: HashSet[string]):
+    tuple[lua: string, e: LuaEmitter] =
+  ## Compile a Kintsugi module to Lua and return both the source and the
+  ## inner LuaEmitter, so a parent (entrypoint) compile can merge the
+  ## module's used helper / type-predicate / stdlib-symbol sets into its
+  ## own prelude. Modules emit no prelude themselves; helpers come from
+  ## the entrypoint's prelude.lua at runtime.
   var e = LuaEmitter(
     indent: 0,
     output: "",
@@ -4730,8 +4771,6 @@ proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
   e.scanTypeChecks(ast)
   e.scanNoneUsage(ast)
   e.emitBlock(ast)
-
-  # Emit exports return
   let exports = findExports(ast)
   if exports.len > 0:
     var parts: seq[string] = @[]
@@ -4739,12 +4778,13 @@ proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
       let lua = luaName(name)
       parts.add(lua & " = " & lua)
     e.ln("return {" & parts.join(", ") & "}")
+  (lua: e.output, e: e)
 
-  # Modules carry their own helpers - they may be `require`d by code that
-  # doesn't itself use the same helpers (e.g., a module that prints blocks
-  # but is required by a script that only does arithmetic). Each chunk's
-  # locals are scoped to its file, so duplicate prelude lines are harmless.
-  e.buildPrelude() & e.output
+proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
+                    compiling: HashSet[string] = initHashSet[string]()): string =
+  ## Backwards-compat wrapper. Use emitLuaModuleEx if you need to merge
+  ## the module's used set into a parent emitter.
+  emitLuaModuleEx(ast, sourceDir, compiling).lua
 
 proc scanTypeChecks(e: var LuaEmitter, vals: seq[KtgValue]) =
   ## Scan AST for is? usage with custom type names.
@@ -4777,8 +4817,45 @@ proc scanNoneUsage(e: var LuaEmitter, vals: seq[KtgValue]) =
     else:
       discard
 
-proc emitLua*(ast: seq[KtgValue], sourceDir: string = ""): string =
-  ## Walk the AST and produce Lua source code.
+proc expandStdlibIntoPrelude(e: var LuaEmitter) =
+  ## For each module recorded in usedStdlibSymbols, splice its requested
+  ## fns and emit them via a fresh sub-emitter. Strip the `local` keyword
+  ## off function declarations so the stdlib lives as globals in the
+  ## prelude alongside the other helpers.
+  var lua = ""
+  for moduleName, syms in e.usedStdlibSymbols:
+    var symList: seq[string]
+    if "*" in syms:
+      symList = moduleExports(moduleName)
+    else:
+      for s in syms: symList.add(s)
+    let fnsAst = spliceSelectedFunctions(moduleName, symList)
+    if fnsAst.len == 0: continue
+    var sub = LuaEmitter(
+      indent: 0, output: "",
+      bindings: initNativeBindings(),
+      nameMap: initTable[string, string](),
+      bindingKinds: initTable[string, BindingKind](),
+      sourceDir: e.sourceDir,
+      moduleNames: collectModuleNames(fnsAst)
+    )
+    sub.prescanBlock(fnsAst)
+    sub.inferBindings(fnsAst)
+    sub.emitBlock(fnsAst)
+    var fnLua = sub.output
+    fnLua = fnLua.replace("\nlocal function ", "\nfunction ")
+    if fnLua.startsWith("local function "):
+      fnLua = fnLua["local ".len .. ^1]
+    lua &= fnLua
+  e.stdlibPreludeLua = lua
+
+proc emitLuaSplit*(ast: seq[KtgValue], sourceDir: string = "",
+                   target: string = ""):
+    tuple[prelude, source: string] =
+  ## Compile a Kintsugi entrypoint into two strings: the runtime support
+  ## prelude (helpers + synthesized type predicates + referenced stdlib
+  ## fns) and the source body. The CLI writes them to separate files;
+  ## the playground renders them in separate panes.
   var e = LuaEmitter(
     indent: 0,
     output: "",
@@ -4794,4 +4871,36 @@ proc emitLua*(ast: seq[KtgValue], sourceDir: string = ""): string =
   e.scanTypeChecks(ast)
   e.scanNoneUsage(ast)
   e.emitBlock(ast)
+  e.expandStdlibIntoPrelude()
+  let prelude = e.buildPrelude()
+  var source = e.output
+  # If there's any prelude content, the source needs to load it. Pick the
+  # right include syntax for the target.
+  if prelude.len > 0:
+    let includeLine =
+      if target == "playdate": "import 'prelude'\n"
+      else: "require('prelude')\n"
+    source = includeLine & source
+  (prelude: prelude, source: source)
+
+proc emitLua*(ast: seq[KtgValue], sourceDir: string = ""): string =
+  ## Backwards-compat wrapper. Returns prelude + source concatenated as
+  ## a single chunk - the prelude is inline, so no require line. Prefer
+  ## emitLuaSplit for new call sites that want true file separation.
+  var e = LuaEmitter(
+    indent: 0,
+    output: "",
+    bindings: initNativeBindings(),
+    nameMap: initTable[string, string](),
+    bindingKinds: initTable[string, BindingKind](),
+    sourceDir: sourceDir,
+    moduleNames: collectModuleNames(ast)
+  )
+  e.prescanBlock(ast)
+  e.inferBindings(ast)
+  e.validateAllGuards()
+  e.scanTypeChecks(ast)
+  e.scanNoneUsage(ast)
+  e.emitBlock(ast)
+  e.expandStdlibIntoPrelude()
   e.buildPrelude() & e.output

@@ -1,42 +1,25 @@
 -- Kintsugi runtime support
-local function _prettify_inner(v)
+-- Reserved global names: _-prefixed helpers + stdlib fns. Kintsugi user code must not shadow these.
+function _prettify(v, inner)
   if v == nil then return "nil" end
   local t = type(v)
-  if t == "string" then
-    return '"' .. v:gsub('\\', '\\\\'):gsub('"', '\\"') .. '"'
-  end
-  if t == "number" or t == "boolean" then return tostring(v) end
+  if t == "string" then return inner and ('"'..v:gsub('"', '\\"')..'"') or v end
   if t ~= "table" then return tostring(v) end
-  local mt = getmetatable(v)
-  if mt ~= nil and mt.__tostring ~= nil then return tostring(v) end
-  local n = #v
-  local kc, isArray = 0, true
-  for k, _ in pairs(v) do
+  local mt = getmetatable(v); if mt and mt.__tostring then return tostring(v) end
+  local n, kc, parts = #v, 0, {}
+  for k in pairs(v) do
     kc = kc + 1
-    if type(k) ~= "number" or k ~= math.floor(k) or k < 1 or k > n then
-      isArray = false
-    end
+    if type(k) ~= "number" or k ~= math.floor(k) or k < 1 or k > n then kc = -1 end
   end
-  if isArray and kc == n then
-    local parts = {}
-    for i = 1, n do parts[i] = _prettify_inner(v[i]) end
-    return "{" .. table.concat(parts, ", ") .. "}"
+  if kc == n then
+    for i = 1, n do parts[i] = _prettify(v[i], true) end
+    return "{"..table.concat(parts, ", ").."}"
   end
-  local parts = {}
   for k, val in pairs(v) do
-    local ks
-    if type(k) == "string" and k:match("^[%a_][%w_]*$") then
-      ks = k
-    else
-      ks = "[" .. _prettify_inner(k) .. "]"
-    end
-    parts[#parts + 1] = ks .. " = " .. _prettify_inner(val)
+    local ks = (type(k) == "string" and k:match("^[%a_][%w_]*$")) and k or "["..tostring(k).."]"
+    parts[#parts+1] = ks.." = ".._prettify(val, true)
   end
-  return "{" .. table.concat(parts, ", ") .. "}"
-end
-local function _prettify(v)
-  if type(v) == "string" then return v end
-  return _prettify_inner(v)
+  return "{"..table.concat(parts, ", ").."}"
 end
 
 local function max_of(a, b)

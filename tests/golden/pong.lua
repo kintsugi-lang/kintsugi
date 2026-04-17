@@ -1,7 +1,8 @@
 -- Kintsugi runtime support
+-- Reserved global names: _-prefixed helpers + stdlib fns. Kintsugi user code must not shadow these.
 math.randomseed(os.time())
-local _NONE = setmetatable({}, {__tostring = function() return "nil" end})
-local function _is_none(v) return v == nil or v == _NONE end
+_NONE = setmetatable({}, {__tostring = function() return "nil" end})
+function _is_none(v) return v == nil or v == _NONE end
 
 local lg = love.graphics
 local le = love.event

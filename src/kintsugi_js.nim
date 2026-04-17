@@ -8,6 +8,7 @@
 ##
 ## Stdlib is available via `import 'math` / `import/using 'math [clamp]`.
 
+import std/json
 import core/[types, version]
 import parse/parser
 import eval/[dialect, evaluator, natives]
@@ -25,15 +26,21 @@ proc setupEval(): Evaluator =
   eval
 
 proc kintsugiCompile*(source: cstring, target: cstring): cstring {.exportc.} =
+  ## Returns a JSON string `{"prelude": "...", "source": "...", "error": ...}`.
+  ## Playground destructures into separate panes. On error, both prelude
+  ## and source are empty and `error` carries the message; otherwise
+  ## `error` is null.
   try:
     let ast = parseSource($source)
     let eval = setupEval()
     let processed = eval.preprocess(ast, forCompilation = true, target = $target)
-    cstring(emitLua(processed, $target))
+    let (prelude, body) = emitLuaSplit(processed, "", $target)
+    cstring($(%*{"prelude": prelude, "source": body, "error": newJNull()}))
   except KtgError as e:
-    cstring("-- Error [" & e.kind & "]: " & e.msg)
+    cstring($(%*{"prelude": "", "source": "",
+                 "error": "[" & e.kind & "]: " & e.msg}))
   except CatchableError as e:
-    cstring("-- Error: " & e.msg)
+    cstring($(%*{"prelude": "", "source": "", "error": e.msg}))
 
 proc kintsugiRun*(source: cstring): cstring {.exportc.} =
   try:

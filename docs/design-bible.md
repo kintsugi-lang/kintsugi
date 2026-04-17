@@ -378,11 +378,20 @@ The emitter validates each `@type/guard` body locally: every head-position word 
 
 **Why:** Without `@type/guard`, where-guard bodies could silently call interpreter-only natives, breaking compilation. With opt-in marking, the emitter guarantees that any guard which compiles in the source also compiles in Lua, with errors local to the edit point.
 
-### Zero-Dependency Lua Output
+### Zero-Dependency Lua Output, Split Across Two Files
 
-Emitted Lua has no external requires. Prelude helpers are tree-shaken — only helpers you actually use appear in the output.
+Compiling an entrypoint produces two files:
 
-**Why:** Game runtimes (Playdate, LOVE2D) have constrained environments. No package manager, no external dependencies. The compiled output must be self-contained.
+- **`prelude.lua`** — runtime support: helper functions (`_prettify`, `_make`, `_NONE`, `_pair_mt`, ...), synthesized `@type` predicates, and any stdlib functions (`lib/*.ktg`) the program references. Everything is declared as a Lua **global** (no `local`) so subsequently-loaded modules transparently see them.
+- **`<source>.lua`** — the user's program. First line is a target-aware include directive: `require('prelude')` for Lua 5.4 / LÖVE, `import 'prelude'` for Playdate. If the program uses no helpers / predicates / stdlib, the prelude file isn't written and the require line is omitted.
+
+Modules (.ktg files without a `Kintsugi [...]` header) emit no prelude reference. The entrypoint that requires them is responsible for loading `prelude.lua` first; helpers are global so they cross chunk boundaries. Running a module file standalone (without the entrypoint priming the prelude) will fail on missing globals — modules are required, not run.
+
+Helpers are tree-shaken: only helpers actually used by the entrypoint and its transitively-required modules appear in `prelude.lua`. Stdlib expansion uses `spliceSelectedFunctions` so only the requested fns plus their dependencies make it in.
+
+**Reserved global namespace in `prelude.lua`:** `_`-prefixed helper names plus stdlib function names. User code must not shadow these.
+
+**Why:** Game runtimes (Playdate, LÖVE2D) have constrained environments — no package manager, no external dependencies. Splitting prelude from source keeps user code readable on its own; the prelude only loads once per program; the compiled source is short enough to read top-to-bottom without scrolling past 50 lines of helpers.
 
 ### Interpreter-Only Features
 

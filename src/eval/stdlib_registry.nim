@@ -68,6 +68,12 @@ proc selectiveModuleAst*(moduleName: string): (seq[KtgValue], seq[FuncDef]) =
     i += 1
   (ast, defs)
 
+proc moduleExports*(moduleName: string): seq[string] =
+  ## Names of every top-level function defined in the named stdlib module.
+  ## Used by the Lua emitter to expand whole-module imports into prelude.
+  let (_, defs) = selectiveModuleAst(moduleName)
+  for d in defs: result.add(d.name)
+
 proc spliceSelectedFunctions*(moduleName: string, symbols: seq[string]): seq[KtgValue] =
   let (ast, defs) = selectiveModuleAst(moduleName)
   let defNames = defs.mapIt(it.name).toHashSet

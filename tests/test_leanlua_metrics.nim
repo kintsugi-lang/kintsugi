@@ -231,6 +231,46 @@ suite "lean-lua metrics":
     # helpers without leaving slack for runaway bloat.
     check preludeLineCount(lua) <= 50
 
+  # --- Split-prelude exit gates: source files must be tiny once helpers
+  # move into prelude.lua. The combined-form gates above measure the
+  # legacy emitLua output; these gates measure the new split.
+  proc splitGolden(name: string): tuple[prelude, source: string] =
+    let ktgPath = currentSourcePath().parentDir / "golden" / (name & ".ktg")
+    let content = readFile(ktgPath)
+    let ast = parseSource(content)
+    let eval = setupEvalForTest()
+    let processed = eval.preprocess(ast, forCompilation = true)
+    let sourceDir = parentDir(absolutePath(ktgPath))
+    emitLuaSplit(processed, sourceDir)
+
+  test "exit gate (split): hello source is just user code + require":
+    let (_, source) = splitGolden("hello")
+    # Source line count: require line + qsort fn + a few prints. Keeps
+    # the source compact - all helpers live in prelude.
+    check source.split('\n').len <= 50
+    check "require('prelude')" in source
+    check "function _prettify" notin source
+
+  test "exit gate (split): combat source has no helper definitions":
+    let (_, source) = splitGolden("combat")
+    check "function _prettify" notin source
+    check "function _make" notin source
+    check "function _NONE" notin source
+    check "_pair_mt" notin source
+    check "require('prelude')" in source
+
+  test "exit gate (split): pong source has no helper definitions":
+    let (_, source) = splitGolden("pong")
+    check "function _prettify" notin source
+    check "function _make" notin source
+
+  test "exit gate (split): prelude bundles all helpers a program uses":
+    let (prelude, _) = splitGolden("hello")
+    # Hello touches _copy, _append, _prettify, _NONE
+    check "function _prettify" in prelude
+    check "function _copy" in prelude
+    check "function _append" in prelude
+
   test "exit gate: script-type goldens run in LuaJIT":
     # Executes compiled output with luajit. Any runtime error -
     # missing helper, bad syntax, undefined global - fails the test.

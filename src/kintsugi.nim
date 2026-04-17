@@ -177,7 +177,11 @@ proc runFile(path: string) =
 # --- Compiler ---
 
 proc compileOne(path: string, outPath: string = "", target: string = "") =
-  ## Compile a single .ktg file. Header presence determines prelude.
+  ## Compile a single .ktg file. Entrypoints (with `Kintsugi [...]` header)
+  ## emit two files: the source and a sibling prelude.lua containing all
+  ## helpers, synthesized type predicates, and referenced stdlib fns.
+  ## Module files (no header) emit only their body; the entrypoint that
+  ## requires them is responsible for loading the prelude.
   if not fileExists(path):
     echo "Error: file not found: " & path
     quit(1)
@@ -190,18 +194,21 @@ proc compileOne(path: string, outPath: string = "", target: string = "") =
   let processed = eval.preprocess(ast, forCompilation = true, target = target)
   let sourceDir = parentDir(absolutePath(path))
 
-  let luaCode = if isEntrypoint:
-                  emitLua(processed, sourceDir)
-                else:
-                  emitLuaModule(processed, sourceDir)
+  let resolvedOut = if outPath.len > 0: outPath
+                    else: path.changeFileExt("lua")
 
-  if outPath.len > 0:
-    writeFile(outPath, luaCode)
-    echo "Compiled: " & path & " -> " & outPath
+  if isEntrypoint:
+    let (preludeLua, sourceLua) = emitLuaSplit(processed, sourceDir, target)
+    writeFile(resolvedOut, sourceLua)
+    echo "Compiled: " & path & " -> " & resolvedOut
+    if preludeLua.len > 0:
+      let preludePath = parentDir(resolvedOut) / "prelude.lua"
+      writeFile(preludePath, preludeLua)
+      echo "Wrote prelude: " & preludePath
   else:
-    let defaultOut = path.changeFileExt("lua")
-    writeFile(defaultOut, luaCode)
-    echo "Compiled: " & path & " -> " & defaultOut
+    let luaCode = emitLuaModule(processed, sourceDir)
+    writeFile(resolvedOut, luaCode)
+    echo "Compiled: " & path & " -> " & resolvedOut
 
 proc compilePath(path: string, outPath: string = "", target: string = "") =
   if dirExists(path):
@@ -218,32 +225,31 @@ proc compilePath(path: string, outPath: string = "", target: string = "") =
     compileOne(path, outPath, target)
 
 proc dryRunPath(path: string, target: string = "") =
-  if dirExists(path):
-    for f in collectKtgFiles(path):
-      let content = readFile(f)
-      let isEntrypoint = hasHeader(content)
-      let source = stripHeader(content)
-      let ast = parseSource(source)
-      let eval = setupEval()
-      let processed = eval.preprocess(ast, forCompilation = true, target = target)
-      let sourceDir = parentDir(absolutePath(f))
-      echo ";; " & f
-      if isEntrypoint:
-        echo emitLua(processed, sourceDir)
-      else:
-        echo emitLuaModule(processed, sourceDir)
-  else:
-    let content = readFile(path)
+  proc dryOne(f: string) =
+    let content = readFile(f)
     let isEntrypoint = hasHeader(content)
     let source = stripHeader(content)
     let ast = parseSource(source)
     let eval = setupEval()
     let processed = eval.preprocess(ast, forCompilation = true, target = target)
-    let sourceDir = parentDir(absolutePath(path))
+    let sourceDir = parentDir(absolutePath(f))
     if isEntrypoint:
-      echo emitLua(processed, sourceDir)
+      let (preludeLua, sourceLua) = emitLuaSplit(processed, sourceDir, target)
+      if preludeLua.len > 0:
+        echo ";; --- prelude.lua ---"
+        echo preludeLua
+      echo ";; --- " & extractFilename(f).changeFileExt("lua") & " ---"
+      echo sourceLua
     else:
+      echo ";; --- " & extractFilename(f).changeFileExt("lua") & " (module) ---"
       echo emitLuaModule(processed, sourceDir)
+
+  if dirExists(path):
+    for f in collectKtgFiles(path):
+      echo ";; " & f
+      dryOne(f)
+  else:
+    dryOne(path)
 
 # --- Main ---
 

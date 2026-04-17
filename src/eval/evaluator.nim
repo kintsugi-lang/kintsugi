@@ -1466,39 +1466,26 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue],
         result.add(v)
       i += 2
 
-    # import/using 'module [symbols] - splice only needed functions
+    # import 'module / import/using 'module [symbols] - in compilation mode
+    # the import statement is preserved verbatim; the emitter detects it
+    # during prescan and routes the requested functions into prelude.lua
+    # (where they live as globals) rather than splicing them inline into
+    # the user's source.lua. Validate the module name here so unknown
+    # imports fail at preprocess time, not at emit time.
     elif forCompilation and ast[i].kind == vkWord and ast[i].wordKind == wkWord and
-       ast[i].wordName == "import/using" and i + 2 < ast.len and
-       ast[i + 1].kind == vkWord and ast[i + 1].wordKind == wkLitWord and
-       ast[i + 2].kind == vkBlock:
-      let moduleName = ast[i + 1].wordName
-      if moduleName in stdlibModules:
-        var symbols: seq[string]
-        for v in ast[i + 2].blockVals:
-          if v.kind == vkWord:
-            symbols.add(v.wordName)
-        let selected = spliceSelectedFunctions(moduleName, symbols)
-        for v in selected:
-          result.add(v)
-      else:
-        raise KtgError(kind: "import",
-          msg: "unknown module: " & moduleName, data: nil)
-      i += 3
-
-    # import 'module - splice stdlib source for compilation
-    elif forCompilation and ast[i].kind == vkWord and ast[i].wordKind == wkWord and
-       ast[i].wordName == "import" and i + 1 < ast.len and
+       ast[i].wordName in ["import", "import/using"] and i + 1 < ast.len and
        ast[i + 1].kind == vkWord and ast[i + 1].wordKind == wkLitWord:
       let moduleName = ast[i + 1].wordName
-      if moduleName in stdlibModules:
-        let source = stripModuleHeader(stdlibModules[moduleName])
-        let moduleAst = parseSource(source)
-        for v in moduleAst:
-          result.add(v)
-      else:
+      if moduleName notin stdlibModules:
         raise KtgError(kind: "import",
           msg: "unknown module: " & moduleName, data: nil)
+      result.add(ast[i])
+      result.add(ast[i + 1])
       i += 2
+      if ast[i - 2].wordName == "import/using" and i < ast.len and
+         ast[i].kind == vkBlock:
+        result.add(ast[i])
+        i += 1
 
     else:
       result.add(ast[i])

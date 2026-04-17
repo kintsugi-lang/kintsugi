@@ -32,7 +32,7 @@ suite "emitter: split":
 
   test "split helper is included in prelude":
     let code = emitLua(parseSource("""split "a,b" "," """))
-    check "local function _split" in code
+    check "function _split" in code
     check "s:find(d, p, true)" in code
 
 suite "emitter: last":
@@ -108,7 +108,7 @@ suite "emitter: inline make":
       ]
       p: make Pos [x: 5]
     """))
-    check "local function _make" notin code
+    check "function _make" notin code
 
   test "make preserves field order from object definition":
     let code = emitLua(parseSource("""
@@ -752,7 +752,7 @@ suite "emitter: synthesized type predicates":
       positive!: @type/where [integer!] [it > 0]
       if is? positive! 5 [print "ok"]
     """))
-    check "local function _positive_p(it)" in code
+    check "function _positive_p(it)" in code
     check "_positive_p(5)" in code
 
   test "predicate not emitted when not used":
@@ -767,14 +767,14 @@ suite "emitter: synthesized type predicates":
       sn!: @type [string! | none!]
       if is? sn! "x" [print "yes"]
     """))
-    check "local function _sn_p(it)" in code
+    check "function _sn_p(it)" in code
 
   test "enum type emits named predicate":
     let code = emitLua(parseSource("""
       dir!: @type/enum ['n | 's | 'e | 'w]
       if is? dir! 'n [print "yes"]
     """))
-    check "local function _dir_p(it)" in code
+    check "function _dir_p(it)" in code
     check "it == \"n\"" in code
 
   test "transitive composition pulls in dependency predicates":
@@ -783,8 +783,8 @@ suite "emitter: synthesized type predicates":
       mixed!: @type [positive! | string!]
       if is? mixed! 5 [print "ok"]
     """))
-    check "local function _positive_p(it)" in code
-    check "local function _mixed_p(it)" in code
+    check "function _positive_p(it)" in code
+    check "function _mixed_p(it)" in code
     # positive must come before mixed (topological order).
     let posIdx = code.find("_positive_p(it)")
     let mixIdx = code.find("_mixed_p(it)")
@@ -809,7 +809,7 @@ suite "emitter: synthesized type predicates":
       ]
     """))
     check "_positive_p(5)" in code
-    check "local function _positive_p" in code
+    check "function _positive_p" in code
 
   test "match pattern on built-in type still uses primitive type check":
     let code = emitLua(parseSource("""
@@ -855,4 +855,36 @@ suite "emitter: meta-word emission":
       discard emitLua(parseSource("""
         @exit [print "x"]
       """))
+
+# =============================================================================
+# emitLuaSplit returns prelude + source separately (Step 1 of prelude split)
+# =============================================================================
+
+suite "emitter: split prelude + source":
+  test "program using print returns non-empty prelude and source":
+    let (prelude, source) = emitLuaSplit(parseSource("""
+      print [1 2 3]
+    """))
+    check prelude.len > 0
+    check source.len > 0
+    check "_prettify" in prelude
+    check "_prettify" in source
+    check "require('prelude')" in source
+
+  test "empty-helpers program returns empty prelude and no require line":
+    # Bare literals + arithmetic don't need any prelude helpers.
+    let (prelude, source) = emitLuaSplit(parseSource("""
+      print "hello"
+    """))
+    check prelude.len == 0
+    check "require('prelude')" notin source
+    check "import 'prelude'" notin source
+
+  test "playdate target uses import directive":
+    let (prelude, source) = emitLuaSplit(parseSource("""
+      print [1 2 3]
+    """), target = "playdate")
+    check prelude.len > 0
+    check "import 'prelude'" in source
+    check "require('prelude')" notin source
 
