@@ -19,7 +19,7 @@ squares-up-to: function [n [integer!]] [
 
 ; --- loop/partition with set destructure ---
 split-even-odd: function [blk [block!]] [
-  set [evens odds] loop/partition [for [x] in blk do [(modulo x 2) = 0]]
+  set [evens odds] loop/partition [for [x] in blk do [(x % 2) = 0]]
   [evens odds]
 ]
 

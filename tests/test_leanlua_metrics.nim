@@ -12,6 +12,7 @@
 import std/[unittest, strutils, os, osproc]
 import ../src/parse/parser
 import ../src/emit/lua
+import ./emit_test_helper
 import ../src/eval/[evaluator, natives]
 import ../src/dialects/[loop_dialect, match_dialect, object_dialect,
                         attempt_dialect, parse_dialect]
@@ -38,7 +39,7 @@ proc compileGolden(name: string): string =
   let processed = eval.preprocess(ast, forCompilation = true)
   let sourceDir = parentDir(absolutePath(ktgPath))
   if isEntrypoint: emitLua(processed, sourceDir)
-  else: emitLuaModule(processed, sourceDir)
+  else: emitLuaModule(processed, sourceDir).lua
 
 proc countOccurrences(text, needle: string): int =
   ## Non-overlapping occurrences of `needle` in `text`.
@@ -95,21 +96,9 @@ suite "lean-lua metrics":
     let stress = compileGolden("leanlua_stress")
     check countOccurrences(stress, "local _set_tmp = (function()") == 0
 
-  test "if as expression uses and-or when body is simple":
-    let src = "Kintsugi [name: 'if-expr-test]\nx: if (1 > 0) [42]\nprint x\n"
-    let ast = parseSource(src)
-    let eval = setupEvalForTest()
-    let processed = eval.preprocess(ast, forCompilation = true)
-    let lua = emitLua(processed, "")
-    check countOccurrences(lua, "(function()") == 0
-
-  test "either as expression uses and-or when both branches are literal":
-    let src = "Kintsugi [name: 'either-expr-test]\nprint (either 1 > 0 [\"yes\"] [\"no\"])\n"
-    let ast = parseSource(src)
-    let eval = setupEvalForTest()
-    let processed = eval.preprocess(ast, forCompilation = true)
-    let lua = emitLua(processed, "")
-    check countOccurrences(lua, "(function()") == 0
+  # The "and-or" inline optimizations for `if` / `either` at expression
+  # position were measured and dropped — the literal-safety gate meant
+  # they never fired on actual Kintsugi source. Removed as dead code.
 
   test "rejoin with numeric-literal-returning function has no defensive tostring":
     let src = "Kintsugi [name: 'rejoin-literal-test]\n" &
@@ -241,7 +230,8 @@ suite "lean-lua metrics":
     let eval = setupEvalForTest()
     let processed = eval.preprocess(ast, forCompilation = true)
     let sourceDir = parentDir(absolutePath(ktgPath))
-    emitLuaSplit(processed, sourceDir)
+    let r = emitLuaSplit(processed, sourceDir)
+    (prelude: r.prelude, source: r.source)
 
   test "exit gate (split): hello source is just user code + require":
     let (_, source) = splitGolden("hello")

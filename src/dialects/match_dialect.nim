@@ -102,21 +102,31 @@ proc matchBlock(patterns: seq[KtgValue], values: seq[KtgValue],
 proc matchValue(pattern: KtgValue, value: KtgValue,
                 bindings: var seq[(string, KtgValue)],
                 eval: Evaluator, ctx: KtgContext): bool =
-  ## Top-level match: if pattern is a block, destructure against value.
-  ## A block pattern with a single element matches a scalar value against that element.
+  ## Top-level match. A block pattern with N elements matches a block
+  ## value of length N (positional destructure). A single-element
+  ## pattern also matches a scalar value against that element
+  ## (`[_]` wildcard, `[x]` capture, `[integer!]` type check, `[n?]`
+  ## predicate) — this is the "any one value" idiom.
+  ##
+  ## Exception: a single-element pattern whose sole element is itself
+  ## a block (`[[a b]]`) does NOT fall back to treating the inner block
+  ## as the pattern. That form was a redundant spelling of the direct
+  ## multi-element destructure `[a b]`. Nested destructure is reached
+  ## via positional patterns (`[_ [a b]]`).
   if pattern.kind == vkBlock:
     let elems = pattern.blockVals
     if value.kind == vkBlock:
-      # Both pattern and value are blocks — try destructure first
       if matchBlock(elems, value.blockVals, bindings, eval, ctx):
         return true
-      # If destructure failed and pattern is single element, try scalar match
-      # (e.g., [_] as catch-all for any block, [x] to capture entire block)
-      if elems.len == 1:
+      # Single-element fallback: allowed for non-block elements only, so
+      # `[_]` catches any block but `[[a b]]` does NOT sneak-destructure.
+      if elems.len == 1 and elems[0].kind != vkBlock:
         return matchSingleValue(elems[0], value, bindings, eval, ctx)
       return false
     elif elems.len == 1:
-      # Single-element block pattern against scalar value
+      # Single-element pattern against scalar: same rule.
+      if elems[0].kind == vkBlock:
+        return false
       return matchSingleValue(elems[0], value, bindings, eval, ctx)
     else:
       return false

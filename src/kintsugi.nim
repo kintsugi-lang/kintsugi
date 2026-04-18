@@ -16,27 +16,10 @@ import emit/lua
 import dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect, parse_dialect]
 import core/version
 
-proc hasHeader(source: string): bool =
-  source.strip.startsWith("Kintsugi")
-
-proc stripHeader(source: string): string =
-  ## Strip Kintsugi [...] header if present.
-  let trimmed = source.strip
-  if not trimmed.startsWith("Kintsugi"):
-    return source
-  var depth = 0
-  var inHeader = false
-  for i in 0 ..< source.len:
-    if source[i] == '[' and not inHeader:
-      inHeader = true
-      depth = 1
-    elif source[i] == '[' and inHeader:
-      depth += 1
-    elif source[i] == ']' and inHeader:
-      depth -= 1
-      if depth == 0:
-        return source[i+1 .. ^1]
-  source
+## Header stripping is done on the parsed AST via `parseSourceStripped`
+## in parse/parser.nim. This correctly handles `[` characters inside
+## strings or comments — a problem the old string-level bracket counter
+## quietly ignored.
 
 proc setupEval(): Evaluator =
   let eval = newEvaluator()
@@ -147,11 +130,12 @@ proc runSingleFile(path: string, eval: Evaluator = nil) =
     echo "Error: file not found: " & path
     quit(1)
 
-  let source = stripHeader(readFile(path))
+  let source = readFile(path)
+  let (ast, _) = parseSourceStripped(source)
   let e = if eval != nil: eval else: setupEval()
 
   try:
-    discard e.evalString(source)
+    discard e.evalBlock(e.preprocess(ast), e.global)
   except ExitSignal as e:
     quit(e.code)
   except KtgError as ke:
@@ -187,9 +171,7 @@ proc compileOne(path: string, outPath: string = "", target: string = "") =
     quit(1)
 
   let content = readFile(path)
-  let isEntrypoint = hasHeader(content)
-  let source = stripHeader(content)
-  let ast = parseSource(source)
+  let (ast, isEntrypoint) = parseSourceStripped(content)
   let eval = setupEval()
   let processed = eval.preprocess(ast, forCompilation = true, target = target)
   let sourceDir = parentDir(absolutePath(path))
@@ -198,17 +180,23 @@ proc compileOne(path: string, outPath: string = "", target: string = "") =
                     else: path.changeFileExt("lua")
 
   if isEntrypoint:
-    let (preludeLua, sourceLua) = emitLuaSplit(processed, sourceDir, target, eval)
+    let (preludeLua, sourceLua, depWrites) =
+      emitLuaSplit(processed, sourceDir, target, eval)
     writeFile(resolvedOut, sourceLua)
     echo "Compiled: " & path & " -> " & resolvedOut
     if preludeLua.len > 0:
       let preludePath = parentDir(resolvedOut) / "prelude.lua"
       writeFile(preludePath, preludeLua)
       echo "Wrote prelude: " & preludePath
+    for dep in depWrites:
+      writeFile(dep.path, dep.lua)
   else:
-    let luaCode = emitLuaModule(processed, sourceDir, eval = eval)
+    let (luaCode, depWrites) =
+      emitLuaModule(processed, sourceDir, eval = eval, target = target)
     writeFile(resolvedOut, luaCode)
     echo "Compiled: " & path & " -> " & resolvedOut
+    for dep in depWrites:
+      writeFile(dep.path, dep.lua)
 
 proc compilePath(path: string, outPath: string = "", target: string = "") =
   if dirExists(path):
@@ -227,14 +215,13 @@ proc compilePath(path: string, outPath: string = "", target: string = "") =
 proc dryRunPath(path: string, target: string = "") =
   proc dryOne(f: string) =
     let content = readFile(f)
-    let isEntrypoint = hasHeader(content)
-    let source = stripHeader(content)
-    let ast = parseSource(source)
+    let (ast, isEntrypoint) = parseSourceStripped(content)
     let eval = setupEval()
     let processed = eval.preprocess(ast, forCompilation = true, target = target)
     let sourceDir = parentDir(absolutePath(f))
     if isEntrypoint:
-      let (preludeLua, sourceLua) = emitLuaSplit(processed, sourceDir, target, eval)
+      let (preludeLua, sourceLua, _) =
+        emitLuaSplit(processed, sourceDir, target, eval)
       if preludeLua.len > 0:
         echo ";; --- prelude.lua ---"
         echo preludeLua
@@ -242,7 +229,7 @@ proc dryRunPath(path: string, target: string = "") =
       echo sourceLua
     else:
       echo ";; --- " & extractFilename(f).changeFileExt("lua") & " (module) ---"
-      echo emitLuaModule(processed, sourceDir, eval = eval)
+      echo emitLuaModule(processed, sourceDir, eval = eval).lua
 
   if dirExists(path):
     for f in collectKtgFiles(path):

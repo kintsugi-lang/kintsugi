@@ -5,6 +5,7 @@ import ../src/dialects/game_dialect
 import ../src/parse/parser
 import ../src/eval/[evaluator, natives]
 import ../src/emit/lua
+import ./emit_test_helper
 
 suite "game dialect skeleton":
   test "love2d backend is registered":

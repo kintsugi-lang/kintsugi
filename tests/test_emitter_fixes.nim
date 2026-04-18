@@ -5,23 +5,24 @@ import std/strutils
 import ../src/core/types
 import ../src/parse/[lexer, parser]
 import ../src/emit/lua
+import ./emit_test_helper
 
 suite "emitter: type predicates":
   test "integer? uses floor check":
-    let code = emitLua(parseSource("integer? x"))
+    let code = emitLua(parseSource("x: 0\ninteger? x"))
     check "math.floor" in code
     check "\"number\"" in code
 
   test "float? uses inverse floor check":
-    let code = emitLua(parseSource("float? x"))
+    let code = emitLua(parseSource("x: 0\nfloat? x"))
     check "math.floor" in code
     check "~=" in code
 
   test "float? and integer? are mutually exclusive in logic":
     # float? should check floor(x) ~= x (not whole number)
     # integer? should check floor(x) == x (whole number)
-    let intCode = emitLua(parseSource("integer? x"))
-    let floatCode = emitLua(parseSource("float? x"))
+    let intCode = emitLua(parseSource("x: 0\ninteger? x"))
+    let floatCode = emitLua(parseSource("x: 0\nfloat? x"))
     check "==" in intCode
     check "~=" in floatCode
 
@@ -37,11 +38,11 @@ suite "emitter: split":
 
 suite "emitter: last":
   test "last on simple var emits direct indexing":
-    let code = emitLua(parseSource("last x"))
+    let code = emitLua(parseSource("x: [1 2 3]\nlast x"))
     check "x[#x]" in code
 
   test "last on complex expr avoids double-eval":
-    let code = emitLua(parseSource("last (f 1)"))
+    let code = emitLua(parseSource("f: function [n] [[1 2 3]]\nlast (f 1)"))
     check "local _t" in code
 
 suite "emitter: @const":
@@ -49,10 +50,6 @@ suite "emitter: @const":
     let code = emitLua(parseSource("x: @const 42"))
     check "<const>" in code
     check "= 42" in code
-
-  test "legacy pre-set-word form is a compile error":
-    expect EmitError:
-      discard emitLua(parseSource("@const x: 42"))
 
 suite "emitter: inline make":
   test "make inlines defaults with overrides":
@@ -166,15 +163,69 @@ suite "emitter: match without IIFE":
     check "r = " in code
 
   test "match assignment with destructuring hoists":
+    # Multi-element pattern `[a b]` destructures the value block. The
+    # older `[[a b]]` single-element wrapper was redundant and has been
+    # removed from the dialect.
     let code = emitLua(parseSource("""
       pair: [10 20]
       r: match pair [
-        [[a b]] [a + b]
+        [a b]   [a + b]
         default [0]
       ]
     """))
     check "(function()" notin code
     check "r = " in code
+
+  test "match assignment with multi-statement handler still binds":
+    # Multi-statement handler body (>3 tokens) must still produce an
+    # assignment to r. Historical bug: the emitter dropped the assignment
+    # and emitted only the body statements, leaving r unbound. The
+    # assertion counts assignments so a `r = 0` in the default branch
+    # can't mask a missing assignment in the [1] branch.
+    let code = emitLua(parseSource("""
+      x: 1
+      r: match x [
+        [1] [
+          tmp: x + 1
+          tmp * 2
+        ]
+        default [0]
+      ]
+    """))
+    check code.count("r = ") >= 2
+    # The bare expression `tmp * 2` would be invalid Lua at statement
+    # position; the fix must wrap or rewrite it as an assignment.
+    check "\n  tmp * 2\n" notin code
+
+  test "match assignment with multi-statement default handler still binds":
+    let code = emitLua(parseSource("""
+      x: 99
+      r: match x [
+        [1] ["one"]
+        default [
+          tmp: x * 2
+          tmp + 1
+        ]
+      ]
+    """))
+    check code.count("r = ") >= 2
+    check "\n  tmp + 1\n" notin code
+
+  test "match assignment with multi-statement only-default handler still binds":
+    # Only a default branch, multi-statement body — different code path
+    # (first=true) in emitMatchHoisted. Previously produced invalid Lua
+    # with a bare `tmp * 2` statement and no assignment.
+    let code = emitLua(parseSource("""
+      x: 42
+      r: match x [
+        default [
+          tmp: x + 1
+          tmp * 2
+        ]
+      ]
+    """))
+    check "r = " in code
+    check "\n  tmp * 2\n" notin code
 
 suite "emitter: field-aware _prettify in rejoin":
   test "typed integer field skips _prettify":
@@ -210,11 +261,14 @@ suite "emitter: field-aware _prettify in rejoin":
     """))
     check "_prettify(b.contents)" in code
 
-  test "unknown variable gets _prettify":
+  test "untyped context field gets _prettify":
+    # A context field reached via path has no SeqType/concat-safety
+    # info, so rejoin wraps it in _prettify.
     let code = emitLua(parseSource("""
-      print rejoin ["Value: " x]
+      ctx: context [val: none]
+      print rejoin ["Value: " ctx/val]
     """))
-    check "_prettify(x)" in code
+    check "_prettify(ctx.val)" in code
 
   test "typed function param skips _prettify in rejoin":
     let code = emitLua(parseSource("""
@@ -844,16 +898,58 @@ suite "emitter: meta-word emission":
     check "function" in code
     check "x > 0" in code
 
-  test "@enter at expression position is a compile error":
-    expect EmitError:
-      discard emitLua(parseSource("""
-        @enter [print "x"]
-      """))
+  test "@enter at module scope partitions and runs as setup":
+    # Module-level @enter blocks are hoisted to the top of the module
+    # per lifecycle partition semantics (matches interpreter).
+    let code = emitLua(parseSource("""
+      @enter [print "setup"]
+      print "body"
+    """))
+    let enterPos = code.find("print(\"setup\")")
+    let bodyPos = code.find("print(\"body\")")
+    check enterPos >= 0
+    check bodyPos > enterPos
 
-  test "@exit at expression position is a compile error":
+  test "@exit at module scope runs after body":
+    let code = emitLua(parseSource("""
+      print "body"
+      @exit [print "cleanup"]
+    """))
+    let bodyPos = code.find("print(\"body\")")
+    let exitPos = code.find("print(\"cleanup\")")
+    check bodyPos >= 0
+    check exitPos > bodyPos
+
+  test "@enter inside a function body runs once per call":
+    let code = emitLua(parseSource("""
+      f: function [] [
+        @enter [print "setup"]
+        print "work"
+      ]
+    """))
+    check "print(\"setup\")" in code
+    check "print(\"work\")" in code
+
+  test "@exit in implicit-return function captures result via IIFE":
+    # When a function has @exit, the body's implicit return must happen
+    # AFTER the exit block runs. Emitter uses an IIFE to capture.
+    let code = emitLua(parseSource("""
+      f: function [] [
+        @exit [print "done"]
+        42
+      ]
+    """))
+    check "local _body_result" in code
+    check "print(\"done\")" in code
+    check "return _body_result" in code
+
+  test "@enter in a paren group is a compile error":
+    # Partition only runs on blocks. @enter/@exit in a paren group is
+    # malformed — the partition pass can't see it, so the emitter
+    # refuses rather than silently dropping.
     expect EmitError:
       discard emitLua(parseSource("""
-        @exit [print "x"]
+        x: (@enter [1] 42)
       """))
 
 # =============================================================================
@@ -862,7 +958,7 @@ suite "emitter: meta-word emission":
 
 suite "emitter: split prelude + source":
   test "program using print returns non-empty prelude and source":
-    let (prelude, source) = emitLuaSplit(parseSource("""
+    let (prelude, source, _) = emitLuaSplit(parseSource("""
       print [1 2 3]
     """))
     check prelude.len > 0
@@ -873,7 +969,7 @@ suite "emitter: split prelude + source":
 
   test "empty-helpers program returns empty prelude and no require line":
     # Bare literals + arithmetic don't need any prelude helpers.
-    let (prelude, source) = emitLuaSplit(parseSource("""
+    let (prelude, source, _) = emitLuaSplit(parseSource("""
       print "hello"
     """))
     check prelude.len == 0
@@ -881,10 +977,116 @@ suite "emitter: split prelude + source":
     check "import 'prelude'" notin source
 
   test "playdate target uses import directive":
-    let (prelude, source) = emitLuaSplit(parseSource("""
+    let (prelude, source, _) = emitLuaSplit(parseSource("""
       print [1 2 3]
     """), target = "playdate")
     check prelude.len > 0
     check "import 'prelude'" in source
     check "require('prelude')" notin source
 
+
+# --- Phase 1 invariant tests: strict-globals diagnostic ----------------------
+
+suite "emitter: strict globals":
+  test "undeclared bare word raises EmitError":
+    # Phase 1 invariant: a word that isn't in bindings, locals,
+    # moduleNames, the Lua stdlib allowlist, or a target allowlist
+    # must compile-error rather than emit a silent Lua global.
+    expect EmitError:
+      discard emitLua(parseSource("no-such-global"))
+
+  test "undeclared call head raises EmitError":
+    expect EmitError:
+      discard emitLua(parseSource("typo-fn 1 2"))
+
+  test "declared local passes":
+    let code = emitLua(parseSource("x: 42\nx"))
+    check "local x = 42" in code
+
+  test "native names pass":
+    let code = emitLua(parseSource("""print "hi" """))
+    check "print(\"hi\")" in code
+
+  test "stdlib-imported fn passes after import":
+    let code = emitLua(parseSource("""
+      import/using 'math [clamp]
+      v: clamp 15 0 10
+    """))
+    check "clamp(15, 0, 10)" in code
+
+  test "playdate target allows playdate globals":
+    let (_, source, _) = emitLuaSplit(parseSource("""
+      bindings [update "playdate.update" 'assign]
+      update: function [] [playdate/update]
+    """), target = "playdate")
+    check "playdate.update" in source
+
+# --- Phase 3a invariant tests: deferred dep-file writes ----------------------
+
+suite "emitter: depWrites from import":
+  test "emitLuaModule populates depWrites for %path import":
+    # Phase 3a invariant: file writes are deferred to caller. The
+    # module entry must surface the compiled dep as a (path, lua) pair
+    # rather than writing it inline during emission.
+    let r = emitLuaModule(parseSource("""
+      utils: import %test-module.ktg
+    """), "tests/fixtures")
+    check r.depWrites.len >= 1
+    let dep = r.depWrites[0]
+    check dep.path.endsWith("test-module.lua")
+    # Dep content must include the compiled module body, not the raw source.
+    check "function double(x)" in dep.lua
+    check "function triple(x)" in dep.lua
+
+  test "emitLuaSplit populates depWrites for %path import":
+    let r = emitLuaSplit(parseSource("""
+      Kintsugi [name: 'test]
+      utils: import %test-module.ktg
+      print utils/double 5
+    """), "tests/fixtures")
+    check r.depWrites.len >= 1
+    check r.depWrites[0].path.endsWith("test-module.lua")
+
+  test "sources without imports produce no depWrites":
+    let r = emitLuaModule(parseSource("x: 1 + 2"))
+    check r.depWrites.len == 0
+
+# --- Phase 4.2 invariant tests: prelude emits deps before dependents ---------
+
+suite "emitter: prelude dependency order":
+  test "_equals emits before _has":
+    # Phase 4.2 invariant: PreludeRegistry order must keep dependencies
+    # before dependents. `_has` calls `_equals`, so `_equals` must be
+    # defined first or the compiled Lua fails at load time.
+    let (prelude, _, _) = emitLuaSplit(parseSource("""
+      needles: [[1 2] [3 4]]
+      check: has? needles [1 2]
+    """))
+    let equalsPos = prelude.find("function _equals")
+    let hasPos = prelude.find("function _has")
+    check equalsPos >= 0
+    check hasPos >= 0
+    check equalsPos < hasPos
+
+  test "_equals emits before _select when both used":
+    # _select also references _equals for value-equality lookup.
+    let (prelude, _, _) = emitLuaSplit(parseSource("""
+      assoc: ["a" 1 "b" 2]
+      v: select assoc "b"
+    """))
+    let equalsPos = prelude.find("function _equals")
+    let selectPos = prelude.find("function _select")
+    check equalsPos >= 0
+    check selectPos >= 0
+    check equalsPos < selectPos
+
+  test "unused helpers are not emitted":
+    # Demand-driven: a program that uses no helpers should produce no
+    # helper bodies in the prelude.
+    let (prelude, _, _) = emitLuaSplit(parseSource("""
+      Kintsugi [name: 'tiny]
+      print "hi"
+    """))
+    check "function _equals" notin prelude
+    check "function _has" notin prelude
+    check "function _prettify" notin prelude

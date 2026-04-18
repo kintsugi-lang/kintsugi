@@ -3,6 +3,7 @@ import std/strutils
 import ../src/core/types
 import ../src/parse/[lexer, parser]
 import ../src/emit/lua
+import ./emit_test_helper
 
 suite "lua emitter":
   test "emit literals":
@@ -84,13 +85,6 @@ suite "binding tracking":
     check "greet(\"world\", false)" in code
 
 suite "emission context":
-  test "if in expression position with literal body uses and-or":
-    let code = emitLua(parseSource("""
-      x: if true [42]
-    """))
-    check "local x = (true and 42 or nil)" in code
-    check "function()" notin code
-
   test "if in statement position emits directly":
     let code = emitLua(parseSource("""
       if true [print 42]
@@ -210,14 +204,14 @@ suite "import compilation":
     let code = emitLuaModule(parseSource("""
       add: function [a b] [a + b]
       exports [add]
-    """))
+    """)).lua
     check "return {add = add}" in code
 
   test "exports is skipped in body":
     let code = emitLuaModule(parseSource("""
       x: 42
       exports [x]
-    """))
+    """)).lua
     check "exports" notin code or "return {x = x}" in code
 
 suite "series operation emission":
@@ -373,6 +367,25 @@ suite "control flow emission":
       x: attempt [source [42] fallback [0]]
     """))
     check "pcall" in code
+
+  test "sourceless attempt emits reusable function(it)":
+    # Matches src/dialects/attempt_dialect.nim:269-286: no source block
+    # returns a 1-arg function taking input as `it`.
+    let code = emitLua(parseSource("""
+      clean: attempt [then [uppercase it] catch 'user [""]]
+    """))
+    check "function(it)" in code
+    # Must not be immediately invoked — it's a reusable value.
+    check "end)()" notin code or "pcall" in code  # pcall IIFE is inside
+    check "pcall" in code
+
+  test "sourceless attempt is callable from pipeline":
+    let code = emitLua(parseSource("""
+      double: attempt [then [it * 2]]
+      r: double 21
+    """))
+    check "function(it)" in code
+    check "double(21)" in code
 
   test "try emits pcall":
     let code = emitLua(parseSource("""

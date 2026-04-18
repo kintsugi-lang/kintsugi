@@ -1,5 +1,5 @@
 import std/[strutils, tables, math, sets]
-import ../core/[types, equality]
+import ../core/[types, equality, lifecycle]
 import ../parse/parser
 import dialect, stdlib_registry
 import ../dialects/game_dialect
@@ -883,16 +883,10 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
         return typeVal
 
       # @const value — annotate following expression as a constant binding.
-      # New canonical form is `name: @const value`; the legacy form
-      # `@const name: value` is a hard error to migrate uniformly with the
-      # other meta-words (type, type/guard, type/where, type/enum, compose,
-      # template, parse) which all follow the set-word.
+      # Canonical form is `name: @const value` (parallel to @type, @type/guard,
+      # @type/where, @type/enum, @compose, @template, @parse — every meta-word
+      # follows the set-word).
       if val.wordName == "const":
-        if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkSetWord:
-          raise KtgError(kind: "syntax",
-            msg: "@const must follow the set-word, not precede it. " &
-                 "Use 'name: @const value' instead of '@const name: value'.",
-            data: nil)
         if pos < vals.len:
           var rhs = eval.evalNext(vals, pos, ctx)
           eval.applyInfix(rhs, vals, pos, ctx)
@@ -940,52 +934,28 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
 
 proc evalBlock*(eval: Evaluator, vals: seq[KtgValue],
                 ctx: KtgContext): KtgValue =
-  # Check for @enter / @exit lifecycle hooks
-  var hasHooks = false
-  for v in vals:
-    if v.kind == vkWord and v.wordKind == wkMetaWord and
-       v.wordName in ["enter", "exit"]:
-      hasHooks = true
-      break
-
-  if hasHooks:
-    var enterBlocks: seq[seq[KtgValue]] = @[]
-    var exitBlocks: seq[seq[KtgValue]] = @[]
-    var bodyVals: seq[KtgValue] = @[]
-    var i = 0
-    while i < vals.len:
-      if vals[i].kind == vkWord and vals[i].wordKind == wkMetaWord:
-        if vals[i].wordName == "enter" and i + 1 < vals.len and
-           vals[i + 1].kind == vkBlock:
-          enterBlocks.add(vals[i + 1].blockVals)
-          i += 2
-          continue
-        if vals[i].wordName == "exit" and i + 1 < vals.len and
-           vals[i + 1].kind == vkBlock:
-          exitBlocks.add(vals[i + 1].blockVals)
-          i += 2
-          continue
-      bodyVals.add(vals[i])
-      i += 1
-
+  # Check for @enter / @exit lifecycle hooks. Partitioning logic shared
+  # with the Lua emitter via src/core/lifecycle.nim.
+  let lc = partitionLifecycle(vals)
+  if lc.hasHooks:
     # Run @enter hooks
-    for blk in enterBlocks:
+    for blk in lc.enterBlocks:
       discard eval.evalBlock(blk, ctx)
 
     # Run body with finally for @exit
     try:
       result = ktgNone()
       var pos = 0
-      while pos < bodyVals.len:
-        let startLine = bodyVals[pos].line
+      while pos < lc.body.len:
+        let startLine = lc.body[pos].line
         try:
-          result = eval.evalNext(bodyVals, pos, ctx)
-          eval.applyInfix(result, bodyVals, pos, ctx)
+          result = eval.evalNext(lc.body, pos, ctx)
+          eval.applyInfix(result, lc.body, pos, ctx)
         except KtgError as e:
           discard e.attachLine(startLine)
           raise
     finally:
-      for blk in exitBlocks:
+      for blk in lc.exitBlocks:
         discard eval.evalBlock(blk, ctx)
   else:
     result = ktgNone()

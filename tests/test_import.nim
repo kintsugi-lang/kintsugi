@@ -5,6 +5,7 @@ import ../src/eval/[dialect, evaluator, natives]
 import ../src/dialects/loop_dialect
 import ../src/parse/parser
 import ../src/emit/lua
+import ./emit_test_helper
 
 proc makeEval(): Evaluator =
   let eval = newEvaluator()

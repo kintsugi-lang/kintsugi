@@ -7,6 +7,7 @@ import ../src/core/types
 import ../src/parse/parser
 import ../src/eval/[dialect, evaluator, natives]
 import ../src/emit/lua
+import ./emit_test_helper
 import ../src/dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect, parse_dialect]
 
 proc setupEval(): Evaluator =

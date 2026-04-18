@@ -13,6 +13,7 @@ import ../src/dialects/[loop_dialect, match_dialect, object_dialect,
                         attempt_dialect, parse_dialect]
 import ../src/parse/[lexer, parser]
 import ../src/emit/lua
+import ./emit_test_helper
 
 proc makeEval(): Evaluator =
   result = newEvaluator()

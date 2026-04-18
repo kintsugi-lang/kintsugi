@@ -15,6 +15,7 @@
 import std/[unittest, os, strutils, algorithm]
 import ../src/parse/parser
 import ../src/emit/lua
+import ./emit_test_helper
 import ../src/eval/[evaluator, natives]
 import ../src/dialects/[loop_dialect, match_dialect, object_dialect,
                         attempt_dialect, parse_dialect]
@@ -43,7 +44,7 @@ proc compileKtg(ktgPath: string): string =
   if isEntrypoint:
     emitLua(processed, sourceDir)
   else:
-    emitLuaModule(processed, sourceDir)
+    emitLuaModule(processed, sourceDir).lua
 
 proc normalize(s: string): string =
   ## LF-normalize. Do NOT strip trailing whitespace or collapse blank lines -

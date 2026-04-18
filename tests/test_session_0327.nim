@@ -7,6 +7,7 @@ import ../src/core/types
 import ../src/parse/[lexer, parser]
 import ../src/eval/[dialect, evaluator, natives]
 import ../src/emit/lua
+import ./emit_test_helper
 import ../src/dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect, parse_dialect]
 
 proc makeEval(): Evaluator =
@@ -81,19 +82,6 @@ suite "@const annotation":
       x: @const 42
     """))
     check "local x <const> = 42" in code
-
-  test "legacy pre-set-word form raises in interpreter":
-    let eval = makeEval()
-    expect KtgError:
-      discard eval.evalString("""
-        @const x: 42
-      """)
-
-  test "legacy pre-set-word form errors in emitter":
-    expect EmitError:
-      discard emitLua(parseSource("""
-        @const x: 42
-      """))
 
 # --- @inline [] block splicing ---
 

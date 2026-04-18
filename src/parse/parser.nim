@@ -1,3 +1,4 @@
+import std/strutils
 import ../core/types
 import lexer
 
@@ -69,3 +70,17 @@ proc parse*(tokens: seq[KtgValue]): seq[KtgValue] =
 proc parseSource*(src: string): seq[KtgValue] =
   ## Convenience: lex + parse in one call.
   parse(tokenize(src))
+
+proc stripKintsugiHeader*(ast: seq[KtgValue]): (seq[KtgValue], bool) =
+  ## Drop a leading `Kintsugi [...]` entrypoint header from an AST.
+  ## Returns (bodyAst, isEntrypoint). Lex-based, so it correctly ignores
+  ## bracket characters inside string literals or comments — unlike a
+  ## naive character-level bracket counter.
+  if ast.len >= 2 and ast[0].kind == vkWord and ast[0].wordKind == wkWord and
+     ast[0].wordName.startsWith("Kintsugi") and ast[1].kind == vkBlock:
+    return (ast[2 .. ^1], true)
+  (ast, false)
+
+proc parseSourceStripped*(src: string): (seq[KtgValue], bool) =
+  ## Lex + parse + strip entrypoint header. Returns (bodyAst, isEntrypoint).
+  stripKintsugiHeader(parseSource(src))
