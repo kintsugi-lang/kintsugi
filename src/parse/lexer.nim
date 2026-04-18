@@ -272,6 +272,19 @@ proc nextToken*(lex: var Lexer): KtgValue =
     discard lex.advance
     return ktgWord(")", wkWord, startLine)  # close marker
 
+  # Negative scalar literal — whitespace-delimited, so a leading '-' that
+  # runs straight into a negatable literal (digit or money `$`) is read as
+  # part of that literal rather than as the minus operator. `- 5` (with
+  # space) is still subtraction; `-5` / `-$5.00` are negative literals.
+  if ch == '-':
+    let next = lex.peekAt(1)
+    if isDigit(next):
+      return lex.readNumber  # readNumber absorbs the leading '-'
+    if next == '$' and lex.peekAt(2).isDigit:
+      discard lex.advance  # consume '-'
+      let m = lex.readMoney(startLine)
+      return ktgMoney(-m.cents, startLine)
+
   # money
   if ch == '$':
     return lex.readMoney(startLine)
@@ -281,7 +294,7 @@ proc nextToken*(lex: var Lexer): KtgValue =
     return ktgFile(lex.readFilePath, startLine)
 
   # numbers (and pair, tuple, date, time)
-  if isDigit(ch) or (ch == '-' and lex.peekAt(1).isDigit):
+  if isDigit(ch):
     return lex.readNumber
 
   # refinement: /word (no space between / and alpha)
@@ -329,8 +342,9 @@ proc nextToken*(lex: var Lexer): KtgValue =
     discard lex.advance  # >
     return ktgWord("->", wkWord, startLine)
 
-  # minus as operator (not negative number — that's handled in readNumber)
-  if ch == '-' and not lex.peekAt(1).isDigit:
+  # minus as operator — negative literals were routed earlier; anything
+  # reaching here is the subtraction operator.
+  if ch == '-':
     discard lex.advance
     return KtgValue(kind: vkOp, opFn: nil, opSymbol: "-", line: startLine)
 

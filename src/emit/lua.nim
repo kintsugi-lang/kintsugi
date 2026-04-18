@@ -436,8 +436,22 @@ proc mathBinary(luaFn: string): ExprHandler =
 # Math expression handlers
 # ---------------------------------------------------------------------------
 
-# Unary math.X(arg) natives
-exprHandlers["abs"] = mathUnary("math.abs")
+# abs — compile-time reject when arg is known money-typed. Money has no
+# natural unsigned magnitude; `negate` is the right tool for sign flips.
+# Catches literals and params typed `money!`; bare vars assigned from a
+# money literal aren't tracked and fall through to math.abs (which errors
+# loudly at runtime with "number expected, got table").
+exprHandlers["abs"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  if pos < vals.len:
+    let v = vals[pos]
+    let isMoneyArg =
+      v.kind == vkMoney or
+      (v.kind == vkWord and v.wordKind == wkWord and
+       v.wordName in e.varTypes and e.varTypes[v.wordName] == "money")
+    if isMoneyArg:
+      raise EmitError(msg:
+        "abs does not apply to money! - use negate to flip sign")
+  "math.abs(" & e.emitExpr(vals, pos) & ")"
 exprHandlers["sqrt"] = mathUnary("math.sqrt")
 exprHandlers["sin"] = mathUnary("math.sin")
 exprHandlers["cos"] = mathUnary("math.cos")
@@ -505,15 +519,19 @@ proc needsParens(expr: string): bool =
   ## Needed when the expression contains and/or which have lower precedence than ==.
   " and " in expr or " or " in expr
 
-## Factory for simple (type(arg) == "X") type predicates.
+proc parenIfComposed(expr: string): string =
+  ## Paren-wrap when the expression contains `and`/`or` and would otherwise
+  ## be composed by a higher-precedence operator (e.g. `not`). The `not`
+  ## handler separately adds its own parens, so callers use this only when
+  ## downstream composition (==, ~=, concat) could mis-group.
+  if needsParens(expr): "(" & expr & ")" else: expr
+
+## Factory for simple `type(arg) == "X"` type predicates. Emits bare —
+## `==` binds tighter than `and`/`or` in Lua, so composition with those
+## doesn't need outer parens; the `not` handler wraps its own arg.
 proc typePred(luaType: string): ExprHandler =
   result = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-    "(type(" & e.emitExpr(vals, pos) & ") == \"" & luaType & "\")"
-
-## Factory for generic fallback type predicates (type(arg) == "baseName").
-proc typePredGeneric(baseName: string): ExprHandler =
-  result = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-    "(type(" & e.emitExpr(vals, pos) & ") == \"" & baseName & "\")"
+    "type(" & e.emitExpr(vals, pos) & ") == \"" & luaType & "\""
 
 # Simple type(arg) == "X" predicates
 exprHandlers["string?"] = typePred("string")
@@ -537,27 +555,26 @@ exprHandlers["frozen?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var 
 exprHandlers["function?"] = typePred("function")
 exprHandlers["native?"] = typePred("function")
 
-# none? — uses _is_none helper
+# none? — direct nil check
 exprHandlers["none?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  let arg = e.emitExpr(vals, pos)
-  "(" & arg & " == nil)"
+  e.emitExpr(vals, pos) & " == nil"
 
 # integer? — number + floor check (references arg multiple times, needs safeArg)
 exprHandlers["integer?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   let arg = e.emitExpr(vals, pos)
   let safeArg = if needsParens(arg): "(" & arg & ")" else: arg
-  "(type(" & safeArg & ") == \"number\" and math.floor(" & safeArg & ") == " & safeArg & ")"
+  "type(" & safeArg & ") == \"number\" and math.floor(" & safeArg & ") == " & safeArg
 
 # float? — number + not-integer check (references arg multiple times, needs safeArg)
 exprHandlers["float?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
   let arg = e.emitExpr(vals, pos)
   let safeArg = if needsParens(arg): "(" & arg & ")" else: arg
-  "(type(" & safeArg & ") == \"number\" and math.floor(" & safeArg & ") ~= " & safeArg & ")"
+  "type(" & safeArg & ") == \"number\" and math.floor(" & safeArg & ") ~= " & safeArg
 
-# Generic fallback predicates — types that emit type(arg) == "baseName"
+# Nominal-type fallback predicates — same shape as typePred, reused.
 for baseName in ["money", "pair", "tuple", "date", "time", "file", "url",
                  "email", "set", "paren", "word", "type"]:
-  exprHandlers[baseName & "?"] = typePredGeneric(baseName)
+  exprHandlers[baseName & "?"] = typePred(baseName)
 
 # ---------------------------------------------------------------------------
 # Infix operators
@@ -690,7 +707,7 @@ proc emitCustomTypePredicateDecl(e: var LuaEmitter, typeName: string): string =
   proc baseCheckExpr(e: var LuaEmitter, t: string): string =
     let base = if t.endsWith("!"): t[0 ..< t.len - 1] else: t
     let prim = primitiveTypeCheck(base, "it")
-    if prim.len > 0: return "(" & prim & ")"
+    if prim.len > 0: return parenIfComposed(prim)
     if base in e.customTypeRules:
       return customTypePredicateName(base) & "(it)"
     # Unknown / object-nominal type — fall back to _type-tag check.
@@ -736,8 +753,10 @@ exprHandlers["is?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int)
   var typeName = typeExpr.strip(chars = {'"'})
   if typeName.endsWith("!"):
     typeName = typeName[0..^2]
-  ## Single outer paren so `not is? ...` and tight-binding callers stay safe.
-  "(" & e.emitAnyTypeCheck(typeName, valExpr) & ")"
+  ## Wrap only when inner has `and`/`or` so `not is? ...` groups correctly.
+  ## Bare single-expr checks (e.g. `type(v) == "string"`, `_foo_p(v)`)
+  ## compose safely without outer parens — `not` handler wraps its own arg.
+  parenIfComposed(e.emitAnyTypeCheck(typeName, valExpr))
 
 proc wrapForPrint(e: var LuaEmitter, expr: string): string =
   ## Lua's print/tostring on a table returns "table: 0x...". Wrap any
@@ -1364,8 +1383,11 @@ proc emitLiteral(e: var LuaEmitter, val: KtgValue): string =
     e.useHelper("_NONE")
     "_NONE"
   of vkMoney:
-    # Emit as integer cents
-    $val.cents
+    # Emit via metatable helper so arithmetic, comparison, print and concat
+    # match the interpreter ($12.34 formatting). Integer cents representation
+    # lives inside the `cents` field; arithmetic is metamethod-dispatched.
+    e.useHelper("_money")
+    "_money(" & $val.cents & ")"
   of vkPair:
     # Emit via metatable helper so arithmetic ops work
     e.useHelper("_pair")
@@ -1462,7 +1484,9 @@ proc emitFuncDef(e: var LuaEmitter, specBlock, bodyBlock: seq[KtgValue]): string
       if typeName.endsWith("!"):
         typeName = typeName[0 ..< typeName.len - 1]
       let kebab = typeName.replace("_", "-")
-      if kebab in e.objectFields:
+      if kebab in e.objectFields or kebab == "money":
+        # Track object types (for make / rejoin field-awareness) and money
+        # (so `abs` can reject money args at compile time).
         e.varTypes[ps.name] = kebab
       if ps.typeName in SafeConcatTypes:
         e.concatSafeVars.incl(luaName(ps.name))
@@ -3646,7 +3670,7 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
               if typeName.endsWith("!"):
                 typeName = typeName[0 ..< typeName.len - 1]
               let kebab = typeName.replace("_", "-")
-              if kebab in e.objectFields:
+              if kebab in e.objectFields or kebab == "money":
                 e.varTypes[ps.name] = kebab
               if ps.typeName in SafeConcatTypes:
                 e.concatSafeVars.incl(luaName(ps.name))
@@ -4016,6 +4040,33 @@ const PreludeDeepCopy = """function _deep_copy(t)
 end
 """
 
+const PreludeMoney = """_money_mt = {}
+function _money(cents) return setmetatable({cents = cents}, _money_mt) end
+_money_mt.__add = function(a, b) return _money(a.cents + b.cents) end
+_money_mt.__sub = function(a, b) return _money(a.cents - b.cents) end
+_money_mt.__mul = function(a, b)
+  local n = type(a) == "number" and a or b
+  local c = type(a) == "table" and a.cents or b.cents
+  return _money(math.floor(n * c + 0.5))
+end
+_money_mt.__div = function(a, b)
+  if type(b) == "number" then return _money(math.floor(a.cents / b + 0.5)) end
+  return a.cents / b.cents
+end
+_money_mt.__unm = function(a) return _money(-a.cents) end
+_money_mt.__eq  = function(a, b) return a.cents == b.cents end
+_money_mt.__lt  = function(a, b) return a.cents < b.cents end
+_money_mt.__le  = function(a, b) return a.cents <= b.cents end
+_money_mt.__tostring = function(m)
+  local neg = m.cents < 0
+  local abs_c = math.abs(m.cents)
+  local d = math.floor(abs_c / 100)
+  local c = abs_c % 100
+  return (neg and "-" or "") .. "$" .. d .. "." .. (c < 10 and ("0"..c) or tostring(c))
+end
+_money_mt.__concat = function(a, b) return tostring(a) .. tostring(b) end
+"""
+
 const PreludePair = """_pair_mt = {}
 _pair_mt.__add = function(a, b) return setmetatable({x=a.x+b.x, y=a.y+b.y}, _pair_mt) end
 _pair_mt.__sub = function(a, b) return setmetatable({x=a.x-b.x, y=a.y-b.y}, _pair_mt) end
@@ -4303,6 +4354,8 @@ proc buildPrelude(e: var LuaEmitter): string =
     parts.add(PreludeNone.strip)
   if "_deep_copy" in e.usedHelpers:
     parts.add(PreludeDeepCopy.strip)
+  if "_money" in e.usedHelpers:
+    parts.add(PreludeMoney.strip)
   if "_pair" in e.usedHelpers:
     parts.add(PreludePair.strip)
   if "_capture" in e.usedHelpers:

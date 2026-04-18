@@ -26,6 +26,8 @@ proc registerMathNatives*(eval: Evaluator) =
     of vkInteger: ktgInt(abs(args[0].intVal))
     of vkFloat: ktgFloat(abs(args[0].floatVal))
     of vkPair: ktgPair(abs(args[0].px), abs(args[0].py))
+    of vkMoney: raise KtgError(kind: "type",
+      msg: "abs does not apply to money! — use negate to flip sign", data: nil)
     else: raise KtgError(kind: "type", msg: "abs expects number! or pair!", data: nil)
   )
 
@@ -33,8 +35,9 @@ proc registerMathNatives*(eval: Evaluator) =
     case args[0].kind
     of vkInteger: ktgInt(-args[0].intVal)
     of vkFloat: ktgFloat(-args[0].floatVal)
+    of vkMoney: ktgMoney(-args[0].cents)
     of vkPair: ktgPair(-args[0].px, -args[0].py)
-    else: raise KtgError(kind: "type", msg: "negate expects number! or pair!", data: nil)
+    else: raise KtgError(kind: "type", msg: "negate expects number!, money! or pair!", data: nil)
   )
 
   ctx.native("min", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
