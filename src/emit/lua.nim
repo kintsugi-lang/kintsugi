@@ -107,10 +107,8 @@ type
     ## Stdlib modules referenced by `import 'name` or
     ## `import/using 'name [...]`. Whole-module imports use sentinel
     ## "*" in the symbol set; selective imports list explicit names.
-    ## expandStdlibIntoPrelude turns these into Lua code stored in
-    ## stdlibPreludeLua, which buildPrelude emits.
+    ## buildPrelude calls expandStdlibIntoPrelude to materialize them.
     usedStdlibSymbols: Table[string, HashSet[string]]
-    stdlibPreludeLua: string
     ## Optional evaluator for compile-time guard checks on literal
     ## arguments at call sites. When nil, compile-time checks are
     ## skipped and guards fall through to the runtime prologue.
@@ -556,6 +554,13 @@ registerExpr("round", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int)
 
 registerExpr("pi", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   lxLit("math.pi"))
+
+# `none` word — the Kintsugi sentinel. Emits `_NONE` so blocks containing
+# none round-trip correctly (Lua `nil` terminates a contiguous table;
+# `_NONE` is a real value that survives length/ipairs/table.concat).
+registerExpr("none", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  e.useHelper("_NONE")
+  lxLit("_NONE"))
 
 # ---------------------------------------------------------------------------
 # String expression handlers
@@ -2890,6 +2895,36 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
   ## Back-compat projection: most call sites still concatenate strings.
   emitExprTyped(e, vals, pos, primary).text
 
+proc emitGenericCall(e: var LuaEmitter, name: string, line: int,
+                     vals: seq[KtgValue], pos: var int): LuaExpr =
+  ## Fallback wkWord arm: a bare name, known function, or method call.
+  ## Interpreter-only natives raise; unknown names fail the strict-globals
+  ## diagnostic. A declared arity triggers a parenthesized call with default
+  ## refinement args filled in (false + nils) for non-refinement invocations.
+  if name in InterpreterOnlyNatives:
+    compileError(name, interpreterOnlyHint(name), line)
+  e.assertKnownName(name, line)
+  let resolvedLua = e.resolvedName(name)
+  let info = e.getBinding(name)
+  let isMethod = name in e.bindingKinds and e.bindingKinds[name] == bkMethod
+  let a = e.arity(name)
+  if a < 0:
+    return lxLit(resolvedLua)
+  var args: seq[string] = @[]
+  for i in 0 ..< a:
+    args.add(e.emitExpr(vals, pos, primary = true))
+  if info.refinements.len > 0:
+    for r in info.refinements:
+      args.add("false")
+      for j in 0 ..< r.paramCount:
+        args.add("nil")
+  if isMethod:
+    let dotPos = resolvedLua.rfind('.')
+    let methodLua = resolvedLua[0..<dotPos] & ":" & resolvedLua[dotPos+1..^1]
+    lxCall(methodLua & "(" & args.join(", ") & ")")
+  else:
+    lxCall(resolvedLua & "(" & args.join(", ") & ")")
+
 proc emitExprTyped(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
                    primary: bool = false): LuaExpr =
   ## Emit the next expression from vals starting at pos. Returns a typed
@@ -3008,60 +3043,18 @@ proc emitExprTyped(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
 
     of wkWord:
       let name = val.wordName
-
-      # `none` word: bind to the _NONE sentinel so blocks containing none
-      # round-trip correctly (Lua nil terminates a contiguous table; _NONE
-      # is a real value that survives length, ipairs, table.concat, etc.).
-      if name == "none":
-        e.useHelper("_NONE")
-        result = lxLit("_NONE")
-        return
-
-      # --- Dispatch table lookup (handlers registered above) ---
-      # Skip if the name has been user-assigned as a value (prescan found name: expr)
+      # Skip handler dispatch if name has been user-assigned as a value
+      # (prescan found `name: expr` where expr isn't a function).
       let userAssigned = name in e.bindings and
         not e.bindings[name].isFunction and not e.bindings[name].isUnknown
       if name in exprHandlers and not userAssigned:
         result = exprHandlers[name](e, vals, pos)
-
-      # --- system/env/NAME → os.getenv("NAME") ---
       elif name.startsWith("system/env/"):
-        let envName = name.split('/')[2]
-        result = lxCall("os.getenv(\"" & envName & "\")")
-
-      # --- Path access or call: obj/field/sub ---
+        result = lxCall("os.getenv(\"" & name.split('/')[2] & "\")")
       elif name.contains('/'):
         result = lxCall(resolvePathCall(e, name, val.line, vals, pos).lua)
-
-
-      # --- Generic function call or variable reference ---
       else:
-        if name in InterpreterOnlyNatives:
-          compileError(name, interpreterOnlyHint(name), val.line)
-        e.assertKnownName(name, val.line)
-        let resolvedLua = e.resolvedName(name)
-        let info = e.getBinding(name)
-        let isMethod = name in e.bindingKinds and e.bindingKinds[name] == bkMethod
-        let a = e.arity(name)
-        if a >= 0:
-          var args: seq[string] = @[]
-          for i in 0 ..< a:
-            args.add(e.emitExpr(vals, pos, primary = true))
-          # Append default refinement args (all false/nil) for non-refinement calls
-          if info.refinements.len > 0:
-            for r in info.refinements:
-              args.add("false")
-              for j in 0 ..< r.paramCount:
-                args.add("nil")
-          if isMethod:
-            # obj.method -> obj:method
-            let dotPos = resolvedLua.rfind('.')
-            let methodLua = resolvedLua[0..<dotPos] & ":" & resolvedLua[dotPos+1..^1]
-            result = lxCall(methodLua & "(" & args.join(", ") & ")")
-          else:
-            result = lxCall(resolvedLua & "(" & args.join(", ") & ")")
-        else:
-          result = lxLit(resolvedLua)
+        result = e.emitGenericCall(name, val.line, vals, pos)
 
   # --- Types, files, urls, emails — emit as string literals ---
   of vkType:
@@ -4135,6 +4128,8 @@ proc topoSortTypes(e: LuaEmitter, names: seq[string]): seq[string] =
   for n in names:
     visit(n, result)
 
+proc expandStdlibIntoPrelude(e: var LuaEmitter): string
+
 proc buildPrelude(e: var LuaEmitter): string =
   ## Build the runtime support prelude. Includes helper functions for any
   ## natives that need them, plus synthesized predicates for every @type
@@ -4149,10 +4144,9 @@ proc buildPrelude(e: var LuaEmitter): string =
   for typeName in ordered:
     typePreds.add(e.emitCustomTypePredicateDecl(typeName))
 
-  # Stdlib expansion happens out-of-line in expandStdlibIntoPrelude
-  # (called from emitLua/emitLuaSplit after main emit) and stashed on
-  # the emitter. Read the cached chunk here.
-  let stdlibLua = e.stdlibPreludeLua
+  # Stdlib expansion is computed on demand — cheap since each usedStdlibSymbols
+  # entry only spliceSelectedFunctions-es the requested subset.
+  let stdlibLua = e.expandStdlibIntoPrelude()
 
   if e.usedHelpers.len == 0 and not e.usedRandom and not e.usedVariadicUnpack and
       typePreds.len == 0 and stdlibLua.len == 0:
@@ -4785,12 +4779,13 @@ proc validatePass(e: var LuaEmitter, vals: seq[KtgValue]) =
           bi.paramNames[j] & " expects " & paramType & ", got " & actual &
           " (" & $arg & " fails " & paramType & " guard at compile time)")
 
-proc expandStdlibIntoPrelude(e: var LuaEmitter) =
+proc expandStdlibIntoPrelude(e: var LuaEmitter): string =
   ## For each module recorded in usedStdlibSymbols, splice its requested
   ## fns and emit them via a fresh sub-emitter. Strip the `local` keyword
   ## off function declarations so the stdlib lives as globals in the
   ## prelude alongside the other helpers.
-  var lua = ""
+  result = ""
+  template lua: untyped = result
   for moduleName, syms in e.usedStdlibSymbols:
     var symList: seq[string]
     if "*" in syms:
@@ -4815,7 +4810,6 @@ proc expandStdlibIntoPrelude(e: var LuaEmitter) =
     if fnLua.startsWith("local function "):
       fnLua = fnLua["local ".len .. ^1]
     lua &= fnLua
-  e.stdlibPreludeLua = lua
 
 proc emitLuaSplit*(ast: seq[KtgValue], sourceDir: string = "",
                    target: string = "",
@@ -4849,7 +4843,6 @@ proc emitLuaSplit*(ast: seq[KtgValue], sourceDir: string = "",
   
   
   e.emitBlock(ast)
-  e.expandStdlibIntoPrelude()
   let prelude = e.buildPrelude()
   var source = e.output
   # If there's any prelude content, the source needs to load it. Pick the
