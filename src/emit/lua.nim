@@ -156,14 +156,20 @@ type
 
   EmitError* = ref object of CatchableError
 
-  ## An expression emitter: given vals and pos, consume arguments and return a Lua expression string.
-  ExprHandler = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string
+  ## An expression emitter: given vals and pos, consume arguments and
+  ## return a typed Lua expression. Callers project `.text` where a raw
+  ## Lua fragment is needed for statement composition.
+  ExprHandler = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr
 
   ## A statement emitter: given vals and pos, consume arguments and emit Lua statements via e.ln().
   StmtHandler = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int)
 
 var exprHandlers = initTable[string, ExprHandler]()
 var stmtHandlers = initTable[string, StmtHandler]()
+
+## Register an expression handler.
+proc registerExpr(name: string, h: ExprHandler) =
+  exprHandlers[name] = h
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -327,6 +333,8 @@ proc resolvedName(e: LuaEmitter, name: string): string =
 
 proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
               primary: bool = false): string
+proc emitExprTyped(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
+                   primary: bool = false): LuaExpr
 proc emitBody(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false)
 proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false)
 proc emitMatchExpr(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValue]): string
@@ -471,22 +479,22 @@ proc validateAllGuards(e: var LuaEmitter) =
 # Handler factories
 # ---------------------------------------------------------------------------
 
-## Factory for math.X(arg) patterns — single-argument Lua math functions.
+## Factory for math.X(arg) patterns.
 proc mathUnary(luaFn: string): ExprHandler =
-  result = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-    luaFn & "(" & e.emitExpr(vals, pos) & ")"
+  result = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+    lxCall(luaFn & "(" & e.emitExpr(vals, pos) & ")")
 
-## Factory for string.X(arg) patterns — single-argument Lua string functions.
+## Factory for string.X(arg) patterns.
 proc stringUnary(luaFn: string): ExprHandler =
-  result = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-    luaFn & "(" & e.emitExpr(vals, pos) & ")"
+  result = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+    lxCall(luaFn & "(" & e.emitExpr(vals, pos) & ")")
 
-## Factory for math.X(a, b) patterns — two-argument Lua math functions.
+## Factory for math.X(a, b) patterns.
 proc mathBinary(luaFn: string): ExprHandler =
-  result = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  result = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
     let a = e.emitExpr(vals, pos)
     let b = e.emitExpr(vals, pos)
-    luaFn & "(" & a & ", " & b & ")"
+    lxCall(luaFn & "(" & a & ", " & b & ")")
 
 # ---------------------------------------------------------------------------
 # Math expression handlers
@@ -497,7 +505,7 @@ proc mathBinary(luaFn: string): ExprHandler =
 # Catches literals and params typed `money!`; bare vars assigned from a
 # money literal aren't tracked and fall through to math.abs (which errors
 # loudly at runtime with "number expected, got table").
-exprHandlers["abs"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("abs", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   if pos < vals.len:
     let v = vals[pos]
     let isMoneyArg =
@@ -507,196 +515,200 @@ exprHandlers["abs"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int)
     if isMoneyArg:
       raise EmitError(msg:
         "abs does not apply to money! - use negate to flip sign")
-  "math.abs(" & e.emitExpr(vals, pos) & ")"
-exprHandlers["sqrt"] = mathUnary("math.sqrt")
-exprHandlers["sin"] = mathUnary("math.sin")
-exprHandlers["cos"] = mathUnary("math.cos")
-exprHandlers["tan"] = mathUnary("math.tan")
-exprHandlers["asin"] = mathUnary("math.asin")
-exprHandlers["acos"] = mathUnary("math.acos")
-exprHandlers["exp"] = mathUnary("math.exp")
-exprHandlers["log"] = mathUnary("math.log")
-exprHandlers["log10"] = mathUnary("math.log10")
-exprHandlers["to-degrees"] = mathUnary("math.deg")
-exprHandlers["to-radians"] = mathUnary("math.rad")
-exprHandlers["floor"] = mathUnary("math.floor")
-exprHandlers["ceil"] = mathUnary("math.ceil")
+  lxCall("math.abs(" & e.emitExpr(vals, pos) & ")"))
+registerExpr("sqrt", mathUnary("math.sqrt"))
+registerExpr("sin", mathUnary("math.sin"))
+registerExpr("cos", mathUnary("math.cos"))
+registerExpr("tan", mathUnary("math.tan"))
+registerExpr("asin", mathUnary("math.asin"))
+registerExpr("acos", mathUnary("math.acos"))
+registerExpr("exp", mathUnary("math.exp"))
+registerExpr("log", mathUnary("math.log"))
+registerExpr("log10", mathUnary("math.log10"))
+registerExpr("to-degrees", mathUnary("math.deg"))
+registerExpr("to-radians", mathUnary("math.rad"))
+registerExpr("floor", mathUnary("math.floor"))
+registerExpr("ceil", mathUnary("math.ceil"))
 
 # Binary math.X(a, b) natives
-exprHandlers["min"] = mathBinary("math.min")
-exprHandlers["max"] = mathBinary("math.max")
-exprHandlers["atan2"] = mathBinary("math.atan2")
-exprHandlers["pow"] = mathBinary("math.pow")
+registerExpr("min", mathBinary("math.min"))
+registerExpr("max", mathBinary("math.max"))
+registerExpr("atan2", mathBinary("math.atan2"))
+registerExpr("pow", mathBinary("math.pow"))
 
-# Custom math handlers
-exprHandlers["negate"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+# Custom math handlers — paren-wrapped outputs are lxCall-safe (no further
+# wrapping needed by composing operators).
+registerExpr("negate", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let arg = e.emitExpr(vals, pos)
-  "-(" & arg & ")"
+  lxCall("-(" & arg & ")"))
 
-exprHandlers["odd?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("odd?", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let arg = e.emitExpr(vals, pos)
-  "(" & arg & " % 2 ~= 0)"
+  lxCall("(" & arg & " % 2 ~= 0)"))
 
-exprHandlers["even?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("even?", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let arg = e.emitExpr(vals, pos)
-  "(" & arg & " % 2 == 0)"
+  lxCall("(" & arg & " % 2 == 0)"))
 
-exprHandlers["round"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("round", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let arg = e.emitExpr(vals, pos)
-  "math.floor(" & arg & " + 0.5)"
+  lxCall("math.floor(" & arg & " + 0.5)"))
 
-exprHandlers["pi"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  "math.pi"
+registerExpr("pi", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  lxLit("math.pi"))
 
 # ---------------------------------------------------------------------------
 # String expression handlers
 # ---------------------------------------------------------------------------
 
-exprHandlers["uppercase"] = stringUnary("string.upper")
-exprHandlers["lowercase"] = stringUnary("string.lower")
+registerExpr("uppercase", stringUnary("string.upper"))
+registerExpr("lowercase", stringUnary("string.lower"))
 
-exprHandlers["trim"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("trim", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let arg = e.emitExpr(vals, pos)
-  "(" & arg & "):match(\"^%s*(.-)%s*$\")"
+  lxCall("(" & arg & "):match(\"^%s*(.-)%s*$\")"))
 
-exprHandlers["length"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  "#" & e.emitExpr(vals, pos)
+registerExpr("length", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  lxCall("#" & e.emitExpr(vals, pos)))
 
-exprHandlers["empty?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("empty?", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let arg = e.emitExpr(vals, pos)
-  "(#" & arg & " == 0)"
+  lxCall("(#" & arg & " == 0)"))
 
 # ---------------------------------------------------------------------------
 # Type predicate expression handlers
 # ---------------------------------------------------------------------------
 
-## (needsParens, parenIfComposed live in helpers.nim.)
-
-## Factory for simple `type(arg) == "X"` type predicates. Emits bare —
-## `==` binds tighter than `and`/`or` in Lua, so composition with those
-## doesn't need outer parens; the `not` handler wraps its own arg.
+## Factory for `type(arg) == "X"` predicates. The result is an `==` infix
+## at prec 3; composition with `and`/`or` (prec 2/1) is safe without outer
+## parens, and `not` wraps its own arg.
 proc typePred(luaType: string): ExprHandler =
-  result = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-    "type(" & e.emitExpr(vals, pos) & ") == \"" & luaType & "\""
+  result = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+    lxInfix("type(" & e.emitExpr(vals, pos) & ") == \"" & luaType & "\"", luaPrec("=="))
 
 # Simple type(arg) == "X" predicates
-exprHandlers["string?"] = typePred("string")
-exprHandlers["logic?"] = typePred("boolean")
-exprHandlers["number?"] = typePred("number")
+registerExpr("string?", typePred("string"))
+registerExpr("logic?", typePred("boolean"))
+registerExpr("number?", typePred("number"))
 
 # Table-backed types
-exprHandlers["block?"] = typePred("table")
-exprHandlers["context?"] = typePred("table")
-exprHandlers["object?"] = typePred("table")
-exprHandlers["map?"] = typePred("table")
+registerExpr("block?", typePred("table"))
+registerExpr("context?", typePred("table"))
+registerExpr("object?", typePred("table"))
+registerExpr("map?", typePred("table"))
 
-# Freeze - no-op in compiled output
-exprHandlers["freeze"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  e.emitExpr(vals, pos, primary = true)
-exprHandlers["frozen?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+# Freeze - no-op in compiled output; passthrough preserves the inner shape.
+registerExpr("freeze", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  lxOther(e.emitExpr(vals, pos, primary = true)))
+registerExpr("frozen?", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   discard e.emitExpr(vals, pos, primary = true)
-  "false"
+  lxLit("false"))
 
 # Function types
-exprHandlers["function?"] = typePred("function")
-exprHandlers["native?"] = typePred("function")
+registerExpr("function?", typePred("function"))
+registerExpr("native?", typePred("function"))
 
-# none? — direct nil check
-exprHandlers["none?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  e.emitExpr(vals, pos) & " == nil"
+# none? — direct `arg == nil` at `==` precedence.
+registerExpr("none?", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  lxInfix(e.emitExpr(vals, pos) & " == nil", luaPrec("==")))
 
-# integer? — number + floor check (references arg multiple times, needs safeArg)
-exprHandlers["integer?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  let arg = e.emitExpr(vals, pos)
-  let safeArg = if needsParens(arg): "(" & arg & ")" else: arg
-  "type(" & safeArg & ") == \"number\" and math.floor(" & safeArg & ") == " & safeArg
+# integer? / float? — compound `and`-joined checks at `and` precedence.
+# Multiple arg references require safeArg parenthesization when the arg
+# already contains `and`/`or`.
+registerExpr("integer?", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  let arg = e.emitExprTyped(vals, pos)
+  let safeArg = paren(arg, luaPrec("and"))
+  lxInfix("type(" & safeArg & ") == \"number\" and math.floor(" & safeArg & ") == " & safeArg,
+          luaPrec("and")))
 
-# float? — number + not-integer check (references arg multiple times, needs safeArg)
-exprHandlers["float?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  let arg = e.emitExpr(vals, pos)
-  let safeArg = if needsParens(arg): "(" & arg & ")" else: arg
-  "type(" & safeArg & ") == \"number\" and math.floor(" & safeArg & ") ~= " & safeArg
+registerExpr("float?", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  let arg = e.emitExprTyped(vals, pos)
+  let safeArg = paren(arg, luaPrec("and"))
+  lxInfix("type(" & safeArg & ") == \"number\" and math.floor(" & safeArg & ") ~= " & safeArg,
+          luaPrec("and")))
 
 # Nominal-type fallback predicates — same shape as typePred, reused.
 for baseName in ["money", "pair", "tuple", "date", "time", "file", "url",
                  "email", "set", "paren", "word", "type"]:
-  exprHandlers[baseName & "?"] = typePred(baseName)
+  registerExpr(baseName & "?", typePred(baseName))
 
 # ---------------------------------------------------------------------------
 # Infix operators
 # ---------------------------------------------------------------------------
-
-# (wrapIfTableCtor lives in helpers.nim.)
 
 # ---------------------------------------------------------------------------
 # Simple native expression handlers
 # ---------------------------------------------------------------------------
 
 # --- raw: splice string contents verbatim as a Lua expression fragment ---
-exprHandlers["raw"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+# The user-supplied string may be anything; tag lxOther to discourage any
+# automatic wrapping by paren().
+registerExpr("raw", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   if pos < vals.len and vals[pos].kind == vkString:
     let s = vals[pos].strVal
     pos += 1
-    return s
-  ""
+    return lxOther(s)
+  lxOther(""))
 
 # --- Refinement natives ---
-exprHandlers["round/down"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  "math.floor(" & e.emitExpr(vals, pos) & ")"
+registerExpr("round/down", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  lxCall("math.floor(" & e.emitExpr(vals, pos) & ")"))
 
-exprHandlers["round/up"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  "math.ceil(" & e.emitExpr(vals, pos) & ")"
+registerExpr("round/up", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  lxCall("math.ceil(" & e.emitExpr(vals, pos) & ")"))
 
-exprHandlers["copy/deep"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("copy/deep", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let arg = e.emitExpr(vals, pos)
   e.useHelper("_deep_copy")
-  "_deep_copy(" & arg & ")"
+  lxCall("_deep_copy(" & arg & ")"))
 
-exprHandlers["sort/by"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("sort/by", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let arr = e.emitExpr(vals, pos)
   let keyFn = e.emitExpr(vals, pos)
-  "(function() local _key = " & keyFn & "; table.sort(" & arr & ", function(a, b) return _key(a) < _key(b) end); return " & arr & " end)()"
+  lxOther("(function() local _key = " & keyFn & "; table.sort(" & arr & ", function(a, b) return _key(a) < _key(b) end); return " & arr & " end)()"))
 
-exprHandlers["sort/with"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("sort/with", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let arr = e.emitExpr(vals, pos)
   let cmpFn = e.emitExpr(vals, pos)
-  "(function() table.sort(" & arr & ", " & cmpFn & "); return " & arr & " end)()"
+  lxOther("(function() table.sort(" & arr & ", " & cmpFn & "); return " & arr & " end)()"))
 
 # --- system/platform → compile-time constant ---
-exprHandlers["system/platform"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  "\"lua\""
+registerExpr("system/platform", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  lxLit("\"lua\""))
 
 # --- now → os.time() (epoch timestamp) ---
-exprHandlers["now"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  "os.time()"
+registerExpr("now", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  lxCall("os.time()"))
 
 # --- function / does / context / try / try/handle ---
-exprHandlers["function"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+# function / does produce `(function(...) ... end)` IIFE-wrapped values —
+# tagged lxOther (no natural precedence; always safe as a standalone term).
+registerExpr("function", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   if pos + 1 < vals.len and vals[pos].kind == vkBlock and vals[pos + 1].kind == vkBlock:
     let specBlock = vals[pos].blockVals
     let bodyBlock = vals[pos + 1].blockVals
     pos += 2
-    e.emitFuncDef(specBlock, bodyBlock)
+    lxOther(e.emitFuncDef(specBlock, bodyBlock))
   else:
-    "nil"
+    lxLit("nil"))
 
-exprHandlers["does"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("does", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   if pos < vals.len and vals[pos].kind == vkBlock:
     let bodyBlock = vals[pos].blockVals
     pos += 1
-    e.emitFuncDef(@[], bodyBlock)
+    lxOther(e.emitFuncDef(@[], bodyBlock))
   else:
-    "nil"
+    lxLit("nil"))
 
-exprHandlers["context"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("context", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   if pos < vals.len and vals[pos].kind == vkBlock:
     let blk = vals[pos].blockVals
     pos += 1
-    e.emitContextBlock(blk)
+    lxTableCtor(e.emitContextBlock(blk))
   else:
-    "{}"
+    lxTableCtor("{}"))
 
-exprHandlers["try"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("try", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   if pos < vals.len and vals[pos].kind == vkBlock:
     let blk = vals[pos].blockVals
     pos += 1
@@ -704,17 +716,17 @@ exprHandlers["try"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int)
     let bodyStr = withCapture(e):
       e.emitBody(blk, asReturn = true)
     e.indent -= 1
-    "(function()\n" &
+    lxOther("(function()\n" &
       e.pad & "  local ok, result = pcall(function()\n" &
       bodyStr &
       e.pad & "  end)\n" &
       e.pad & "  if ok then return {ok=true, value=result}\n" &
       e.pad & "  else return {ok=false, message=result} end\n" &
-      e.pad & "end)()"
+      e.pad & "end)()")
   else:
-    "nil"
+    lxLit("nil"))
 
-exprHandlers["try/handle"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("try/handle", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   if pos < vals.len and vals[pos].kind == vkBlock:
     let blk = vals[pos].blockVals
     pos += 1
@@ -732,7 +744,7 @@ exprHandlers["try/handle"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: v
     let bodyStr = withCapture(e):
       e.emitBody(blk, asReturn = true)
     e.indent -= 1
-    "(function()\n" &
+    lxOther("(function()\n" &
       e.pad & "  local ok, it = pcall(function()\n" &
       bodyStr &
       e.pad & "  end)\n" &
@@ -740,27 +752,32 @@ exprHandlers["try/handle"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: v
       e.pad & "  else\n" &
       handlerBody &
       e.pad & "  end\n" &
-      e.pad & "end)()"
+      e.pad & "end)()")
   else:
-    "nil"
+    lxLit("nil"))
 
 ## (primitiveTypeCheck and customTypePredicateName live in helpers.nim.)
 
 proc emitCustomTypeCheck(e: var LuaEmitter, typeName, valExpr: string): string
 
-proc emitAnyTypeCheck(e: var LuaEmitter, typeName, valExpr: string): string =
+proc emitAnyTypeCheckTyped(e: var LuaEmitter, typeName, valExpr: string): LuaExpr =
   ## Dispatch: primitive first, then user-declared custom type (synthesized
   ## predicate call), else fall back to the object-auto-gen _type tag.
-  ## Result may contain bare `and`/`or`; callers that compose with further
-  ## `and`/`or` should paren.
-  let prim = primitiveTypeCheck(typeName, valExpr)
-  if prim.len > 0: return prim
+  ## Result may be `lxInfix` composed with `and`; callers that compose with
+  ## further `and`/`or` use `paren(result, luaPrec("and"))` to wrap precisely.
+  let primTyped = primitiveTypeCheckTyped(typeName, valExpr)
+  if primTyped.text.len > 0: return primTyped
   if typeName in e.customTypeRules:
     # Predicate is synthesized in the prelude; emit a call. Mark used.
     e.usedTypeChecks.incl(typeName)
-    return customTypePredicateName(typeName) & "(" & valExpr & ")"
-  valExpr & " ~= nil and type(" & valExpr & ") == \"table\" and " &
-    valExpr & "._type == \"" & typeName & "\""
+    return lxCall(customTypePredicateName(typeName) & "(" & valExpr & ")")
+  lxInfix(valExpr & " ~= nil and type(" & valExpr & ") == \"table\" and " &
+          valExpr & "._type == \"" & typeName & "\"",
+          luaPrec("and"))
+
+proc emitAnyTypeCheck(e: var LuaEmitter, typeName, valExpr: string): string =
+  ## Back-compat string projection.
+  emitAnyTypeCheckTyped(e, typeName, valExpr).text
 
 proc emitCustomTypeCheck(e: var LuaEmitter, typeName, valExpr: string): string =
   ## Inline predicate for a @type-declared custom type.
@@ -809,8 +826,12 @@ proc emitCustomTypePredicateDecl(e: var LuaEmitter, typeName: string): string =
 
   proc baseCheckExpr(e: var LuaEmitter, t: string): string =
     let base = if t.endsWith("!"): t[0 ..< t.len - 1] else: t
-    let prim = primitiveTypeCheck(base, "it")
-    if prim.len > 0: return parenIfComposed(prim)
+    let primTyped = primitiveTypeCheckTyped(base, "it")
+    if primTyped.text.len > 0:
+      # Wrap at `and` precedence so composed `type() == "x" and ...` checks
+      # (integer/float) get parens; simple `type() == "x"` checks (prec 3 >
+      # "and" prec 2) are left bare.
+      return paren(primTyped, luaPrec("and"))
     if base in e.customTypeRules:
       return customTypePredicateName(base) & "(it)"
     # Unknown / object-nominal type — fall back to _type-tag check.
@@ -853,147 +874,148 @@ proc emitCustomTypePredicateDecl(e: var LuaEmitter, typeName: string): string =
       guardBody.strip(chars = {'\n'}) & "\nend"
 
 # --- is? — unified type checking ---
-exprHandlers["is?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("is?", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let typeExpr = e.emitExpr(vals, pos, primary = true)
   let valExpr = e.emitExpr(vals, pos, primary = true)
   var typeName = typeExpr.strip(chars = {'"'})
   if typeName.endsWith("!"):
     typeName = typeName[0..^2]
-  ## Wrap only when inner has `and`/`or` so `not is? ...` groups correctly.
-  ## Bare single-expr checks (e.g. `type(v) == "string"`, `_foo_p(v)`)
-  ## compose safely without outer parens — `not` handler wraps its own arg.
-  parenIfComposed(e.emitAnyTypeCheck(typeName, valExpr))
+  # Wrap only when the inner check is an `and`/`or` composition so `not is?`
+  # groups correctly. Bare single-expr checks (e.g. `type(v) == "string"`,
+  # `_foo_p(v)`) compose safely — their precedence is above `and`/`or`.
+  let innerTyped = e.emitAnyTypeCheckTyped(typeName, valExpr)
+  lxOther(paren(innerTyped, luaPrec("and"))))
 
-proc wrapForPrint(e: var LuaEmitter, expr: string): string =
+proc prettifyForPrint(e: var LuaEmitter, expr: LuaExpr): string =
   ## Lua's print/tostring on a table returns "table: 0x...". Wrap any
-  ## expression that isn't a syntactically obvious string/number/bool
-  ## literal in `_prettify(...)` so blocks, contexts, pairs, and maps
-  ## print like the interpreter does.
-  if expr.startsWith("\""):
-    return expr
-  if expr.len > 0 and (expr[0] in {'0'..'9'} or
-      (expr[0] == '-' and expr.len > 1 and expr[1] in {'0'..'9'})):
-    return expr
-  if expr == "true" or expr == "false" or expr == "nil":
-    return expr
+  ## expression that isn't already string-typed in `_prettify(...)` so
+  ## blocks, contexts, pairs, and maps print like the interpreter does.
+  ## Literals print as-is; `..`-concat chains also produce strings by Lua's
+  ## operator semantics so they can skip _prettify.
+  if expr.kind == lxLiteral: return expr.text
+  if expr.kind == lxInfix and expr.prec == luaPrec(".."): return expr.text
   e.useHelper("_prettify")
-  "_prettify(" & expr & ")"
+  "_prettify(" & expr.text & ")"
 
 # --- print ---
-exprHandlers["print"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  let arg = e.emitExpr(vals, pos)
-  "print(" & wrapForPrint(e, arg) & ")"
+registerExpr("print", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  let arg = e.emitExprTyped(vals, pos)
+  lxCall("print(" & prettifyForPrint(e,arg) & ")"))
 
 # --- probe (returns value) ---
-exprHandlers["probe"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("probe", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let arg = e.emitExpr(vals, pos)
-  let printed = wrapForPrint(e, "_v")
-  "(function() local _v = " & arg & "; print(" & printed & "); return _v end)()"
+  # `_v` is a bare identifier — classify as literal for the print heuristic.
+  let printed = prettifyForPrint(e,lxLit("_v"))
+  lxOther("(function() local _v = " & arg & "; print(" & printed & "); return _v end)()"))
 
-# --- not ---
-exprHandlers["not"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+# --- not --- unary boolean; its arg is parenthesized so the result composes
+# safely at any precedence. Tagged lxCall so `paren` leaves it alone.
+registerExpr("not", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let arg = e.emitExpr(vals, pos)
-  if arg.startsWith("(") or arg.startsWith("not "): "not " & arg
-  else: "not (" & arg & ")"
+  if arg.startsWith("(") or arg.startsWith("not "): lxCall("not " & arg)
+  else: lxCall("not (" & arg & ")"))
 
-# --- return ---
-exprHandlers["return"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  "return " & e.emitExpr(vals, pos)
+# --- return --- `return` + expression; always a statement-ish expression.
+registerExpr("return", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  lxOther("return " & e.emitExpr(vals, pos)))
 
-# --- join ---
-exprHandlers["join"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+# --- join --- two-arg string concat, prec 4 (..)
+registerExpr("join", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let a = e.emitExpr(vals, pos)
   let b = e.emitExpr(vals, pos)
-  "tostring(" & a & ") .. tostring(" & b & ")"
+  lxInfix("tostring(" & a & ") .. tostring(" & b & ")", luaPrec("..")))
 
 # --- Series operations ---
-exprHandlers["first"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("first", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let seqType = e.inferSeqType(vals, pos)
-  let arg = wrapIfTableCtor(e.emitExpr(vals, pos))
+  # paren at minPrec=0: wraps only lxTableCtor (needs outer parens to index
+  # a bare `{...}` literal); lxInfix is never wrapped since its prec is > 0.
+  let arg = paren(e.emitExprTyped(vals, pos), 0)
   case seqType
-  of stString: arg & ":sub(1, 1)"
-  else: arg & "[1]"
+  of stString: lxCall(arg & ":sub(1, 1)")
+  else: lxCall(arg & "[1]"))
 
-exprHandlers["second"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("second", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let seqType = e.inferSeqType(vals, pos)
-  let arg = wrapIfTableCtor(e.emitExpr(vals, pos))
+  let arg = paren(e.emitExprTyped(vals, pos), 0)
   case seqType
-  of stString: arg & ":sub(2, 2)"
-  else: arg & "[2]"
+  of stString: lxCall(arg & ":sub(2, 2)")
+  else: lxCall(arg & "[2]"))
 
-exprHandlers["last"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("last", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let seqType = e.inferSeqType(vals, pos)
   let arg = e.emitExpr(vals, pos)
   # Simple identifier: emit arg[#arg]. Complex expression: use temp to avoid double eval.
   let isSimple = arg.allCharsInSet({'a'..'z', 'A'..'Z', '0'..'9', '_', '.'})
   case seqType
   of stString:
-    if isSimple: arg & ":sub(#" & arg & ", #" & arg & ")"
-    else: "(function() local _t = " & arg & "; return _t:sub(#_t, #_t) end)()"
+    if isSimple: lxCall(arg & ":sub(#" & arg & ", #" & arg & ")")
+    else: lxOther("(function() local _t = " & arg & "; return _t:sub(#_t, #_t) end)()")
   else:
-    if isSimple: arg & "[#" & arg & "]"
-    else: "(function() local _t = " & arg & "; return _t[#_t] end)()"
+    if isSimple: lxCall(arg & "[#" & arg & "]")
+    else: lxOther("(function() local _t = " & arg & "; return _t[#_t] end)()"))
 
-exprHandlers["pick"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("pick", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let seqType = e.inferSeqType(vals, pos)
-  let blk = e.emitExpr(vals, pos)
+  let blkTyped = e.emitExprTyped(vals, pos)
   let idx = e.emitExpr(vals, pos)
-  let wrapped = wrapIfTableCtor(blk)
+  let wrapped = paren(blkTyped, 0)
   case seqType
-  of stString: wrapped & ":sub(" & idx & ", " & idx & ")"
-  else: wrapped & "[" & idx & "]"
+  of stString: lxCall(wrapped & ":sub(" & idx & ", " & idx & ")")
+  else: lxCall(wrapped & "[" & idx & "]"))
 
-exprHandlers["append"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("append", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let blk = e.emitExpr(vals, pos)
   let val_expr = e.emitExpr(vals, pos)
   e.useHelper("_append")
-  "_append(" & blk & ", " & val_expr & ")"
+  lxCall("_append(" & blk & ", " & val_expr & ")"))
 
-exprHandlers["append/only"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("append/only", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let blk = e.emitExpr(vals, pos)
   let val_expr = e.emitExpr(vals, pos)
-  "(function() table.insert(" & blk & ", " & val_expr & "); return " & blk & " end)()"
+  lxOther("(function() table.insert(" & blk & ", " & val_expr & "); return " & blk & " end)()"))
 
-exprHandlers["copy"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("copy", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let arg = e.emitExpr(vals, pos)
   e.useHelper("_copy")
-  "_copy(" & arg & ")"
+  lxCall("_copy(" & arg & ")"))
 
-exprHandlers["insert"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("insert", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let seqType = e.inferSeqType(vals, pos)
   let blk = e.emitExpr(vals, pos)
   let val_expr = e.emitExpr(vals, pos)
   let idx_expr = e.emitExpr(vals, pos)
   case seqType
   of stString:
-    blk & ":sub(1, " & idx_expr & " - 1) .. " & val_expr & " .. " & blk & ":sub(" & idx_expr & ")"
+    lxInfix(blk & ":sub(1, " & idx_expr & " - 1) .. " & val_expr & " .. " & blk & ":sub(" & idx_expr & ")", luaPrec(".."))
   of stBlock:
-    "(function() table.insert(" & blk & ", " & idx_expr & ", " & val_expr & "); return " & blk & " end)()"
+    lxOther("(function() table.insert(" & blk & ", " & idx_expr & ", " & val_expr & "); return " & blk & " end)()")
   of stUnknown:
     e.useHelper("_insert")
-    "_insert(" & blk & ", " & val_expr & ", " & idx_expr & ")"
+    lxCall("_insert(" & blk & ", " & val_expr & ", " & idx_expr & ")"))
 
-exprHandlers["remove"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("remove", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let seqType = e.inferSeqType(vals, pos)
   let blk = e.emitExpr(vals, pos)
   let idx_expr = e.emitExpr(vals, pos)
   case seqType
   of stString:
-    blk & ":sub(1, " & idx_expr & " - 1) .. " & blk & ":sub(" & idx_expr & " + 1)"
+    lxInfix(blk & ":sub(1, " & idx_expr & " - 1) .. " & blk & ":sub(" & idx_expr & " + 1)", luaPrec(".."))
   of stBlock:
-    "(function() table.remove(" & blk & ", " & idx_expr & "); return " & blk & " end)()"
+    lxOther("(function() table.remove(" & blk & ", " & idx_expr & "); return " & blk & " end)()")
   of stUnknown:
     e.useHelper("_remove")
-    "_remove(" & blk & ", " & idx_expr & ")"
+    lxCall("_remove(" & blk & ", " & idx_expr & ")"))
 
-exprHandlers["select"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("select", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let blk = e.emitExpr(vals, pos)
   let key = e.emitExpr(vals, pos)
   e.useHelper("_select")
   e.useHelper("_equals")
-  "_select(" & blk & ", " & key & ")"
+  lxCall("_select(" & blk & ", " & key & ")"))
 
-exprHandlers["has?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("has?", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   # Peek at needle AST to detect scalar literals
   let isScalar = pos + 1 < vals.len and
     (vals[pos + 1].kind in {vkString, vkInteger, vkFloat} or
@@ -1002,134 +1024,139 @@ exprHandlers["has?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int
   let seqType = e.inferSeqType(vals, pos)
   let blk = e.emitExpr(vals, pos)
   let val_expr = e.emitExpr(vals, pos)
-  # String: substring search
+  # String: substring search — paren-wrapped already.
   if seqType == stString:
-    return "(string.find(" & blk & ", " & val_expr & ", 1, true) ~= nil)"
+    return lxCall("(string.find(" & blk & ", " & val_expr & ", 1, true) ~= nil)")
   if isScalar:
     # Inline loop with == for scalars — no need for _equals
-    "(function() for _, x in ipairs(" & blk & ") do if x == " & val_expr &
-      " then return true end end return false end)()"
+    lxOther("(function() for _, x in ipairs(" & blk & ") do if x == " & val_expr &
+      " then return true end end return false end)()")
   else:
     e.useHelper("_has")
     e.useHelper("_equals")
-    "_has(" & blk & ", " & val_expr & ")"
+    lxCall("_has(" & blk & ", " & val_expr & ")"))
 
 # --- String operations ---
-exprHandlers["split"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("split", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let str = e.emitExpr(vals, pos)
   let delim = e.emitExpr(vals, pos)
   e.useHelper("_split")
-  "_split(" & str & ", " & delim & ")"
+  lxCall("_split(" & str & ", " & delim & ")"))
 
-exprHandlers["replace"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("replace", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let str = e.emitExpr(vals, pos)
   let old = e.emitExpr(vals, pos)
   let new_str = e.emitExpr(vals, pos)
   e.useHelper("_replace")
-  "_replace(" & str & ", " & old & ", " & new_str & ")"
+  lxCall("_replace(" & str & ", " & old & ", " & new_str & ")"))
 
-exprHandlers["byte"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  "string.byte(" & e.emitExpr(vals, pos) & ", 1)"
+registerExpr("byte", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  lxCall("string.byte(" & e.emitExpr(vals, pos) & ", 1)"))
 
-exprHandlers["char"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  "string.char(" & e.emitExpr(vals, pos) & ")"
+registerExpr("char", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  lxCall("string.char(" & e.emitExpr(vals, pos) & ")"))
 
-exprHandlers["starts-with?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("starts-with?", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let str = e.emitExpr(vals, pos)
   let prefix = e.emitExpr(vals, pos)
-  "(string.sub(" & str & ", 1, #" & prefix & ") == " & prefix & ")"
+  lxCall("(string.sub(" & str & ", 1, #" & prefix & ") == " & prefix & ")"))
 
-exprHandlers["ends-with?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("ends-with?", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let str = e.emitExpr(vals, pos)
   let suffix = e.emitExpr(vals, pos)
-  "(string.sub(" & str & ", -#" & suffix & ") == " & suffix & ")"
+  lxCall("(string.sub(" & str & ", -#" & suffix & ") == " & suffix & ")"))
 
-exprHandlers["subset"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("subset", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let seqType = e.inferSeqType(vals, pos)
   let str = e.emitExpr(vals, pos)
   let start = e.emitExpr(vals, pos)
   let length = e.emitExpr(vals, pos)
   case seqType
   of stString:
-    "string.sub(" & str & ", " & start & ", " & start & " + " & length & " - 1)"
+    lxCall("string.sub(" & str & ", " & start & ", " & start & " + " & length & " - 1)")
   of stBlock:
     # Inline block slice — no helper
-    "(function() local r={} local _t=" & str & " local _s=" & start & " local _n=math.min(_s+" & length & "-1, #_t) for _i=_s,_n do r[#r+1]=_t[_i] end return r end)()"
+    lxOther("(function() local r={} local _t=" & str & " local _s=" & start & " local _n=math.min(_s+" & length & "-1, #_t) for _i=_s,_n do r[#r+1]=_t[_i] end return r end)()")
   of stUnknown:
     e.useHelper("_subset")
-    "_subset(" & str & ", " & start & ", " & length & ")"
+    lxCall("_subset(" & str & ", " & start & ", " & length & ")"))
 
 # --- random ---
-exprHandlers["random"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+# `random N` emits `math.random() * N`, a multiplication at prec 6.
+registerExpr("random", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   e.usedRandom = true
-  "math.random() * " & e.emitExpr(vals, pos)
+  lxInfix("math.random() * " & e.emitExpr(vals, pos), luaPrec("*")))
 
-exprHandlers["random/int"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("random/int", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   e.usedRandom = true
   let n = e.emitExpr(vals, pos)
-  "math.random(" & n & ")"
+  lxCall("math.random(" & n & ")"))
 
-exprHandlers["random/int/range"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("random/int/range", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   e.usedRandom = true
   let lo = e.emitExpr(vals, pos)
   let hi = e.emitExpr(vals, pos)
-  "math.random(" & lo & ", " & hi & ")"
+  lxCall("math.random(" & lo & ", " & hi & ")"))
 
-exprHandlers["random/choice"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("random/choice", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   e.usedRandom = true
   let blk = e.emitExpr(vals, pos)
-  "(function() local _t = " & blk & "; return _t[math.random(#_t)] end)()"
+  lxOther("(function() local _t = " & blk & "; return _t[math.random(#_t)] end)()"))
 
-exprHandlers["random/seed"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("random/seed", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   e.usedRandom = true
-  "math.randomseed(" & e.emitExpr(vals, pos) & ")"
+  lxCall("math.randomseed(" & e.emitExpr(vals, pos) & ")"))
 
 # --- Type conversion ---
-exprHandlers["to"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("to", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let typeExpr = e.emitExpr(vals, pos)
   let val_expr = e.emitExpr(vals, pos)
-  if typeExpr == "\"string!\"": "tostring(" & val_expr & ")"
-  elif typeExpr == "\"integer!\"": "math.floor(tonumber(" & val_expr & "))"
-  elif typeExpr == "\"float!\"": "tonumber(" & val_expr & ")"
-  else: "tonumber(" & val_expr & ") or " & val_expr
+  if typeExpr == "\"string!\"": lxCall("tostring(" & val_expr & ")")
+  elif typeExpr == "\"integer!\"": lxCall("math.floor(tonumber(" & val_expr & "))")
+  elif typeExpr == "\"float!\"": lxCall("tonumber(" & val_expr & ")")
+  else: lxInfix("tonumber(" & val_expr & ") or " & val_expr, luaPrec("or")))
 
 # --- Type introspection ---
-exprHandlers["type"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  "type(" & e.emitExpr(vals, pos) & ")"
+registerExpr("type", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  lxCall("type(" & e.emitExpr(vals, pos) & ")"))
 
 # --- error: raise a tagged error table so catch handlers can dispatch on kind ---
-exprHandlers["error"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("error", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let kind = e.emitExpr(vals, pos)
   let msg = e.emitExpr(vals, pos)
   let data = e.emitExpr(vals, pos)
-  "error({kind = " & kind & ", msg = " & msg & ", data = " & data & "})"
+  lxCall("error({kind = " & kind & ", msg = " & msg & ", data = " & data & "})"))
 
 # --- sort ---
-exprHandlers["sort"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("sort", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let seqType = e.inferSeqType(vals, pos)
   let arg = e.emitExpr(vals, pos)
   case seqType
   of stString:
-    "(function() local t = {} for i = 1, #" & arg & " do t[i] = " & arg & ":sub(i,i) end table.sort(t) return table.concat(t) end)()"
+    lxOther("(function() local t = {} for i = 1, #" & arg & " do t[i] = " & arg & ":sub(i,i) end table.sort(t) return table.concat(t) end)()")
   of stBlock:
-    "(function() table.sort(" & arg & "); return " & arg & " end)()"
+    lxOther("(function() table.sort(" & arg & "); return " & arg & " end)()")
   of stUnknown:
     e.useHelper("_sort")
-    "_sort(" & arg & ")"
+    lxCall("_sort(" & arg & ")"))
 
 # --- apply ---
-exprHandlers["apply"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("apply", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let fn = e.emitExpr(vals, pos)
   let args_expr = e.emitExpr(vals, pos)
   e.usedVariadicUnpack = true
-  fn & "(unpack(" & args_expr & "))"
+  lxCall(fn & "(unpack(" & args_expr & "))"))
 
-# --- reduce (passthrough) ---
-exprHandlers["reduce"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  e.emitExpr(vals, pos)
+# --- reduce (passthrough) — returns whatever shape the inner expression has.
+# Since `reduce` is a no-op in compiled output, tag as `lxOther` to preserve
+# conservative wrap behavior; a typed passthrough would require emitExpr to
+# return LuaExpr which happens in Phase C.4.
+registerExpr("reduce", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  lxOther(e.emitExpr(vals, pos)))
 
-# --- all/any: short-circuit boolean combinators ---
-exprHandlers["all?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+# --- all/any: short-circuit boolean combinators. Paren-wrapped outputs
+# compose safely; tag as lxCall so `paren` leaves them alone.
+registerExpr("all?", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   if pos < vals.len and vals[pos].kind == vkBlock:
     let blk = vals[pos].blockVals
     pos += 1
@@ -1137,11 +1164,11 @@ exprHandlers["all?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int
     var bpos = 0
     while bpos < blk.len:
       parts.add(e.emitExpr(blk, bpos))
-    "(" & parts.join(" and ") & ")"
+    lxCall("(" & parts.join(" and ") & ")")
   else:
-    "true"
+    lxLit("true"))
 
-exprHandlers["any?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("any?", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   if pos < vals.len and vals[pos].kind == vkBlock:
     let blk = vals[pos].blockVals
     pos += 1
@@ -1149,18 +1176,18 @@ exprHandlers["any?"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int
     var bpos = 0
     while bpos < blk.len:
       parts.add(e.emitExpr(blk, bpos))
-    "(" & parts.join(" or ") & ")"
+    lxCall("(" & parts.join(" or ") & ")")
   else:
-    "false"
+    lxLit("false"))
 
 # --- merge: create new table with entries from both sources ---
-exprHandlers["merge"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("merge", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let a = e.emitExpr(vals, pos, primary = true)
   let b = e.emitExpr(vals, pos, primary = true)
-  "(function() local r = {} for k, v in pairs(" & a & ") do r[k] = v end for k, v in pairs(" & b & ") do r[k] = v end return r end)()"
+  lxOther("(function() local r = {} for k, v in pairs(" & a & ") do r[k] = v end for k, v in pairs(" & b & ") do r[k] = v end return r end)()"))
 
 # --- object: emit as table with field defaults and methods ---
-exprHandlers["object"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("object", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   if pos < vals.len and vals[pos].kind == vkBlock:
     let specBlock = vals[pos].blockVals
     pos += 1
@@ -1236,14 +1263,14 @@ exprHandlers["object"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var i
         continue
       i += 1
     if parts.len == 0:
-      result = "{}"
+      result = lxTableCtor("{}")
     else:
-      result = "{\n" & parts.mapIt(repeat("  ", e.indent + 1) & it).join(",\n") & "\n" & e.pad & "}"
+      result = lxTableCtor("{\n" & parts.mapIt(repeat("  ", e.indent + 1) & it).join(",\n") & "\n" & e.pad & "}")
   else:
-    result = "{}"
+    result = lxTableCtor("{}"))
 
 # --- make: emit inline table merging object defaults with overrides ---
-exprHandlers["make"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("make", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let objExpr = e.emitExpr(vals, pos, primary = true)
   let objName = objExpr.toLower.replace("_", "-")
   # Parse overrides into a name->expr table
@@ -1266,9 +1293,9 @@ exprHandlers["make"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int
     e.useHelper("_make")
     discard  # prototype needed at runtime
     if objName in e.customTypes:
-      return "_make(" & objExpr & ", " & overridesExpr & ", \"" & objName & "\")"
+      return lxCall("_make(" & objExpr & ", " & overridesExpr & ", \"" & objName & "\")")
     else:
-      return "_make(" & objExpr & ", " & overridesExpr & ")"
+      return lxCall("_make(" & objExpr & ", " & overridesExpr & ")")
   # If we know this object's field specs, inline the merged table
   if objName in e.objectFields:
     let fields = e.objectFields[objName]
@@ -1295,23 +1322,23 @@ exprHandlers["make"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int
     if objName in e.customTypes and objName in e.usedTypeChecks:
       parts.add("_type = \"" & objName & "\"")
     if parts.len == 0:
-      "{}"
+      lxTableCtor("{}")
     else:
-      "{\n" & parts.mapIt(repeat("  ", e.indent + 1) & it).join(",\n") & "\n" & e.pad & "}"
+      lxTableCtor("{\n" & parts.mapIt(repeat("  ", e.indent + 1) & it).join(",\n") & "\n" & e.pad & "}")
   else:
     # Unknown object - fall back to _make (prototype table needed at runtime)
     e.useHelper("_make")
     discard  # prototype needed at runtime
     let overridesExpr = "{" & overrides.mapIt(it.name & " = " & it.value).join(", ") & "}"
     if objName in e.customTypes:
-      "_make(" & objExpr & ", " & overridesExpr & ", \"" & objName & "\")"
+      lxCall("_make(" & objExpr & ", " & overridesExpr & ", \"" & objName & "\")")
     else:
-      "_make(" & objExpr & ", " & overridesExpr & ")"
+      lxCall("_make(" & objExpr & ", " & overridesExpr & ")"))
 
 # --- exports: handled at module level, skip in expression context ---
-exprHandlers["exports"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("exports", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   discard e.emitExpr(vals, pos)  # consume the block arg
-  "nil"
+  lxLit("nil"))
 
 # ---------------------------------------------------------------------------
 # Statement-specific handlers (where stmt behavior differs from expr)
@@ -2237,43 +2264,43 @@ stmtHandlers["match"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var in
 
 # --- Expression-form control flow / dialect registrations -------------------
 
-exprHandlers["scope"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("scope", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   if pos < vals.len and vals[pos].kind == vkBlock:
     let blk = vals[pos].blockVals
     pos += 1
-    e.emitScope(blk, asExpr = true)
+    lxOther(e.emitScope(blk, asExpr = true))
   else:
-    "nil"
+    lxLit("nil"))
 
-exprHandlers["loop"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("loop", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   if pos < vals.len and vals[pos].kind == vkBlock:
     let blk = vals[pos].blockVals
     pos += 1
     let loopCode = withCapture(e):
       discard e.emitLoop(blk)
     e.raw(loopCode)
-    "nil"
+    lxLit("nil")
   else:
-    "nil"
+    lxLit("nil"))
 
-exprHandlers["attempt"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("attempt", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   if pos < vals.len and vals[pos].kind == vkBlock:
     let pipelineBlk = vals[pos].blockVals
     pos += 1
-    e.emitAttemptExpr(pipelineBlk)
+    lxOther(e.emitAttemptExpr(pipelineBlk))
   else:
-    "nil"
+    lxLit("nil"))
 
-exprHandlers["match"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("match", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let valueExpr = e.emitExpr(vals, pos)
   if pos < vals.len and vals[pos].kind == vkBlock:
     let rulesBlock = vals[pos].blockVals
     pos += 1
-    e.emitMatchExpr(valueExpr, rulesBlock)
+    lxOther(e.emitMatchExpr(valueExpr, rulesBlock))
   else:
-    "nil"
+    lxLit("nil"))
 
-exprHandlers["rejoin/with"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("rejoin/with", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   if pos < vals.len and vals[pos].kind == vkBlock:
     let blk = vals[pos].blockVals
     pos += 1
@@ -2287,13 +2314,13 @@ exprHandlers["rejoin/with"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: 
       else:
         e.useHelper("_prettify")
         parts.add("_prettify(" & elem & ")")
-    "table.concat({" & parts.join(", ") & "}, " & delim & ")"
+    lxCall("table.concat({" & parts.join(", ") & "}, " & delim & ")")
   else:
     let arg = e.emitExpr(vals, pos)
     let delim = e.emitExpr(vals, pos)
-    "table.concat(" & arg & ", " & delim & ")"
+    lxCall("table.concat(" & arg & ", " & delim & ")"))
 
-exprHandlers["rejoin"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("rejoin", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   if pos < vals.len and vals[pos].kind == vkBlock:
     let blk = vals[pos].blockVals
     pos += 1
@@ -2343,49 +2370,49 @@ exprHandlers["rejoin"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var i
         merged[^1] = merged[^1][0..^2] & p[1..^1]
       else:
         merged.add(p)
-    if merged.len == 1: merged[0]
-    else: merged.join(" .. ")
+    if merged.len == 1: lxOther(merged[0])
+    else: lxInfix(merged.join(" .. "), luaPrec(".."))
   else:
     let arg = e.emitExpr(vals, pos)
-    "table.concat(" & arg & ")"
+    lxCall("table.concat(" & arg & ")"))
 
-exprHandlers["find"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("find", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let seqType = e.inferSeqType(vals, pos)
   let series = e.emitExpr(vals, pos)
   let needle = e.emitExpr(vals, pos)
   case seqType
   of stString:
-    "(string.find(" & series & ", " & needle & ", 1, true))"
+    lxCall("(string.find(" & series & ", " & needle & ", 1, true))")
   of stBlock:
     e.useHelper("_equals")
-    "(function() for i, v in ipairs(" & series & ") do if _equals(v, " & needle & ") then return i end end return nil end)()"
+    lxOther("(function() for i, v in ipairs(" & series & ") do if _equals(v, " & needle & ") then return i end end return nil end)()")
   of stUnknown:
     e.useHelper("_equals")
-    "(function() " &
+    lxOther("(function() " &
       "if type(" & series & ") == \"string\" then " &
       "local i = string.find(" & series & ", " & needle & ", 1, true); " &
       "if i then return i end; return nil " &
       "else " &
       "for i, v in ipairs(" & series & ") do if _equals(v, " & needle & ") then return i end end; return nil " &
       "end " &
-      "end)()"
+      "end)()"))
 
-exprHandlers["reverse"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("reverse", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let seqType = e.inferSeqType(vals, pos)
-  let arg = e.emitExpr(vals, pos)
-  let a = wrapIfTableCtor(arg)
+  let argTyped = e.emitExprTyped(vals, pos)
+  let a = paren(argTyped, 0)
   case seqType
   of stString:
-    "string.reverse(" & a & ")"
+    lxCall("string.reverse(" & a & ")")
   of stBlock:
-    "(function() local _t=" & a & "; local r={}; for i=#_t,1,-1 do r[#r+1]=_t[i] end; return r end)()"
+    lxOther("(function() local _t=" & a & "; local r={}; for i=#_t,1,-1 do r[#r+1]=_t[i] end; return r end)()")
   of stUnknown:
-    "(function() " &
+    lxOther("(function() " &
       "if type(" & a & ") == \"string\" then return string.reverse(" & a & ") " &
       "else local _t=" & a & "; local r={}; for i=#_t,1,-1 do r[#r+1]=_t[i] end; return r end " &
-      "end)()"
+      "end)()"))
 
-exprHandlers["if"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("if", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let cond = e.emitExpr(vals, pos)
   if pos < vals.len and vals[pos].kind == vkBlock:
     let bodyBlock = vals[pos].blockVals
@@ -2394,13 +2421,13 @@ exprHandlers["if"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int):
     let bodyOut = withCapture(e):
       e.emitBody(bodyBlock, asReturn = true)
     e.indent -= 1
-    "(function()\n" & e.pad & "  if " & cond & " then\n" &
+    lxOther("(function()\n" & e.pad & "  if " & cond & " then\n" &
       bodyOut &
-      e.pad & "  end\n" & e.pad & "end)()"
+      e.pad & "  end\n" & e.pad & "end)()")
   else:
-    "nil"
+    lxLit("nil"))
 
-exprHandlers["either"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("either", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let cond = e.emitExpr(vals, pos)
   var trueBlock: seq[KtgValue] = @[]
   var falseBlock: seq[KtgValue] = @[]
@@ -2410,13 +2437,13 @@ exprHandlers["either"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var i
   if pos < vals.len and vals[pos].kind == vkBlock:
     falseBlock = vals[pos].blockVals
     pos += 1
-  e.emitEitherExpr(cond, trueBlock, falseBlock)
+  lxOther(e.emitEitherExpr(cond, trueBlock, falseBlock)))
 
 # Loop refinements — fixed names, registered explicitly so the wkWord arm
 # dispatch doesn't need a pattern-match branch.
 for refinement in ["collect", "fold", "partition"]:
   let refName = refinement  # closure capture
-  exprHandlers["loop/" & refinement] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+  registerExpr("loop/" & refinement, proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
     if pos < vals.len and vals[pos].kind == vkBlock:
       let blk = vals[pos].blockVals
       pos += 1
@@ -2425,9 +2452,9 @@ for refinement in ["collect", "fold", "partition"]:
         let resultVar = e.emitLoop(blk, refName)
         e.ln("return " & resultVar)
       e.indent -= 1
-      "(function()\n" & loopCode & e.pad & "end)()"
+      lxOther("(function()\n" & loopCode & e.pad & "end)()")
     else:
-      "nil"
+      lxLit("nil"))
 
 proc importHandlerImpl(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
                        name: string): string =
@@ -2501,13 +2528,13 @@ proc importHandlerImpl(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
       if depE.programUsesNoneCheck: e.programUsesNoneCheck = true
     "require(\"" & moduleName & "\")"
 
-exprHandlers["import"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  importHandlerImpl(e, vals, pos, "import")
+registerExpr("import", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  lxOther(importHandlerImpl(e, vals, pos, "import")))
 
-exprHandlers["import/using"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
-  importHandlerImpl(e, vals, pos, "import/using")
+registerExpr("import/using", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  lxOther(importHandlerImpl(e, vals, pos, "import/using")))
 
-exprHandlers["capture"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): string =
+registerExpr("capture", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   # Parse schema (second arg) at compile time to get keyword names
   let dataStart = pos
   var schemaPos = pos
@@ -2553,7 +2580,7 @@ exprHandlers["capture"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var 
     if pos < vals.len and vals[pos].kind == vkBlock:
       pos += 1
     e.useHelper("_capture")
-    "_capture(" & dataStr & ", " & specStr & ")"
+    lxCall("_capture(" & dataStr & ", " & specStr & ")")
   else:
     let dataExpr = e.emitExpr(vals, pos)
     if pos < vals.len and vals[pos].kind == vkBlock:
@@ -2565,9 +2592,9 @@ exprHandlers["capture"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var 
           specParts.add("\"" & kw & "\"")
       pos += 1
       e.useHelper("_capture")
-      "_capture(" & dataExpr & ", {" & specParts.join(", ") & "})"
+      lxCall("_capture(" & dataExpr & ", {" & specParts.join(", ") & "})")
     else:
-      "nil"
+      lxLit("nil"))
 
 # ---------------------------------------------------------------------------
 # Emit either as expression
@@ -2860,12 +2887,17 @@ proc resolvePathCall(e: var LuaEmitter, name: string, line: int,
 
 proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
               primary: bool = false): string =
-  ## Emit the next expression from vals starting at pos. Returns a Lua
-  ## expression string and advances pos past the consumed values.
-  ## When primary=false (default), greedily consumes infix operators.
-  ## When primary=true, emits only the primary expression (no infix chain).
+  ## Back-compat projection: most call sites still concatenate strings.
+  emitExprTyped(e, vals, pos, primary).text
+
+proc emitExprTyped(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
+                   primary: bool = false): LuaExpr =
+  ## Emit the next expression from vals starting at pos. Returns a typed
+  ## `LuaExpr` and advances pos past the consumed values. When primary=false
+  ## (default), greedily consumes infix operators. When primary=true, emits
+  ## only the primary expression (no infix chain).
   if pos >= vals.len:
-    return "nil"
+    return lxLit("nil")
 
   let val = vals[pos]
   pos += 1
@@ -2874,11 +2906,11 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
 
   # --- Literals ---
   of vkInteger, vkFloat, vkString, vkLogic, vkNone, vkMoney, vkPair, vkTuple:
-    result = emitLiteral(e, val)
+    result = lxLit(emitLiteral(e, val))
 
   # --- Block: emit as Lua table ---
   of vkBlock:
-    result = e.emitBlockLiteral(val.blockVals)
+    result = lxTableCtor(e.emitBlockLiteral(val.blockVals))
 
   # --- Paren: emit contents as grouped expression ---
   # (f x) where f is unknown param = function call. (expr op expr) = grouping.
@@ -2896,10 +2928,11 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
       var args: seq[string] = @[]
       while ppos < pvals.len:
         args.add(e.emitExpr(pvals, ppos))
-      result = "(" & e.resolvedName(headName) & "(" & args.join(", ") & "))"
+      result = lxCall("(" & e.resolvedName(headName) & "(" & args.join(", ") & "))")
     else:
       var ppos = 0
-      let inner = e.emitExpr(pvals, ppos)
+      let innerTyped = e.emitExprTyped(pvals, ppos)
+      let inner = innerTyped.text
       # Kintsugi parens group evaluation order. Lua has operator
       # precedence, Kintsugi does not — so we must preserve parens
       # whenever the inner expression contains an infix operator that
@@ -2913,13 +2946,15 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
           hasInfix = true
           break
       if ppos < pvals.len or hasInfix:
-        result = "(" & inner & ")"
+        result = lxCall("(" & inner & ")")
       else:
-        result = inner
+        # Single token or pure call — inherit inner kind for best downstream
+        # composition decisions.
+        result = innerTyped
 
   # --- Op: shouldn't appear here, handled by infix ---
   of vkOp:
-    result = luaOp(val.opSymbol)
+    result = lxLit(luaOp(val.opSymbol))
 
   # --- Word ---
   of vkWord:
@@ -2928,14 +2963,13 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
     of wkSetWord:
       # x: expr -> should be handled at statement level, but handle here for
       # nested contexts. Return the expression value.
-      let rhs = e.emitExpr(vals, pos)
-      result = rhs  # the assignment is done at statement level
+      result = e.emitExprTyped(vals, pos)  # the assignment is done at statement level
 
     of wkGetWord:
-      result = luaName(val.wordName)
+      result = lxLit(luaName(val.wordName))
 
     of wkLitWord:
-      result = "\"" & val.wordName & "\""
+      result = lxLit("\"" & val.wordName & "\"")
 
     of wkMetaWord:
       let metaName = val.wordName
@@ -2964,13 +2998,13 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
       # the form was malformed (e.g. an `@type` not in a set-word RHS). Emit
       # nothing rather than `nil` — predicates are looked up by name.
       if metaName == "type" or metaName.startsWith("type/"):
-        result = ""
+        result = lxLit("")
       elif metaName == "const":
-        result = ""
+        result = lxLit("")
       else:
         # Unknown meta-words (@template, @inline, @preprocess) - silently
         # erase. Compile-time machinery handles these elsewhere.
-        result = ""
+        result = lxLit("")
 
     of wkWord:
       let name = val.wordName
@@ -2980,7 +3014,7 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
       # is a real value that survives length, ipairs, table.concat, etc.).
       if name == "none":
         e.useHelper("_NONE")
-        result = "_NONE"
+        result = lxLit("_NONE")
         return
 
       # --- Dispatch table lookup (handlers registered above) ---
@@ -2993,11 +3027,11 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
       # --- system/env/NAME → os.getenv("NAME") ---
       elif name.startsWith("system/env/"):
         let envName = name.split('/')[2]
-        result = "os.getenv(\"" & envName & "\")"
+        result = lxCall("os.getenv(\"" & envName & "\")")
 
       # --- Path access or call: obj/field/sub ---
       elif name.contains('/'):
-        result = resolvePathCall(e, name, val.line, vals, pos).lua
+        result = lxCall(resolvePathCall(e, name, val.line, vals, pos).lua)
 
 
       # --- Generic function call or variable reference ---
@@ -3023,61 +3057,62 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
             # obj.method -> obj:method
             let dotPos = resolvedLua.rfind('.')
             let methodLua = resolvedLua[0..<dotPos] & ":" & resolvedLua[dotPos+1..^1]
-            result = methodLua & "(" & args.join(", ") & ")"
+            result = lxCall(methodLua & "(" & args.join(", ") & ")")
           else:
-            result = resolvedLua & "(" & args.join(", ") & ")"
+            result = lxCall(resolvedLua & "(" & args.join(", ") & ")")
         else:
-          result = resolvedLua
+          result = lxLit(resolvedLua)
 
   # --- Types, files, urls, emails — emit as string literals ---
   of vkType:
-    result = "\"" & val.typeName & "\""
+    result = lxLit("\"" & val.typeName & "\"")
   of vkFile:
-    result = "\"" & luaEscape(val.filePath) & "\""
+    result = lxLit("\"" & luaEscape(val.filePath) & "\"")
   of vkUrl:
-    result = "\"" & luaEscape(val.urlVal) & "\""
+    result = lxLit("\"" & luaEscape(val.urlVal) & "\"")
   of vkEmail:
-    result = "\"" & luaEscape(val.emailVal) & "\""
+    result = lxLit("\"" & luaEscape(val.emailVal) & "\"")
 
   # --- Date/Time — emit as tables ---
   of vkDate:
-    result = "{year=" & $val.year & ", month=" & $val.month & ", day=" & $val.day & "}"
+    result = lxTableCtor("{year=" & $val.year & ", month=" & $val.month & ", day=" & $val.day & "}")
   of vkTime:
-    result = "{hour=" & $val.hour & ", minute=" & $val.minute & ", second=" & $val.second & "}"
+    result = lxTableCtor("{hour=" & $val.hour & ", minute=" & $val.minute & ", second=" & $val.second & "}")
 
   # --- Remaining types ---
   of vkMap:
     var parts: seq[string] = @[]
     for k, v in val.mapEntries:
       parts.add(luaName(k) & " = " & emitLiteral(e, v))
-    result = "{" & parts.join(", ") & "}"
+    result = lxTableCtor("{" & parts.join(", ") & "}")
 
   of vkSet:
     var parts: seq[string] = @[]
     for m in val.setMembers:
       parts.add("[\"" & luaEscape(m) & "\"] = true")
-    result = "{" & parts.join(", ") & "}"
+    result = lxTableCtor("{" & parts.join(", ") & "}")
 
   of vkContext:
     var parts: seq[string] = @[]
     for k, v in val.ctx.entries:
       parts.add(luaName(k) & " = " & emitLiteral(e, v))
-    result = "{" & parts.join(", ") & "}"
+    result = lxTableCtor("{" & parts.join(", ") & "}")
 
   of vkObject:
     var parts: seq[string] = @[]
     for k, v in val.obj.entries:
       parts.add(luaName(k) & " = " & emitLiteral(e, v))
-    result = "{" & parts.join(", ") & "}"
+    result = lxTableCtor("{" & parts.join(", ") & "}")
 
   of vkFunction, vkNative:
-    result = "nil  -- cannot emit runtime function/native value"
+    result = lxLit("nil  -- cannot emit runtime function/native value")
 
   # Handle infix chain — left-to-right (Kintsugi has no precedence).
-  # Leverage Lua's own precedence: only add parens when Kintsugi's left-to-right
-  # order disagrees with Lua's precedence (higher-prec op follows lower-prec op).
+  # `result` is the accumulating left operand; `paren(result, opPrec)`
+  # decides wrapping from `lxInfix.prec` directly. Non-infix left operands
+  # (lxLit / lxCall / lxOther / lxTableCtor) are treated as atomic by
+  # `paren` — matching the previous "never wraps on first iteration" rule.
   if not primary:
-    var lastPrec = int.high  # no prior op = highest (never needs wrapping)
     while pos < vals.len and isInfixOp(vals[pos]):
       let op = vals[pos]
       let opStr = if op.kind == vkOp: luaOp(op.opSymbol) else: luaOp(op.wordName)
@@ -3090,27 +3125,18 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
       # which side of the boundary the absent value came from.
       if right == "_NONE" and opStr == "==":
         e.useHelper("_is_none")
-        result = "_is_none(" & result & ")"
-        lastPrec = prec
+        result = lxCall("_is_none(" & result.text & ")")
       elif right == "_NONE" and opStr == "~=":
         e.useHelper("_is_none")
-        result = "(not _is_none(" & result & "))"
-        lastPrec = prec
-      elif result == "_NONE" and opStr == "==":
+        result = lxCall("(not _is_none(" & result.text & "))")
+      elif result.text == "_NONE" and opStr == "==":
         e.useHelper("_is_none")
-        result = "_is_none(" & right & ")"
-        lastPrec = prec
-      elif result == "_NONE" and opStr == "~=":
+        result = lxCall("_is_none(" & right & ")")
+      elif result.text == "_NONE" and opStr == "~=":
         e.useHelper("_is_none")
-        result = "(not _is_none(" & right & "))"
-        lastPrec = prec
+        result = lxCall("(not _is_none(" & right & "))")
       else:
-        # Wrap left side only when this op binds tighter in Lua than the
-        # previous one — otherwise Lua's precedence already groups correctly.
-        if prec > lastPrec:
-          result = "(" & result & ")"
-        result = result & " " & opStr & " " & right
-        lastPrec = prec
+        result = lxInfix(paren(result, prec) & " " & opStr & " " & right, prec)
 
 ## Words that terminate `->` argument collection. `->` is specifically a
 ## Lua-colon-method interop operator (emits `x:method(args)`); it has no
@@ -4022,7 +4048,7 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
         continue
       elif name in exprHandlers and not stmtUserAssigned:
         pos += 1
-        let base = exprHandlers[name](e, vals, pos)
+        let base = exprHandlers[name](e, vals, pos).text
         let expr = e.emitMethodChain(base, vals, pos)
         if expr.len > 0 and expr != "nil":
           if expr.startsWith("("):

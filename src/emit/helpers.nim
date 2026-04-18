@@ -85,24 +85,44 @@ proc luaPrec*(op: string): int =
   else: 5
 
 # ---------------------------------------------------------------------------
-# Paren / wrap helpers (string-level — will be replaced by LuaExpr in Phase 3c)
+# Typed expression representation (Phase C)
 # ---------------------------------------------------------------------------
 
-proc needsParens*(expr: string): bool =
-  ## An expression needs wrapping when `and`/`or` (lowest precedence) is
-  ## visible in its text and it's about to be composed by a higher-
-  ## precedence operator.
-  " and " in expr or " or " in expr
+type
+  LuaExprKind* = enum
+    lxLiteral    ## numbers, strings, booleans, nil, bare identifiers
+    lxCall       ## function-call shape: f(x), a.b(c), a[b]
+    lxInfix      ## binary operator composition; `prec` is its Lua precedence
+    lxTableCtor  ## `{...}` literal; needs paren wrap whenever composed
+    lxOther      ## escape hatch: captured statement blocks, IIFE wrappers
 
-proc parenIfComposed*(expr: string): string =
-  ## Paren-wrap when the expression contains `and`/`or`. Callers use this
-  ## only when downstream composition (==, ~=, concat) could mis-group.
-  if needsParens(expr): "(" & expr & ")" else: expr
+  LuaExpr* = object
+    text*: string
+    case kind*: LuaExprKind
+    of lxInfix: prec*: int
+    else: discard
 
-proc wrapIfTableCtor*(expr: string): string =
-  ## Wrap table constructors so they can be indexed: ({...})[n].
-  if expr.len > 0 and expr[0] == '{': "(" & expr & ")"
-  else: expr
+proc lxLit*(text: string): LuaExpr = LuaExpr(kind: lxLiteral, text: text)
+proc lxCall*(text: string): LuaExpr = LuaExpr(kind: lxCall, text: text)
+proc lxInfix*(text: string, prec: int): LuaExpr =
+  LuaExpr(kind: lxInfix, text: text, prec: prec)
+proc lxTableCtor*(text: string): LuaExpr = LuaExpr(kind: lxTableCtor, text: text)
+proc lxOther*(text: string): LuaExpr = LuaExpr(kind: lxOther, text: text)
+
+proc projectText*(e: LuaExpr): string = e.text
+
+proc paren*(e: LuaExpr, minPrec: int): string =
+  ## Return the expression's text, wrapped in parens iff composing it into
+  ## a context whose binding precedence is `minPrec` would regroup it.
+  ## lxTableCtor always wraps — `{1,2}[1]` and `{1,2} + x` are both invalid
+  ## Lua; wrapping makes them well-formed.
+  case e.kind
+  of lxInfix:
+    if e.prec < minPrec: "(" & e.text & ")" else: e.text
+  of lxTableCtor:
+    "(" & e.text & ")"
+  else:
+    e.text
 
 # ---------------------------------------------------------------------------
 # Type-check emission (primitive + custom-type name helpers)
@@ -183,20 +203,35 @@ proc inlineTypePredicate*(name, valueExpr: string): string =
   of "block?":            "type(" & valueExpr & ") == \"table\""
   else: ""  # unreachable — caller gates on BuiltinTypePredicates
 
-proc primitiveTypeCheck*(typeName, valExpr: string): string =
-  ## Lua expression testing a primitive type against valExpr. Unparenthesized —
-  ## the caller adds grouping when the surrounding precedence needs it.
-  ## Returns empty string when typeName is not a recognized primitive.
+proc primitiveTypeCheckTyped*(typeName, valExpr: string): LuaExpr =
+  ## Typed Lua expression testing a primitive type against valExpr. Result is
+  ## an `lxInfix` carrying its precedence so callers wrap precisely. Returns
+  ## an empty `lxLit` when typeName is not a recognized primitive.
   case typeName
-  of "integer": "type(" & valExpr & ") == \"number\" and math.floor(" & valExpr & ") == " & valExpr
-  of "float": "type(" & valExpr & ") == \"number\" and math.floor(" & valExpr & ") ~= " & valExpr
-  of "number": "type(" & valExpr & ") == \"number\""
-  of "string": "type(" & valExpr & ") == \"string\""
-  of "logic": "type(" & valExpr & ") == \"boolean\""
-  of "function", "native": "type(" & valExpr & ") == \"function\""
-  of "block", "context", "map", "object": "type(" & valExpr & ") == \"table\""
-  of "none": valExpr & " == nil"
-  else: ""
+  of "integer":
+    lxInfix("type(" & valExpr & ") == \"number\" and math.floor(" & valExpr & ") == " & valExpr,
+            luaPrec("and"))
+  of "float":
+    lxInfix("type(" & valExpr & ") == \"number\" and math.floor(" & valExpr & ") ~= " & valExpr,
+            luaPrec("and"))
+  of "number":
+    lxInfix("type(" & valExpr & ") == \"number\"", luaPrec("=="))
+  of "string":
+    lxInfix("type(" & valExpr & ") == \"string\"", luaPrec("=="))
+  of "logic":
+    lxInfix("type(" & valExpr & ") == \"boolean\"", luaPrec("=="))
+  of "function", "native":
+    lxInfix("type(" & valExpr & ") == \"function\"", luaPrec("=="))
+  of "block", "context", "map", "object":
+    lxInfix("type(" & valExpr & ") == \"table\"", luaPrec("=="))
+  of "none":
+    lxInfix(valExpr & " == nil", luaPrec("=="))
+  else:
+    lxLit("")
+
+proc primitiveTypeCheck*(typeName, valExpr: string): string =
+  ## Back-compat string projection over `primitiveTypeCheckTyped`.
+  primitiveTypeCheckTyped(typeName, valExpr).text
 
 proc customTypePredicateName*(typeName: string): string =
   ## Lua name for a synthesized custom-type predicate.

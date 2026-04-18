@@ -5,7 +5,41 @@ import std/strutils
 import ../src/core/types
 import ../src/parse/[lexer, parser]
 import ../src/emit/lua
+import ../src/emit/helpers
 import ./emit_test_helper
+
+suite "emitter: LuaExpr typed expressions":
+  test "lxLit round-trips text":
+    let e = lxLit("42")
+    check e.kind == lxLiteral
+    check e.text == "42"
+    check projectText(e) == "42"
+
+  test "lxCall tagged as call":
+    let e = lxCall("math.abs(x)")
+    check e.kind == lxCall
+    check paren(e, 5) == "math.abs(x)"  # calls never need wrapping
+
+  test "lxInfix below minPrec is parenthesized":
+    let sub = lxInfix("b - a", luaPrec("-"))  # prec 5
+    check paren(sub, luaPrec("*")) == "(b - a)"  # minPrec 6 > 5
+
+  test "lxInfix at or above minPrec is bare":
+    let mul = lxInfix("x * y", luaPrec("*"))  # prec 6
+    check paren(mul, luaPrec("+")) == "x * y"  # minPrec 5 < 6
+
+  test "lxTableCtor always parenthesizes":
+    let t = lxTableCtor("{1, 2, 3}")
+    check paren(t, 0) == "({1, 2, 3})"
+    check paren(t, 100) == "({1, 2, 3})"
+
+  test "lxOther passes text through":
+    let o = lxOther("(function() return 1 end)()")
+    check paren(o, 5) == "(function() return 1 end)()"
+
+  test "lxLit unchanged by paren":
+    let lit = lxLit("\"hello\"")
+    check paren(lit, 10) == "\"hello\""
 
 suite "emitter: type predicates":
   test "integer? uses floor check":

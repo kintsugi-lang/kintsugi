@@ -211,7 +211,7 @@ local function name_of(unit)
   return unit.name
 end
 local function print_team(label, team)
-  print(_prettify(label .. name_of(team[1]) .. ", " .. name_of(team[2]) .. ", " .. name_of(team[#team])))
+  print(label .. name_of(team[1]) .. ", " .. name_of(team[2]) .. ", " .. name_of(team[#team]))
 end
 print("=== BATTLE START ===")
 print_team("Team A: ", team_a)
