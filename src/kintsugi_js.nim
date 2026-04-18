@@ -34,7 +34,7 @@ proc kintsugiCompile*(source: cstring, target: cstring): cstring {.exportc.} =
     let ast = parseSource($source)
     let eval = setupEval()
     let processed = eval.preprocess(ast, forCompilation = true, target = $target)
-    let (prelude, body) = emitLuaSplit(processed, "", $target)
+    let (prelude, body) = emitLuaSplit(processed, "", $target, eval)
     cstring($(%*{"prelude": prelude, "source": body, "error": newJNull()}))
   except KtgError as e:
     cstring($(%*{"prelude": "", "source": "",

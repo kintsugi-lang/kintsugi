@@ -198,7 +198,7 @@ proc compileOne(path: string, outPath: string = "", target: string = "") =
                     else: path.changeFileExt("lua")
 
   if isEntrypoint:
-    let (preludeLua, sourceLua) = emitLuaSplit(processed, sourceDir, target)
+    let (preludeLua, sourceLua) = emitLuaSplit(processed, sourceDir, target, eval)
     writeFile(resolvedOut, sourceLua)
     echo "Compiled: " & path & " -> " & resolvedOut
     if preludeLua.len > 0:
@@ -206,7 +206,7 @@ proc compileOne(path: string, outPath: string = "", target: string = "") =
       writeFile(preludePath, preludeLua)
       echo "Wrote prelude: " & preludePath
   else:
-    let luaCode = emitLuaModule(processed, sourceDir)
+    let luaCode = emitLuaModule(processed, sourceDir, eval = eval)
     writeFile(resolvedOut, luaCode)
     echo "Compiled: " & path & " -> " & resolvedOut
 
@@ -234,7 +234,7 @@ proc dryRunPath(path: string, target: string = "") =
     let processed = eval.preprocess(ast, forCompilation = true, target = target)
     let sourceDir = parentDir(absolutePath(f))
     if isEntrypoint:
-      let (preludeLua, sourceLua) = emitLuaSplit(processed, sourceDir, target)
+      let (preludeLua, sourceLua) = emitLuaSplit(processed, sourceDir, target, eval)
       if preludeLua.len > 0:
         echo ";; --- prelude.lua ---"
         echo preludeLua
@@ -242,7 +242,7 @@ proc dryRunPath(path: string, target: string = "") =
       echo sourceLua
     else:
       echo ";; --- " & extractFilename(f).changeFileExt("lua") & " (module) ---"
-      echo emitLuaModule(processed, sourceDir)
+      echo emitLuaModule(processed, sourceDir, eval = eval)
 
   if dirExists(path):
     for f in collectKtgFiles(path):

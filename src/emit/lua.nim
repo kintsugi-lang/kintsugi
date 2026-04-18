@@ -19,7 +19,7 @@ when not defined(js):
   import std/os
 import ../core/[types, natives_shared]
 import ../parse/parser
-import ../eval/stdlib_registry
+import ../eval/[stdlib_registry, evaluator]
 
 type
   BindingKind* = enum
@@ -41,6 +41,8 @@ type
     isParam*: bool       ## true = function parameter, try calling with 1 arg in head position
     refinements*: seq[RefinementInfo]
     returnArity*: int    ## -1 = unknown return, 0+ = returns a function with N params
+    paramTypes*: seq[string]  ## typeName per positional param ("" if untyped)
+    paramNames*: seq[string]  ## param names, paired with paramTypes
 
   LuaEmitter = object
     indent: int
@@ -105,6 +107,10 @@ type
     ## stdlibPreludeLua, which buildPrelude emits.
     usedStdlibSymbols: Table[string, HashSet[string]]
     stdlibPreludeLua: string
+    ## Optional evaluator for compile-time guard checks on literal
+    ## arguments at call sites. When nil, compile-time checks are
+    ## skipped and guards fall through to the runtime prologue.
+    eval*: Evaluator
 
   CustomTypeKind* = enum
     ctUnion       ## @type [t! | t!]
@@ -328,9 +334,11 @@ proc emitMatchHoisted(e: var LuaEmitter, varName: string, valueExpr: string,
 proc emitAttemptExpr(e: var LuaEmitter, blk: seq[KtgValue]): string
 proc emitEitherExpr(e: var LuaEmitter, cond: string, trueBlock, falseBlock: seq[KtgValue]): string
 proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
-                    compiling: HashSet[string] = initHashSet[string]()): string
+                    compiling: HashSet[string] = initHashSet[string](),
+                    eval: Evaluator = nil): string
 proc emitLuaModuleEx(ast: seq[KtgValue], sourceDir: string,
-                     compiling: HashSet[string]):
+                     compiling: HashSet[string],
+                     eval: Evaluator = nil):
     tuple[lua: string, e: LuaEmitter]
 proc findExports(ast: seq[KtgValue]): seq[string]
 proc emitContextBlock(e: var LuaEmitter, vals: seq[KtgValue]): string
@@ -1453,6 +1461,31 @@ proc allLuaParams(spec: ParsedFuncSpec): seq[string] =
     for rp in r.params:
       result.add(luaName(rp.name))
 
+proc customTypeBase(typeName: string): string =
+  ## Strip trailing `!` and normalize to kebab-case for customTypeRules lookup.
+  var t = typeName.toLower
+  if t.endsWith("!"):
+    t = t[0 ..< t.len - 1]
+  t.replace("_", "-")
+
+proc emitCustomTypeParamGuards(e: var LuaEmitter, spec: ParsedFuncSpec) =
+  ## Emit runtime guard checks for params annotated with a custom @type.
+  ## Matches interpreter semantics: calling the function with a value that
+  ## fails the type's guard errors at call time with "<name> expects
+  ## <type>!, got <actual>". Primitive-typed params (integer!, string!,
+  ## etc.) are intentionally skipped here — they are a separate gap.
+  for ps in spec.params:
+    if ps.typeName.len == 0: continue
+    let base = customTypeBase(ps.typeName)
+    if base in e.customTypeRules:
+      e.usedTypeChecks.incl(base)
+      let predName = customTypePredicateName(base)
+      let paramLua = luaName(ps.name)
+      e.ln("if not " & predName & "(" & paramLua & ") then")
+      e.ln("  error(\"" & ps.name & " expects " & ps.typeName &
+           ", got \" .. type(" & paramLua & "))")
+      e.ln("end")
+
 # ---------------------------------------------------------------------------
 # Emit function definition
 # ---------------------------------------------------------------------------
@@ -1496,8 +1529,12 @@ proc emitFuncDef(e: var LuaEmitter, specBlock, bodyBlock: seq[KtgValue]): string
         e.varSeqTypes[luaName(ps.name)] = stBlock
 
   e.indent += 1
-  # Emit body — last expression is implicit return
+  # Emit body — last expression is implicit return. Guard checks (for
+  # custom-typed params) run before the body so a failing arg errors
+  # with a useful "<param> expects <type>!, got <actual>" message
+  # instead of a misleading downstream type error.
   let bodyStr = withCapture(e):
+    e.emitCustomTypeParamGuards(spec)
     e.emitBody(bodyBlock, asReturn = true)
   e.indent -= 1
 
@@ -2996,7 +3033,7 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
               var childCompiling = e.compiling
               childCompiling.incl(absPath)
               let depDir = parentDir(absPath)
-              let (depLua, depE) = emitLuaModuleEx(depAst, depDir, childCompiling)
+              let (depLua, depE) = emitLuaModuleEx(depAst, depDir, childCompiling, e.eval)
               writeFile(outPath, depLua)
               # Merge module's used set into parent's prelude scope.
               for h in depE.usedHelpers: e.usedHelpers.incl(h)
@@ -3679,6 +3716,7 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
               elif ps.typeName == "block!":
                 e.varSeqTypes[luaName(ps.name)] = stBlock
           e.indent += 1
+          e.emitCustomTypeParamGuards(spec)
           e.emitBody(bodyBlock, asReturn = not (isPath or isBound or isOverride))
           e.indent -= 1
           e.locals = savedLocals
@@ -4495,7 +4533,11 @@ proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
                body[^2].kind == vkBlock and body[^1].kind == vkBlock:
               let innerSpec = parseFuncSpec(body[^2].blockVals)
               retArity = innerSpec.params.len
-          e.bindings[name] = bindingFunc(spec.params.len, refInfos, retArity)
+          var bi = bindingFunc(spec.params.len, refInfos, retArity)
+          for ps in spec.params:
+            bi.paramTypes.add(ps.typeName)
+            bi.paramNames.add(ps.name)
+          e.bindings[name] = bi
           # Track return type for concat-safe inference in rejoin
           if spec.returnType.len > 0:
             e.funcReturnTypes[name] = spec.returnType
@@ -4634,7 +4676,11 @@ proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
           var refInfos: seq[RefinementInfo] = @[]
           for r in spec.refinements:
             refInfos.add(RefinementInfo(name: r.name, paramCount: r.params.len))
-          e.bindings[name] = bindingFunc(spec.params.len, refInfos, -1)
+          var bi = bindingFunc(spec.params.len, refInfos, -1)
+          for ps in spec.params:
+            bi.paramTypes.add(ps.typeName)
+            bi.paramNames.add(ps.name)
+          e.bindings[name] = bi
           e.guardFuncs.incl(name)
           var paramNames: HashSet[string]
           for p in spec.params: paramNames.incl(p.name)
@@ -4799,9 +4845,11 @@ proc collectModuleNames(vals: seq[KtgValue]): HashSet[string] =
 
 proc scanTypeChecks(e: var LuaEmitter, vals: seq[KtgValue])
 proc scanNoneUsage(e: var LuaEmitter, vals: seq[KtgValue])
+proc validateLiteralTypeChecks(e: var LuaEmitter, vals: seq[KtgValue])
 
 proc emitLuaModuleEx(ast: seq[KtgValue], sourceDir: string,
-                     compiling: HashSet[string]):
+                     compiling: HashSet[string],
+                     eval: Evaluator = nil):
     tuple[lua: string, e: LuaEmitter] =
   ## Compile a Kintsugi module to Lua and return both the source and the
   ## inner LuaEmitter, so a parent (entrypoint) compile can merge the
@@ -4816,13 +4864,15 @@ proc emitLuaModuleEx(ast: seq[KtgValue], sourceDir: string,
     bindingKinds: initTable[string, BindingKind](),
     sourceDir: sourceDir,
     compiling: compiling,
-    moduleNames: collectModuleNames(ast)
+    moduleNames: collectModuleNames(ast),
+    eval: eval
   )
   e.prescanBlock(ast)
   e.inferBindings(ast)
   e.validateAllGuards()
   e.scanTypeChecks(ast)
   e.scanNoneUsage(ast)
+  e.validateLiteralTypeChecks(ast)
   e.emitBlock(ast)
   let exports = findExports(ast)
   if exports.len > 0:
@@ -4834,10 +4884,11 @@ proc emitLuaModuleEx(ast: seq[KtgValue], sourceDir: string,
   (lua: e.output, e: e)
 
 proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
-                    compiling: HashSet[string] = initHashSet[string]()): string =
+                    compiling: HashSet[string] = initHashSet[string](),
+                    eval: Evaluator = nil): string =
   ## Backwards-compat wrapper. Use emitLuaModuleEx if you need to merge
   ## the module's used set into a parent emitter.
-  emitLuaModuleEx(ast, sourceDir, compiling).lua
+  emitLuaModuleEx(ast, sourceDir, compiling, eval).lua
 
 proc scanTypeChecks(e: var LuaEmitter, vals: seq[KtgValue]) =
   ## Scan AST for is? usage with custom type names.
@@ -4869,6 +4920,102 @@ proc scanNoneUsage(e: var LuaEmitter, vals: seq[KtgValue]) =
         return
     else:
       discard
+
+proc isLiteralArg(v: KtgValue): bool =
+  ## A standalone value that compile-time guard evaluation can trust.
+  ## Excludes computed expressions (paren-wrapped, infix chains, calls).
+  v.kind in {vkInteger, vkFloat, vkString, vkLogic, vkNone, vkMoney,
+             vkPair, vkTuple, vkDate, vkTime, vkFile, vkUrl, vkEmail} or
+    (v.kind == vkWord and v.wordKind == wkLitWord)
+
+proc matchesCustomRule(e: LuaEmitter, rule: CustomTypeRule, arg: KtgValue): bool =
+  ## Check if `arg` satisfies `rule`. Union / enum rules are structural —
+  ## no evaluator needed. Where rules run the guard body via e.eval; when
+  ## e.eval is nil the rule is assumed to pass (caller falls through to
+  ## the runtime prologue for verification).
+  case rule.kind
+  of ctUnion:
+    let actual = typeName(arg)
+    for t in rule.unionTypes:
+      if actual == t: return true
+      let base = customTypeBase(t)
+      if base in e.customTypeRules:
+        if e.matchesCustomRule(e.customTypeRules[base], arg):
+          return true
+    false
+  of ctEnum:
+    if arg.kind == vkWord and arg.wordKind == wkLitWord:
+      return arg.wordName in rule.enumMembers
+    false
+  of ctWhere:
+    # Base-type gate: the arg's kind must satisfy one of the whereTypes
+    # before we run the guard body.
+    let actual = typeName(arg)
+    var baseMatch = rule.whereTypes.len == 0
+    for t in rule.whereTypes:
+      if actual == t:
+        baseMatch = true
+      else:
+        let base = customTypeBase(t)
+        if base in e.customTypeRules and
+           e.matchesCustomRule(e.customTypeRules[base], arg):
+          baseMatch = true
+    if not baseMatch: return false
+    if e.eval == nil: return true
+    let ctx = e.eval.global.child
+    ctx.set("it", arg)
+    try:
+      let r = e.eval.evalBlock(rule.guardBody, ctx)
+      r.kind == vkLogic and r.boolVal
+    except CatchableError:
+      true
+
+proc validateLiteralTypeChecks(e: var LuaEmitter, vals: seq[KtgValue]) =
+  ## Walk the AST looking for calls to user-defined functions with
+  ## custom-typed params. For any literal arg whose value fails the
+  ## type's guard (via the evaluator's typeMatches), raise EmitError at
+  ## compile time. Runtime-prologue guards catch the rest; this pass
+  ## just fast-fails provable violations.
+  ##
+  ## Union / enum rules are checked without an evaluator. Where rules
+  ## need `e.eval` to run the guard body; when it's nil they are
+  ## assumed to pass and fall through to the runtime prologue.
+  ## Only examines a single literal arg that isn't immediately followed
+  ## by an infix op — arithmetic / logical compositions produce a
+  ## computed value that this pass can't evaluate.
+  for i in 0 ..< vals.len:
+    case vals[i].kind
+    of vkBlock: e.validateLiteralTypeChecks(vals[i].blockVals)
+    of vkParen: e.validateLiteralTypeChecks(vals[i].parenVals)
+    else: discard
+
+    if vals[i].kind != vkWord or vals[i].wordKind != wkWord: continue
+    let name = vals[i].wordName
+    if name notin e.bindings: continue
+    let bi = e.bindings[name]
+    if not bi.isFunction: continue
+    if bi.paramTypes.len == 0: continue
+
+    for j in 0 ..< bi.paramTypes.len:
+      let paramType = bi.paramTypes[j]
+      if paramType.len == 0: continue
+      let base = customTypeBase(paramType)
+      if base notin e.customTypeRules: continue
+
+      let argIdx = i + 1 + j
+      if argIdx >= vals.len: break
+      let arg = vals[argIdx]
+      if not isLiteralArg(arg): continue
+      # If an infix op follows the arg, the real arg is a computed
+      # expression — we can't verify it literally.
+      if argIdx + 1 < vals.len and isInfixOp(vals[argIdx + 1]): continue
+
+      let passes = e.matchesCustomRule(e.customTypeRules[base], arg)
+      if not passes:
+        let actual = typeName(arg)
+        raise EmitError(msg:
+          bi.paramNames[j] & " expects " & paramType & ", got " & actual &
+          " (" & $arg & " fails " & paramType & " guard at compile time)")
 
 proc expandStdlibIntoPrelude(e: var LuaEmitter) =
   ## For each module recorded in usedStdlibSymbols, splice its requested
@@ -4903,12 +5050,18 @@ proc expandStdlibIntoPrelude(e: var LuaEmitter) =
   e.stdlibPreludeLua = lua
 
 proc emitLuaSplit*(ast: seq[KtgValue], sourceDir: string = "",
-                   target: string = ""):
+                   target: string = "",
+                   eval: Evaluator = nil):
     tuple[prelude, source: string] =
   ## Compile a Kintsugi entrypoint into two strings: the runtime support
   ## prelude (helpers + synthesized type predicates + referenced stdlib
   ## fns) and the source body. The CLI writes them to separate files;
   ## the playground renders them in separate panes.
+  ##
+  ## When `eval` is non-nil, compile-time guard checks run on literal
+  ## args against custom-typed params — failing guards raise EmitError.
+  ## Non-literal args fall through to the runtime prologue emitted at
+  ## the top of each typed function.
   var e = LuaEmitter(
     indent: 0,
     output: "",
@@ -4916,13 +5069,15 @@ proc emitLuaSplit*(ast: seq[KtgValue], sourceDir: string = "",
     nameMap: initTable[string, string](),
     bindingKinds: initTable[string, BindingKind](),
     sourceDir: sourceDir,
-    moduleNames: collectModuleNames(ast)
+    moduleNames: collectModuleNames(ast),
+    eval: eval
   )
   e.prescanBlock(ast)
   e.inferBindings(ast)
   e.validateAllGuards()
   e.scanTypeChecks(ast)
   e.scanNoneUsage(ast)
+  e.validateLiteralTypeChecks(ast)
   e.emitBlock(ast)
   e.expandStdlibIntoPrelude()
   let prelude = e.buildPrelude()
@@ -4936,7 +5091,8 @@ proc emitLuaSplit*(ast: seq[KtgValue], sourceDir: string = "",
     source = includeLine & source
   (prelude: prelude, source: source)
 
-proc emitLua*(ast: seq[KtgValue], sourceDir: string = ""): string =
+proc emitLua*(ast: seq[KtgValue], sourceDir: string = "",
+              eval: Evaluator = nil): string =
   ## Backwards-compat wrapper. Returns prelude + source concatenated as
   ## a single chunk - the prelude is inline, so no require line. Prefer
   ## emitLuaSplit for new call sites that want true file separation.
@@ -4947,13 +5103,15 @@ proc emitLua*(ast: seq[KtgValue], sourceDir: string = ""): string =
     nameMap: initTable[string, string](),
     bindingKinds: initTable[string, BindingKind](),
     sourceDir: sourceDir,
-    moduleNames: collectModuleNames(ast)
+    moduleNames: collectModuleNames(ast),
+    eval: eval
   )
   e.prescanBlock(ast)
   e.inferBindings(ast)
   e.validateAllGuards()
   e.scanTypeChecks(ast)
   e.scanNoneUsage(ast)
+  e.validateLiteralTypeChecks(ast)
   e.emitBlock(ast)
   e.expandStdlibIntoPrelude()
   e.buildPrelude() & e.output
