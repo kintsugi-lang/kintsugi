@@ -3139,29 +3139,26 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
 ## sprites), so the emitter can't know arities and must use a syntactic
 ## barrier instead. Any word here marks "this is not an arg — stop."
 ##
-## Derived at module-init time from the handler tables plus a small list
-## of control-flow expression handlers and dialect-internal keywords that
-## aren't themselves handlers (they appear inside loop/attempt/match
-## bodies). Source of truth lives at each handler's registration site.
-let methodChainBarriers: HashSet[string] = block:
-  var s = toHashSet([
-    # Dialect-internal keywords (not handlers, but still end arg
-    # collection inside loop/attempt/match bodies):
-    "do", "in", "from", "to", "by", "when",
-    "source", "then", "fallback", "retries", "catch", "default",
-    # Expression-form control-flow handlers:
-    "if", "either", "unless", "loop", "match", "try", "try/handle",
-    "return", "print", "probe", "scope", "attempt", "capture",
-  ])
-  # Statement-form handlers are implicitly control-flow.
-  for name in stmtHandlers.keys: s.incl(name)
-  s
+## Dialect-internal keywords that aren't handlers themselves (they appear
+## inside loop/attempt/match bodies) plus the explicit control-flow expr
+## handlers. Statement handlers are implicitly barriers (checked via
+## `stmtHandlers` lookup). Kept as a const array because module-level
+## HashSets confuse the Nim JS backend's codegen.
+const MethodChainBarrierNames = [
+  "do", "in", "from", "to", "by", "when",
+  "source", "then", "fallback", "retries", "catch", "default",
+  "if", "either", "unless", "loop", "match", "try", "try/handle",
+  "return", "print", "probe", "scope", "attempt", "capture",
+]
+
+proc isMethodChainBarrier(name: string): bool =
+  name in MethodChainBarrierNames or name in stmtHandlers
 
 proc emitMethodChain(e: var LuaEmitter, receiver: string,
                       vals: seq[KtgValue], pos: var int): string =
   ## Process zero or more `-> method args...` steps on `receiver`.
   ## Each step emits `:method(args)` appended to `receiver`, where args
-  ## are collected until a methodChainBarriers entry, another `->`, an
+  ## are collected until an `isMethodChainBarrier` word, another `->`, an
   ## infix op, a block, or a slashed path word (all syntactic cues that
   ## the stream has moved on to the next expression/statement).
   result = receiver
@@ -3179,7 +3176,7 @@ proc emitMethodChain(e: var LuaEmitter, receiver: string,
       if next.kind == vkWord and next.wordKind == wkSetWord: break
       if next.kind == vkWord and next.wordKind == wkMetaWord: break
       if next.kind == vkWord and next.wordKind == wkWord and
-         next.wordName in methodChainBarriers: break
+         isMethodChainBarrier(next.wordName): break
       if next.kind == vkWord and next.wordKind == wkWord and
          next.wordName.contains('/'): break
       if next.kind == vkBlock: break
