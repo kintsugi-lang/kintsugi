@@ -4,6 +4,16 @@ Follow-on to the main burndown (see `~/.claude/plans/all-right-plan-the-fluffy-p
 
 ## Status — 2026-04-18
 
+### Phase B — COMPLETE
+
+Pure AST walker landed. `advanceExpr` + `advanceWordCall` +
+`advanceMethodChain` + `advanceExprWithChain` mirror `emitExpr`'s
+token consumption without touching emitter state. `findLastStmtStart`
+rewritten to use the walker; `withDryRun` template and `inDryRun`
+field deleted. Regression test: `f: does [import %test-module.ktg]`
+produces exactly one `depWrites` entry (previously would have been
+two via dry-run emission).
+
 ### Phase A — COMPLETE
 
 All form migrations landed. From `emitExpr` elif chain into `exprHandlers`:
@@ -22,28 +32,13 @@ Tests 1616 green, goldens byte-identical.
 
 LOC: `src/emit/lua.nim` 4796 -> 4727. Total `src/emit/*.nim` 5349 -> 5280.
 
-## Phase B — findLastStmtStart pure walk (~1 day)
+## Phase B — findLastStmtStart pure walk — DONE
 
-Depends on Phase A item 1 (`consumesArgs` metadata on handlers).
-
-1. **Write `advanceExpr(vals, pos, bindings): int`** — pure AST walker that
-   mirrors `emitExpr`'s arg consumption without output. For each `wkWord`,
-   looks up `consumesArgs` from handler table, else uses `bindings` arity.
-   Handles literals, parens, blocks, infix chains, method chains as the
-   real emitter does. Unit test each branch (one test per form) asserting
-   `advanceExpr`'s returned position matches `emitExpr`'s `pos` under
-   `withDryRun`.
-
-2. **Replace `findLastStmtStart` body** — loop calling `advanceExpr` until
-   end; return last start.
-
-3. **Delete `withDryRun` template + `inDryRun` field** on `LuaEmitter`.
-
-4. **Regression test** — `f: does [import %x.ktg]` run twice; verify
-   `pendingDepWrites` contains one entry per dep, not two.
-
-Acceptance: `withDryRun` grep returns nothing in `src/emit/`. Tests green.
-`src/emit/lua.nim` around 4300 lines.
+Landed. Walker lives alongside `findLastStmtStart` in `src/emit/lua.nim`.
+Arg-shape knowledge is duplicated between `advanceWordCall` and the real
+handlers — acceptable duplication for now (handler table is flat, not
+metadata-annotated). If Phase C introduces a Handler struct with
+`consumesArgs`, `advanceWordCall` can collapse into a table lookup.
 
 ## Phase C — LuaExpr typed expressions (6-8 days)
 

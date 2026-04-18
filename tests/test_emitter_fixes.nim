@@ -1051,6 +1051,21 @@ suite "emitter: depWrites from import":
     let r = emitLuaModule(parseSource("x: 1 + 2"))
     check r.depWrites.len == 0
 
+  test "import inside function body produces exactly one depWrite":
+    # Phase B invariant: findLastStmtStart walks function bodies via a
+    # pure AST walker, not a dry-run of the emitter. If the walker ever
+    # regresses back to probing emitExpr, this case would double-count
+    # because the import branch would fire once during dry-run and once
+    # during real emission — producing two entries in depWrites for the
+    # same dep file.
+    let r = emitLuaModule(parseSource("""
+      load-utils: function [] [utils: import %test-module.ktg]
+    """), "tests/fixtures")
+    var count = 0
+    for d in r.depWrites:
+      if d.path.endsWith("test-module.lua"): count += 1
+    check count == 1
+
 # --- Phase 4.2 invariant tests: prelude emits deps before dependents ---------
 
 suite "emitter: prelude dependency order":

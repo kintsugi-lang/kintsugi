@@ -118,10 +118,6 @@ type
     ## Compile target ("", "love2d", "playdate"). Drives target-specific
     ## global allowlists in the strict-globals diagnostic.
     target: string
-    ## True during findLastStmtStart's dry-run. Suppresses diagnostics
-    ## that would false-positive when walking AST without the full
-    ## emitBlock state-tracking (set-word -> locals updates, etc.).
-    inDryRun: bool
     ## Dependency .lua files produced by `import %path`. The emitter
     ## never writes these itself — it accumulates (absolutePath, luaSource)
     ## pairs here, and the caller (CLI) flushes them after emission. Keeps
@@ -284,22 +280,6 @@ template withCapture(e: var LuaEmitter, body: untyped): string =
   e.output = wcSaved
   wcResult
 
-template withDryRun(e: var LuaEmitter, body: untyped) =
-  ## Execute body with ALL emitter mutations rolled back afterward.
-  ## Unlike `withCapture` (which only saves `output`), this snapshots
-  ## every mutable field so probing handlers for position advance cannot
-  ## contaminate `usedHelpers`, bindings, stdlib symbols, or the import
-  ## side-effect path. LuaEmitter is a value object with `eval` as the
-  ## only ref field, so a plain object assignment snapshots collections
-  ## without aliasing the evaluator. Also sets inDryRun so diagnostics
-  ## that depend on full emission state (strict-globals) are skipped.
-  let drSaved = e
-  e.inDryRun = true
-  try:
-    body
-  finally:
-    e = drSaved
-
 proc getBinding(e: LuaEmitter, name: string): BindingInfo =
   if name in e.bindings: e.bindings[name]
   else: BindingInfo(arity: -1, isFunction: false, isUnknown: true, returnArity: -1)
@@ -403,7 +383,6 @@ proc assertKnownName(e: LuaEmitter, name: string, line: int) =
   ## bare Lua global reference to an undeclared name. This catches typos
   ## and forgotten `bindings` entries at compile time rather than letting
   ## them surface as runtime `attempt to call a nil value` errors.
-  if e.inDryRun: return
   # Path heads: only check the head segment; the remaining segments are
   # field access, not independent global lookups.
   let headName = if '/' in name: name.split('/')[0] else: name
@@ -3195,111 +3174,249 @@ proc emitExprWithChain(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): st
   e.emitMethodChain(receiver, vals, pos)
 
 # ---------------------------------------------------------------------------
+# Pure AST walker — mirrors emitExpr's position advancement without
+# emitting anything. Used by findLastStmtStart so it can find statement
+# boundaries without the side-effect hazards of dry-running the real
+# emitter (helper flags, import file I/O, bindings pollution).
+#
+# Must stay in sync with emitExpr / emitBlock's token consumption. When a
+# new handler is added, update `advanceWordCall` with its arg shape — the
+# generic arity fallback only fires for pure user-bound function calls.
+# ---------------------------------------------------------------------------
+
+proc advanceExpr(e: LuaEmitter, vals: seq[KtgValue], pos: var int,
+                 primary: bool = false)
+
+proc advanceWordCall(e: LuaEmitter, vals: seq[KtgValue], pos: var int,
+                     name: string) =
+  ## Consume args for a `wkWord` function-call token. `pos` already past
+  ## the name. Mirrors emitExpr's wkWord arm dispatch.
+  if name == "none": return
+  let userAssigned = name in e.bindings and
+    not e.bindings[name].isFunction and not e.bindings[name].isUnknown
+  if userAssigned: return
+
+  case name
+
+  # 0 args (constants / value-only natives)
+  of "pi", "now", "system/platform", "break":
+    return
+
+  # 1 expr arg
+  of "print", "probe", "return", "not", "negate", "assert",
+     "abs", "sqrt", "sin", "cos", "tan", "asin", "acos", "exp",
+     "log", "log10", "to-degrees", "to-radians", "floor", "ceil",
+     "round", "round/up", "round/down",
+     "uppercase", "lowercase", "trim", "length", "empty?",
+     "integer?", "float?", "string?", "logic?", "number?", "none?",
+     "block?", "context?", "object?", "map?", "function?", "native?",
+     "freeze", "frozen?", "odd?", "even?",
+     "first", "second", "last", "copy", "copy/deep", "reverse",
+     "byte", "char", "sort", "reduce", "type", "raw", "exports",
+     "random", "random/int", "random/seed", "random/choice":
+    advanceExpr(e, vals, pos)
+
+  # 2 expr args
+  of "min", "max", "atan2", "pow", "is?",
+     "join", "pick", "select", "has?", "split",
+     "starts-with?", "ends-with?", "sort/by", "sort/with", "find",
+     "random/int/range", "to", "apply", "merge",
+     "append", "append/only", "remove":
+    advanceExpr(e, vals, pos)
+    advanceExpr(e, vals, pos)
+
+  # 3 expr args
+  of "insert", "replace", "subset", "error":
+    advanceExpr(e, vals, pos)
+    advanceExpr(e, vals, pos)
+    advanceExpr(e, vals, pos)
+
+  # 1 expr + 1 block
+  of "if", "unless", "match":
+    advanceExpr(e, vals, pos)
+    if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+
+  # 1 expr + 2 blocks
+  of "either":
+    advanceExpr(e, vals, pos)
+    if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+    if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+
+  # 1 block
+  of "loop", "scope", "try", "does", "context", "attempt",
+     "all?", "any?", "object",
+     "loop/collect", "loop/fold", "loop/partition":
+    if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+
+  # 2 blocks
+  of "function", "try/handle":
+    if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+    if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+
+  # Special: block-or-expr + optional follow-up
+  of "rejoin":
+    if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+    else: advanceExpr(e, vals, pos)
+
+  of "rejoin/with":
+    if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+    else: advanceExpr(e, vals, pos)
+    advanceExpr(e, vals, pos)
+
+  of "capture":
+    # data (block-or-expr) + optional schema block
+    if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+    else: advanceExpr(e, vals, pos)
+    if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+
+  of "make":
+    # prototype-expr + (block literal | dynamic overrides expr)
+    advanceExpr(e, vals, pos, primary = true)
+    if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+    else: advanceExpr(e, vals, pos, primary = true)
+
+  of "set":
+    # set [names] rhs
+    if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+    advanceExpr(e, vals, pos)
+
+  of "import":
+    # module spec: lit-word or file path. One token either way.
+    if pos < vals.len: pos += 1
+
+  of "import/using":
+    if pos < vals.len: pos += 1
+    if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+
+  else:
+    # No explicit pattern. Handle path access, then generic arity.
+    if name.startsWith("system/env/"):
+      return
+    if name.contains('/'):
+      let parts = name.split('/')
+      let head = parts[0]
+      let fullBinding = e.getBinding(name)
+      let headBinding = e.getBinding(head)
+      if fullBinding.isFunction and not fullBinding.isUnknown:
+        for i in 0 ..< fullBinding.arity:
+          advanceExpr(e, vals, pos, primary = true)
+      elif headBinding.isFunction and not headBinding.isUnknown:
+        let refNames = parts[1..^1]
+        for i in 0 ..< headBinding.arity:
+          advanceExpr(e, vals, pos, primary = true)
+        if headBinding.refinements.len > 0:
+          for r in headBinding.refinements:
+            let active = r.name in refNames
+            if active:
+              for j in 0 ..< r.paramCount:
+                advanceExpr(e, vals, pos, primary = true)
+      # else: field access, no args
+      return
+    # Generic user-bound function call
+    let info = e.getBinding(name)
+    if info.arity >= 0:
+      for i in 0 ..< info.arity:
+        advanceExpr(e, vals, pos, primary = true)
+
+proc advanceExpr(e: LuaEmitter, vals: seq[KtgValue], pos: var int,
+                 primary: bool = false) =
+  ## Advance `pos` past one Kintsugi expression without emitting. Matches
+  ## emitExpr's token consumption: primary-then-infix-chain when
+  ## `primary = false`; stops after the primary when `primary = true`.
+  if pos >= vals.len: return
+  let val = vals[pos]
+  pos += 1
+
+  case val.kind
+  of vkInteger, vkFloat, vkString, vkLogic, vkNone, vkMoney, vkPair, vkTuple,
+     vkBlock, vkParen, vkOp, vkType, vkFile, vkUrl, vkEmail,
+     vkDate, vkTime, vkMap, vkSet, vkContext,
+     vkObject, vkFunction, vkNative:
+    discard
+  of vkWord:
+    case val.wordKind
+    of wkSetWord:
+      advanceExpr(e, vals, pos)
+    of wkGetWord, wkLitWord, wkMetaWord:
+      discard
+    of wkWord:
+      advanceWordCall(e, vals, pos, val.wordName)
+
+  # Infix chain: `a op b op c ...` continues consuming op+primary pairs.
+  if not primary:
+    while pos < vals.len and isInfixOp(vals[pos]):
+      pos += 1
+      advanceExpr(e, vals, pos, primary = true)
+
+proc advanceMethodChain(e: LuaEmitter, vals: seq[KtgValue], pos: var int) =
+  ## Advance past `-> method args ...` steps, matching emitMethodChain.
+  while pos < vals.len and vals[pos].kind == vkWord and
+        vals[pos].wordName == "->":
+    pos += 1
+    if pos >= vals.len or vals[pos].kind != vkWord: break
+    pos += 1
+    while pos < vals.len:
+      let next = vals[pos]
+      if next.kind == vkWord and next.wordName == "->": break
+      if isInfixOp(next): break
+      if next.kind == vkWord and next.wordKind == wkSetWord: break
+      if next.kind == vkWord and next.wordKind == wkMetaWord: break
+      if next.kind == vkWord and next.wordKind == wkWord and
+         isMethodChainBarrier(next.wordName): break
+      if next.kind == vkWord and next.wordKind == wkWord and
+         next.wordName.contains('/'): break
+      if next.kind == vkBlock: break
+      if next.kind == vkWord and next.wordKind == wkWord and
+         pos + 1 < vals.len and vals[pos + 1].kind == vkWord and
+         vals[pos + 1].wordName == "->":
+        break
+      advanceExpr(e, vals, pos)
+
+proc advanceExprWithChain(e: LuaEmitter, vals: seq[KtgValue],
+                          pos: var int) =
+  advanceExpr(e, vals, pos)
+  advanceMethodChain(e, vals, pos)
+
+# ---------------------------------------------------------------------------
 # Emit a sequence of values as Lua statements
 # ---------------------------------------------------------------------------
 
-proc findLastStmtStart(e: var LuaEmitter, vals: seq[KtgValue]): int =
-  ## Dry-run through vals to find where the last statement starts.
-  ## Uses emitExpr with output and all other mutations discarded via
-  ## withDryRun, so helper-use flags, bindings, and import side effects
-  ## stay unchanged — only the position cursor matters here.
+proc findLastStmtStart(e: LuaEmitter, vals: seq[KtgValue]): int =
+  ## Pure AST walk: find the position of the last statement in `vals`.
+  ## Uses the advanceExpr walker — no emission, no side effects, no
+  ## emitter state mutation.
   var stmtStarts: seq[int] = @[]
   var pos = 0
-  withDryRun(e):
-    while pos < vals.len:
-      stmtStarts.add(pos)
-      let val = vals[pos]
-      # Skip headers, bindings, exports
-      if val.kind == vkWord and val.wordKind == wkWord and
-         val.wordName.startsWith("Kintsugi"):
+  while pos < vals.len:
+    stmtStarts.add(pos)
+    let val = vals[pos]
+    # Headers, bindings, exports: skip keyword + block.
+    if val.kind == vkWord and val.wordKind == wkWord and
+       val.wordName.startsWith("Kintsugi"):
+      pos += 1
+      if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+      continue
+    if val.kind == vkWord and val.wordKind == wkWord and
+       val.wordName in ["bindings", "exports"]:
+      pos += 1
+      if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
+      continue
+    # @const prefix
+    if val.kind == vkWord and val.wordKind == wkMetaWord and
+       val.wordName == "const":
+      pos += 1
+      if pos < vals.len and vals[pos].kind == vkWord and
+         vals[pos].wordKind == wkSetWord:
         pos += 1
-        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
-        continue
-      if val.kind == vkWord and val.wordKind == wkWord and
-         val.wordName in ["bindings", "exports"]:
-        pos += 1
-        if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
-        continue
-      # @const prefix
-      if val.kind == vkWord and val.wordKind == wkMetaWord and val.wordName == "const":
-        pos += 1
-        if pos < vals.len and vals[pos].kind == vkWord and vals[pos].wordKind == wkSetWord:
-          pos += 1
-          discard e.emitExprWithChain(vals, pos)
-          continue
-        continue
-      # Set-word
-      if val.kind == vkWord and val.wordKind == wkSetWord:
-        pos += 1
-        discard e.emitExprWithChain(vals, pos)
-        continue
-      # Keywords with known token counts
-      if val.kind == vkWord and val.wordKind == wkWord:
-        case val.wordName
-        of "if", "unless":
-          pos += 1
-          discard e.emitExpr(vals, pos)
-          if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
-          continue
-        of "either":
-          pos += 1
-          discard e.emitExpr(vals, pos)
-          if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
-          if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
-          continue
-        of "loop", "scope":
-          pos += 1
-          if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
-          continue
-        of "match":
-          pos += 1
-          discard e.emitExpr(vals, pos)
-          if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
-          continue
-        of "return":
-          pos += 1
-          discard e.emitExpr(vals, pos)
-          continue
-        of "break":
-          pos += 1
-          continue
-        of "print", "assert":
-          pos += 1
-          discard e.emitExpr(vals, pos)
-          continue
-        of "raw":
-          pos += 1
-          discard e.emitExpr(vals, pos)
-          continue
-        of "set":
-          pos += 1
-          if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
-          discard e.emitExpr(vals, pos)
-          continue
-        of "remove":
-          pos += 1
-          discard e.emitExpr(vals, pos)
-          discard e.emitExpr(vals, pos)
-          continue
-        of "insert":
-          pos += 1
-          discard e.emitExpr(vals, pos)
-          discard e.emitExpr(vals, pos)
-          discard e.emitExpr(vals, pos)
-          continue
-        of "append":
-          pos += 1
-          discard e.emitExpr(vals, pos)
-          discard e.emitExpr(vals, pos)
-          continue
-        else: discard
-        # Loop refinement paths (loop/collect, loop/fold, loop/partition)
-        if val.wordName.startsWith("loop/"):
-          pos += 1
-          if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
-          continue
-      # Generic expression
-      discard e.emitExprWithChain(vals, pos)
+        advanceExprWithChain(e, vals, pos)
+      continue
+    # Set-word
+    if val.kind == vkWord and val.wordKind == wkSetWord:
+      pos += 1
+      advanceExprWithChain(e, vals, pos)
+      continue
+    # Generic expression / handler dispatch — advanceExpr covers them all.
+    advanceExprWithChain(e, vals, pos)
   if stmtStarts.len > 0: stmtStarts[^1] else: 0
 
 proc emitLastWithReturn(e: var LuaEmitter, vals: seq[KtgValue]) =
