@@ -75,6 +75,10 @@ type
     ## values, 0+ for function-typed methods.
     objectFields: Table[string, seq[tuple[name: string, default: string,
                                           fieldType: string, arity: int]]]
+    ## Raw object spec blocks, indexed by kebab-case name. Stashed during
+    ## prescan so `include TypeName` can splice a referenced object's fields
+    ## and methods into an outer object at declaration time.
+    objectSpecBlocks: Table[string, seq[KtgValue]]
     ## Custom types that have is? checks — only these need _type tags.
     usedTypeChecks: HashSet[string]
     ## Per-scope variable type / sequence / concat-safety tracking.
@@ -392,6 +396,7 @@ proc emitContextBlock(e: var LuaEmitter, vals: seq[KtgValue]): string
 proc emitFuncDef(e: var LuaEmitter, specBlock, bodyBlock: seq[KtgValue]): string
 proc inferSeqType(e: LuaEmitter, vals: seq[KtgValue], pos: int): SeqType
 proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue])
+proc expandIncludes(e: LuaEmitter, specBlock: seq[KtgValue]): seq[KtgValue]
 
 # ---------------------------------------------------------------------------
 # Compile-error guards for interpreter-only features
@@ -1243,7 +1248,10 @@ registerExpr("merge", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int)
 # --- object: emit as table with field defaults and methods ---
 registerExpr("object", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   if pos < vals.len and vals[pos].kind == vkBlock:
-    let specBlock = vals[pos].blockVals
+    # Expand `include TypeName [overrides]` so the walker below sees a
+    # flat spec with only field/required, field/optional, fields, and
+    # set-word method entries.
+    let specBlock = expandIncludes(e, vals[pos].blockVals)
     pos += 1
     # Parse field declarations into {name = default, ...} table
     var parts: seq[string] = @[]
@@ -4417,6 +4425,93 @@ proc applyBindingEntries(e: var LuaEmitter, blk: seq[KtgValue]) =
     else:
       discard
 
+proc fieldNameFromBlock(fieldBlock: seq[KtgValue]): string =
+  ## Extract the field name from a `field/required [name [type!]]` or
+  ## `field/optional [name [type!] default]` sub-block. Returns "" if
+  ## the shape is unexpected (leaves the entry untouched upstream).
+  if fieldBlock.len >= 1 and fieldBlock[0].kind == vkWord and
+     fieldBlock[0].wordKind == wkWord:
+    return fieldBlock[0].wordName
+  ""
+
+proc expandIncludes(e: LuaEmitter, specBlock: seq[KtgValue]): seq[KtgValue] =
+  ## Replace `include TypeName [overrides]` directives in an object spec
+  ## with the referenced type's stashed spec entries, applying any
+  ## overrides as field defaults (required -> optional with that value).
+  ##
+  ## If the type hasn't been prescanned yet (forward reference) or isn't
+  ## an object, the include is skipped silently -- the error surfaces at
+  ## the regular emit pass if the name is undefined.
+  result = @[]
+  var pos = 0
+  while pos < specBlock.len:
+    let v = specBlock[pos]
+    if v.kind == vkWord and v.wordKind == wkWord and v.wordName == "include" and
+       pos + 1 < specBlock.len and specBlock[pos + 1].kind == vkWord and
+       specBlock[pos + 1].wordKind == wkWord:
+      let includeName = specBlock[pos + 1].wordName.toLower
+      pos += 2
+      # Optional override block.
+      var overrides = initTable[string, KtgValue]()
+      if pos < specBlock.len and specBlock[pos].kind == vkBlock:
+        let ovBlock = specBlock[pos].blockVals
+        var op = 0
+        while op < ovBlock.len:
+          if ovBlock[op].kind == vkWord and ovBlock[op].wordKind == wkSetWord and
+             op + 1 < ovBlock.len:
+            let key = ovBlock[op].wordName
+            overrides[key] = ovBlock[op + 1]
+            op += 2
+          else:
+            op += 1
+        pos += 1
+      # Look up the included type. Unknown names are skipped silently;
+      # the surrounding emit pass will surface any real issue.
+      if includeName notin e.objectSpecBlocks: continue
+      let included = e.objectSpecBlocks[includeName]
+      var ip = 0
+      while ip < included.len:
+        let iv = included[ip]
+        # field/required with override -> rewrite as field/optional with default.
+        if iv.kind == vkWord and iv.wordKind == wkWord and
+           iv.wordName == "field/required" and
+           ip + 1 < included.len and included[ip + 1].kind == vkBlock:
+          let fname = fieldNameFromBlock(included[ip + 1].blockVals)
+          if fname.len > 0 and fname in overrides:
+            let typeAnno = included[ip + 1].blockVals[1]
+            let rewritten = ktgBlock(@[
+              ktgWord(fname, wkWord),
+              typeAnno,
+              overrides[fname]
+            ])
+            result.add(ktgWord("field/optional", wkWord))
+            result.add(rewritten)
+            ip += 2
+            continue
+        # field/optional with override -> replace the default.
+        if iv.kind == vkWord and iv.wordKind == wkWord and
+           iv.wordName == "field/optional" and
+           ip + 1 < included.len and included[ip + 1].kind == vkBlock:
+          let fb = included[ip + 1].blockVals
+          let fname = fieldNameFromBlock(fb)
+          if fname.len > 0 and fname in overrides and fb.len >= 2:
+            let typeAnno = fb[1]
+            let rewritten = ktgBlock(@[
+              ktgWord(fname, wkWord),
+              typeAnno,
+              overrides[fname]
+            ])
+            result.add(ktgWord("field/optional", wkWord))
+            result.add(rewritten)
+            ip += 2
+            continue
+        # Pass-through any other entry (methods, other field decls, etc).
+        result.add(iv)
+        ip += 1
+      continue
+    result.add(v)
+    pos += 1
+
 proc prescanBindings(e: var LuaEmitter, blk: seq[KtgValue]) =
   ## Two-pass: universal (outer) entries first, then the target-matching
   ## sub-block last so it overrides same-name universal entries.
@@ -4514,7 +4609,14 @@ proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
         e.bindings[name] = bindingVal()  # object is a value, not a function
         # Extract field specs for inline make
         if i + 2 < vals.len and vals[i + 2].kind == vkBlock:
-          let specBlock = vals[i + 2].blockVals
+          # Expand `include TypeName [overrides]` directives into the spec
+          # block so prescan and emit both see a flat object. Included
+          # fields get substituted defaults when overrides are present.
+          let rawSpec = vals[i + 2].blockVals
+          let specBlock = expandIncludes(e, rawSpec)
+          # Stash the expanded spec so nested includes referencing this
+          # type see the flattened shape.
+          e.objectSpecBlocks[kebabName] = specBlock
           var fields: seq[tuple[name: string, default: string,
                                  fieldType: string, arity: int]] = @[]
           var si = 0

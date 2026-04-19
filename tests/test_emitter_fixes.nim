@@ -170,6 +170,50 @@ suite "emitter: inline make":
     check "name = \"sword\"" in code
     check "count = 1" in code
 
+suite "emitter: include expansion in objects":
+  test "include pastes field defaults into make":
+    let code = emitLua(parseSource("""
+      Named: object [
+        field/optional [label [string!] "default"]
+      ]
+      Enemy: object [
+        field/required [hp [integer!]]
+        include Named
+      ]
+      e: make Enemy [hp: 50]
+    """))
+    check "label = \"default\"" in code
+    check "hp = 50" in code
+
+  test "include override pins a required field to a default":
+    let code = emitLua(parseSource("""
+      Damageable: object [
+        field/required [hp [integer!]]
+      ]
+      Enemy: object [
+        field/required [name [string!]]
+        include Damageable [hp: 100]
+      ]
+      e: make Enemy [name: "Goblin"]
+    """))
+    # hp got a default from the include override, so make inlines it
+    check "hp = 100" in code
+    check "name = \"Goblin\"" in code
+
+  test "multi-include composes several traits":
+    let code = emitLua(parseSource("""
+      Damageable: object [field/optional [hp [integer!] 100]]
+      Movable:    object [field/optional [speed [float!] 40.0]]
+      Enemy: object [
+        field/required [name [string!]]
+        include Damageable
+        include Movable
+      ]
+      e: make Enemy [name: "Goblin"]
+    """))
+    check "hp = 100" in code
+    check "speed = 40.0" in code
+
 suite "emitter: match without IIFE":
   test "match assignment hoists to if/elseif":
     let code = emitLua(parseSource("""
