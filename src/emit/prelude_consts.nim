@@ -66,6 +66,12 @@ _pair_mt.__tostring = function(a) return "{x = " .. tostring(a.x) .. ", y = " ..
 function _pair(x, y) return setmetatable({x=x, y=y}, _pair_mt) end
 """
 
+const PreludeCheckRet* = """function _check_ret(v, pred, name)
+  if not pred(v) then error("return expects "..name..", got "..type(v)) end
+  return v
+end
+"""
+
 const PreludePrettify* = """function _prettify(v, inner)
   if v == nil then return "nil" end
   local t = type(v)
@@ -305,4 +311,6 @@ const PreludeRegistry* = @[
                body: PreludeMake.strip),
   PreludeEntry(key: "_prettify", useFlags: @["_prettify"],
                body: PreludePrettify.strip),
+  PreludeEntry(key: "_check_ret", useFlags: @["_check_ret"],
+               body: PreludeCheckRet.strip),
 ]

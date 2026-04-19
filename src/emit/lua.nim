@@ -1669,20 +1669,21 @@ proc emitFuncDef(e: var LuaEmitter, specBlock, bodyBlock: seq[KtgValue]): string
   var bodyStr: string
   if returnGuardBase.len > 0:
     e.usedTypeChecks.incl(returnGuardBase)
+    e.useHelper("_check_ret")
     let predName = customTypePredicateName(returnGuardBase)
-    e.indent += 1
-    let innerStr = withCapture(e):
-      e.emitBody(bodyBlock, asReturn = true)
-    e.indent -= 1
-    bodyStr = paramGuardStr
-    bodyStr &= e.pad & "local _ret = (function()\n"
-    bodyStr &= innerStr
-    bodyStr &= e.pad & "end)()\n"
-    bodyStr &= e.pad & "if not " & predName & "(_ret) then\n"
-    bodyStr &= e.pad & "  error(\"return expects " & spec.returnType &
-               ", got \" .. type(_ret))\n"
-    bodyStr &= e.pad & "end\n"
-    bodyStr &= e.pad & "return _ret\n"
+    let suffix = ", " & predName & ", \"" & spec.returnType & "\")"
+    if isPureExpressionBody(bodyBlock):
+      var bpos = 0
+      let expr = e.emitExpr(bodyBlock, bpos)
+      bodyStr = paramGuardStr & e.pad & "return _check_ret(" & expr & suffix & "\n"
+    else:
+      e.indent += 1
+      let innerStr = withCapture(e):
+        e.emitBody(bodyBlock, asReturn = true)
+      e.indent -= 1
+      bodyStr = paramGuardStr & e.pad & "return _check_ret((function()\n"
+      bodyStr &= innerStr
+      bodyStr &= e.pad & "end)()" & suffix & "\n"
   else:
     let innerStr = withCapture(e):
       e.emitBody(bodyBlock, asReturn = true)
@@ -3952,17 +3953,19 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
           e.emitCustomTypeParamGuards(spec)
           if returnGuardBase.len > 0 and asRet:
             e.usedTypeChecks.incl(returnGuardBase)
+            e.useHelper("_check_ret")
             let predName = customTypePredicateName(returnGuardBase)
-            e.ln("local _ret = (function()")
-            e.indent += 1
-            e.emitBody(bodyBlock, asReturn = true)
-            e.indent -= 1
-            e.ln("end)()")
-            e.ln("if not " & predName & "(_ret) then")
-            e.ln("  error(\"return expects " & spec.returnType &
-                 ", got \" .. type(_ret))")
-            e.ln("end")
-            e.ln("return _ret")
+            let suffix = ", " & predName & ", \"" & spec.returnType & "\")"
+            if isPureExpressionBody(bodyBlock):
+              var bpos = 0
+              let expr = e.emitExpr(bodyBlock, bpos)
+              e.ln("return _check_ret(" & expr & suffix)
+            else:
+              e.ln("return _check_ret((function()")
+              e.indent += 1
+              e.emitBody(bodyBlock, asReturn = true)
+              e.indent -= 1
+              e.ln("end)()" & suffix)
           else:
             e.emitBody(bodyBlock, asReturn = asRet)
           e.indent -= 1
