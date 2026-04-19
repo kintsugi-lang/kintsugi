@@ -1,8 +1,4 @@
-Kintsugi [
-  name: 'full-spec
-  date: 2026-03-29
-  file: %script-spec.ktg
-]
+Kintsugi [name: 'full-spec]
 
 ; ============================================================
 ; Learn Kintsugi in Y Minutes
@@ -26,14 +22,23 @@ Kintsugi [
 ; File extensions:
 ;   .ktg - For all source files.
 ;
+; The progression of this spec is:
+;   1. Data and words
+;   2. Evaluation and control flow
+;   3. Functions, contexts, scope
+;   4. Series, collections, date/time
+;   5. Type system and error handling
+;   6. Runtime dialects (loop, match, object, parse)
+;   7. Metaprogramming (blocks -> templates -> preprocess -> game)
+;   8. Modules, I/O, gotchas
+;
 ; ============================================================
 
 
 ; ============================================================
 ; DATATYPES
 ; ============================================================
-; Kintsugi has many built-in datatypes. Every value carries
-; its type at runtime. Type names are suffixed with !
+; Every value carries its type at runtime. Type names end with !
 
 ; --- Scalars ---
 
@@ -42,15 +47,12 @@ negative: -7                            ; integer!
 my-float: 3.14                          ; float!
 my-pair: 100x200                        ; pair! (2D coordinates, float64 components)
 decimal-pair: 1.5x-2.5                  ; decimals and negatives allowed
-; pair/x and pair/y read components; set-path rebinds:
-;   p: 10x20   p/x: 50   ; p is now 50x20
-;   p/y: 1.5            ; p is now 50x1.5
 my-version: 1.2.3                       ; tuple! (versions, colors, IPs)
 
 ; --- Logic ---
 ; true and false are literals. on/off/yes/no are words bound
-; to logic values -- available as aliases in normal code, but
-; usable as keywords inside dialects without collision.
+; to logic values -- aliases in normal code, usable as keywords
+; inside dialects without collision.
 
 a: true                                 ; logic!
 b: false
@@ -86,12 +88,15 @@ my-email: user@example.com             ; email!
 
 my-money: $19.99                        ; money! (1999 cents)
 probe $0.00 - $0.50                     ; -$0.50 (sign preserved)
-; money!, date!, time!, tuple! all expose components via /field,
-; and their components can be rebound via set-path:
-;   m/cents                  ; -> 1999
-;   t: 14:30:00   t/minute: 45   ; t is now 14:45:00
-;   d: 2026-03-15 d/day: 20      ; d is now 2026-03-20
-;   v: 1.2.3      v/2: 99         ; v is now 1.99.3
+
+; money!, date!, time!, tuple!, pair! expose components via /field.
+; Components can be rebound via set-path. Value types are immutable:
+; set-path rebuilds and writes back to the variable.
+;   p: 10x20   p/x: 50   ; p is now 50x20
+;   m: $19.99  m/cents   ; -> 1999
+;   t: 14:30:00 t/minute: 45  ; t is now 14:45:00
+;   d: 2026-03-15 d/day: 20   ; d is now 2026-03-20
+;   v: 1.2.3   v/2: 99   ; v is now 1.99.3
 ; Invalid rebinds (Feb 30, hour 24, ...) raise range errors.
 
 ; --- Composite ---
@@ -102,15 +107,14 @@ code-as-data: [print "I am data"]      ; code is just a block
 my-paren: (1 + 2)                       ; paren! evaluates immediately: 3
 
 ; --- Internal types ---
-; These are not constructed directly in user code, but
-; are returned by type and used internally:
-;   native!    -- built-in function
-;   op!        -- operator (infix symbol)
-;   type!      -- type name value (integer!, string!, etc.)
-;   context!   -- mutable key-value scope
-;   object! -- frozen object with typed field specs
-;   set!       -- unordered unique collection
-;   map!       -- hash-based key-value store
+; Returned by type, not constructed directly:
+;   native!    - built-in function
+;   op!        - operator (infix symbol)
+;   type!      - type name value (integer!, string!, etc.)
+;   context!   - mutable key-value scope
+;   object!    - frozen object with typed field specs
+;   set!       - unordered unique collection
+;   map!       - hash-based key-value store
 
 
 ; ============================================================
@@ -123,9 +127,9 @@ my-paren: (1 + 2)                       ; paren! evaluates immediately: 3
 ;   word:   - set-word (bind a value)
 ;   :word   - get-word (get without calling)
 ;   'word   - lit-word (the symbol itself)
-;   @word   - meta-word (lifecycle hooks / metamethods)
+;   @word   - meta-word (lifecycle hooks / metadata)
 ;
-; The same system applies to paths:
+; Path syntax mirrors words:
 ;   path/to          - evaluate / lookup
 ;   path/to:         - set-path (assign through path)
 ;   path/:var        - dynamic index (evaluate var, use as index)
@@ -142,13 +146,13 @@ is-valid?: true
 my-variable!: 42
 
 ; --- Sigils ---
-; Every prefix, suffix, and punctuation character in Kintsugi
-; has a fixed meaning. Nothing is arbitrary.
+; Every prefix, suffix, and punctuation character has a fixed
+; meaning. Nothing is arbitrary.
 ;
 ; Word prefixes (change how the word evaluates):
 ;   :    - get-word   (retrieve value without calling)
 ;   '    - lit-word   (the symbol itself, unevaluated)
-;   @    - meta-word  (lifecycle hooks, runtime metadata)
+;   @    - meta-word  (lifecycle hooks, compile-time hooks)
 ;
 ; Word suffixes (naming conventions enforced by type):
 ;   :    - set-word   (bind a value)
@@ -169,9 +173,8 @@ my-variable!: 42
 ; ============================================================
 ; EVALUATION MODEL & ARITHMETIC
 ; ============================================================
-; Kintsugi evaluates left to right with no operator precedence.
-; Use parens to control evaluation order. Operators are just
-; infix functions -- none is special.
+; Left to right, no operator precedence. Parens force order.
+; Operators are infix functions -- none is special.
 
 x: 10
 y: 3
@@ -183,9 +186,9 @@ print 2 + 3 * 4                         ; 20 (left to right, NOT 14)
 print 2 + (3 * 4)                       ; 14 (parens force order)
 
 ; --- Division ---
-; Division returns integer when exact, float otherwise.
-print 10 / 2                            ; 5 (integer! -- exact)
-print 10 / 3                            ; 3.333... (float! -- inexact)
+; Integer when exact, float otherwise.
+print 10 / 2                            ; 5 (integer!)
+print 10 / 3                            ; 3.333... (float!)
 
 ; Use round for explicit rounding
 print round/down 10 / 3                 ; 3 (truncate toward zero)
@@ -202,14 +205,13 @@ print 5 >= 5                            ; true
 print 3 <= 5                            ; true
 
 ; --- Numeric cross-type ---
-print 42 = 42.0                         ; true (= compares by value across types)
-print 42 == 42.0                        ; false (== is strict -- requires same type)
-print 42 == 42                          ; true (same type, same value)
+print 42 = 42.0                         ; true  (value equality)
+print 42 == 42.0                        ; false (strict -- same type required)
+print 42 == 42                          ; true
 
 ; --- Logic ---
 ; and/or are infix operators. They do NOT short-circuit --
-; both sides are always evaluated because the evaluator must
-; consume the right operand.
+; both sides always evaluated (the evaluator must consume the right operand).
 ; Only false and none are falsy. 0, "", and [] are truthy.
 
 print not 1 = 2                         ; true
@@ -217,8 +219,6 @@ print 1 = 1 and 2 = 2                  ; true
 print 1 = 2 or 2 = 2                   ; true
 
 ; all?/any? -- block-based short-circuit predicates
-; all? returns true if every expression is truthy, false otherwise.
-; any? returns true if at least one is truthy, false otherwise.
 print all? [1 2 3]                      ; true
 print all? [1 false 3]                  ; false
 print any? [false none 42]             ; true
@@ -233,23 +233,23 @@ print $10.00 > $5.00                    ; true
 ; --- Pair arithmetic ---
 print 100x200 + 10x20                  ; 110x220
 print 100x200 - 10x20                  ; 90x180
-print 10x20 * 3                        ; 30x60   (scalar scale)
-print 3 * 10x20                        ; 30x60   (either side)
+print 10x20 * 3                        ; 30x60
+print 3 * 10x20                        ; 30x60
 print 10x20 / 2                        ; 5x10
-print 10x20 * 1.5                      ; 15x30   (float scalar ok)
+print 10x20 * 1.5                      ; 15x30
 print negate -10x20                    ; 10x-20
 print abs -10x-20                      ; 10x20
-print min 10x50 20x40                  ; 10x40   (componentwise)
-print max 10x50 20x40                  ; 20x50   (componentwise)
+print min 10x50 20x40                  ; 10x40
+print max 10x50 20x40                  ; 20x50
 
 ; set-path on a pair rebinds the variable to a new pair:
 p: 10x20
-p/x: 50                                 ; p is now 50x20
-p/y: 1.5                                ; p is now 50x1.5
+p/x: 50
+p/y: 1.5
 print p                                 ; 50x1.5
 
 ; --- String concatenation ---
-; Use rejoin to concatenate strings. + on strings is an error.
+; rejoin concatenates. + on strings is an error.
 print rejoin ["hello" " world"]        ; hello world
 
 
@@ -299,12 +299,11 @@ print counter                           ; 10
 ; ============================================================
 ; FUNCTIONS
 ; ============================================================
-; The spec block inside 'function' is a dialect. Words,
-; type blocks, refinements, and return: have special meaning.
+; The spec block inside function is a dialect. Words, type
+; blocks, refinements, and return: have special meaning.
 ;
-; Type annotations are enforced at runtime -- passing the
-; wrong type raises a type error. A future compiler can
-; trust these annotations for static optimization.
+; Type annotations are enforced at runtime. The compiler uses
+; them for static optimization.
 
 ; Basic definition
 add: function [a b] [a + b]
@@ -315,7 +314,6 @@ add-typed: function [a [integer!] b [integer!] return: [integer!]] [
   a + b
 ]
 print add-typed 3 4                     ; 7
-; add-typed "hi" 3                      ; ERROR: a expects integer!, got string!
 
 ; Typesets for polymorphism
 double: function [value [number!]] [
@@ -382,7 +380,7 @@ make-adder: function [n] [function [x] [x + n]]
 add5: make-adder 5
 print add5 10                           ; 15
 
-; function with no parameters
+; Function with no parameters
 greet-world: function [] [print "Hello, world!"]
 greet-world                             ; Hello, world!
 
@@ -392,151 +390,107 @@ say-hi                                  ; hi
 
 
 ; ============================================================
-; LOOP DIALECT
+; CONTEXTS, BINDING & SCOPE
 ; ============================================================
-; loop is the only looping construct. The block inside loop
-; is a dialect when it starts with 'for' or 'from'.
-; Otherwise, the entire block is the body (infinite loop).
+; Contexts are the universal construct. Closures, objects,
+; modules, and scopes are all contexts.
 ;
-; Refinements:
-;   loop            - side effects only, returns none
-;   loop/collect    - gathers body results into a block
-;   loop/fold       - accumulates: first var is accumulator
-;   loop/partition  - body is predicate; values go into
-;                     [truthy falsy] based on result
+;   context!  - mutable key-value scope
+;   object!   - frozen context with typed field specs
 ;
-; Dialect keywords:
-;   for   - declare iteration variable(s)
-;   in    - the data to iterate over
-;   from  - counting start value
-;   to    - counting end value
-;   by    - step value (default 1 or -1 based on direction)
-;   when  - guard clause (filter)
-;   do    - required before body block
-;   it    - implicit variable when for is omitted
+; Created by:
+;   context [...]  - mutable context
+;   function       - parameters and local words
+;   object [...]   - frozen object (see OBJECT DIALECT)
+;   make Object [] - mutable instance stamped from an object
+;   scope [...]    - lexical child context (no value leaks)
+;   freeze ctx     - convert context! to object! (one-way)
 
-; --- Basic iteration ---
+; --- context ---
+point: context [x: 10 y: 20]
+print point/x                           ; 10
+print point/y                           ; 20
 
-loop [for [item] in [1 2 3 4 5] do [print item]]
+; Set-path assignment works on context!
+point/x: 30
+print point/x                           ; 30
 
-; Multi-line:
-loop [
-  for [item] in [6 7 8]
-  do [print item]
-]
+; Introspection
+print words point                       ; [x y]
 
-; --- Iterating strings ---
-; for/in works on strings too, yielding one character per iteration.
-loop [for [c] in "abc" do [print c]]
-; a
-; b
-; c
-
-; --- Counting ---
-
-loop [for [n] from 1 to 5 do [print n]]
-; 1
-; 2
-; 3
-; 4
-; 5
-
-; Counting with step
-loop [from 0 to 10 by 5 do [print it]]
-; 0
-; 5
-; 10
-
-; Counting down (direction inferred)
-loop [from 5 to 1 do [print it]]
-; 5
-; 4
-; 3
-; 2
-; 1
-
-; --- Collecting ---
-
-squares: loop/collect [for [n] from 1 to 5 do [n * n]]
-probe squares                           ; 1 4 9 16 25
-
-; --- Filtering ---
-
-evens: loop/collect [
-  for [n] in [1 2 3 4 5 6 7 8]
-  when [even? n]
-  do [n]
-]
-probe evens                             ; 2 4 6 8
-
-; --- Folding ---
-
-total: loop/fold [for [acc n] from 1 to 10 do [acc + n]]
-print total                             ; 55
-
-; --- Partitioning ---
-
-set [evens odds] loop/partition [for [x] from 1 to 8 do [even? x]]
-probe evens                             ; 2 4 6 8
-probe odds                              ; 1 3 5 7
-
-; --- Break inside loop ---
-
-partial: loop/collect [
-  for [x] from 1 to 5 do [
-    if x = 4 [break]
-    x * 10
-  ]
-]
-probe partial                           ; 10 20 30
-
-; --- Loop variables are scoped ---
-; After the loop, iteration variables do not exist in the
-; parent scope. This prevents accidental leaks.
-; Use loop/fold or loop/collect to get values out.
-;   loop [for [i] from 1 to 5 do [i]]
-;   print i                             ; ERROR: i has no value
-
-
-; ============================================================
-; MATCH DIALECT
-; ============================================================
-; Pattern matching with destructuring. First match wins.
+; --- Write-through scoping ---
+; Set-words write to wherever the name exists in the scope chain.
+; If the name doesn't exist, it creates a new local binding.
+; Functions and loops naturally update outer variables.
 ;
-; Pattern elements:
-;   literal    - matches exactly (integers, strings, etc.)
-;   bare word  - captures/binds the value at this position
-;   type!      - matches any value of that type
-;   (expr)     - evaluate expression, match against result
-;   'word      - matches the literal word
-;   _          - wildcard (matches anything, doesn't bind)
-;   when       - guard clause
-;   default    - fallback if nothing matched
+; Context builders (context [...], make map! [...], object [...],
+; scope [...]) are isolated -- set-words inside always create local
+; entries, never write through.
 
-match [1 2 3] [
-  [1 2 3]  [print "got 1 2 3"]
-  [1 _ 3]  [print "1, anything, 3"]
-  default [print "nothing matched"]
-]
-; got 1 2 3
+g-counter: 0
+g-tick: does [g-counter: g-counter + 1]
+g-tick
+g-tick
+g-tick
+print g-counter                         ; 3
 
-; Destructuring
-match [10 20] [
-  [0 0]   [print "origin"]
-  [x 0]   [print rejoin ["x-axis at " x]]
-  [0 y]   [print rejoin ["y-axis at " y]]
-  [x y]   [print rejoin [x ", " y]]
-]
-; 10, 20
+; --- Assignment is by reference ---
+; Compound values (blocks, contexts, maps) are shared.
+; copy creates an independent value.
 
-; Guards
-match 25 [
-  [n] when [n < 13]  [print "child"]
-  [n] when [n < 20]  [print "teenager"]
-  [n] when [n < 65]  [print "adult"]
-  [_]                [print "senior"]
+a-block: [1 2 3]
+b-block: a-block
+append b-block 4
+print length a-block                     ; 4 (same block!)
+
+c-block: copy a-block
+append c-block 5
+print length a-block                     ; 4 (independent)
+print length c-block                     ; 5
+
+; copy/deep -- recursively copies nested blocks and contexts
+deep-src: [[1 2] [3 4]]
+deep-clone: copy/deep deep-src
+append (first deep-clone) 99
+print first deep-src                    ; [1 2] (unaffected)
+print first deep-clone                  ; [1 2 99]
+
+; --- merge ---
+; merge creates a new context from two sources. Second overwrites first.
+; Skips none values (useful with capture results).
+; merge/freeze returns an object! instead of context!.
+; merge/deep copies blocks and contexts instead of sharing.
+
+defaults: context [name: "Unknown" hp: 100 attack: 10]
+overrides: context [name: "Warrior" hp: 200]
+result: merge defaults overrides
+print result/name                       ; Warrior
+print result/hp                         ; 200
+print result/attack                     ; 10
+
+; --- scope ---
+; Lexical child context. Variables defined inside don't leak out.
+; Parent scope is accessible.
+
+x-outer: "visible"
+scope [
+  y-inner: "scoped"
+  print x-outer                         ; visible
 ]
-; adult
+; y-inner does not exist here
+
+; --- Lifecycle hooks: @enter / @exit ---
+; @enter runs before the block body. @exit runs after, always,
+; even on error propagation through the block.
+
+scope [
+  @enter [print "entering scope"]
+  @exit  [print "exiting scope"]
+  print "inside scope"
+]
+; entering scope
+; inside scope
+; exiting scope
 
 
 ; ============================================================
@@ -561,7 +515,7 @@ print has? data 30                      ; true
 print find data 30                    ; 3 (1-based)
 print has? "hello world" "world"        ; true
 
-; Select -- key-value lookup in flat blocks
+; select -- key-value lookup in flat blocks
 config: [width 800 height 600 depth 32]
 print select config 'width              ; 800
 print select config 'depth              ; 32
@@ -573,26 +527,27 @@ insert buf 0 1                          ; insert 0 at position 1
 remove buf 1                            ; remove at position 1
 print length buf                         ; 4
 
-; Copy creates an independent block
+; copy creates an independent block
 original: [1 2 3]
 clone: copy original
 append clone 99
 print length original                    ; 3 (unaffected)
 
-; Sort mutates in place
+; sort mutates in place
 nums: [3 1 4 1 5 9 2 6]
 sort nums
 print first nums                        ; 1
 print last nums                         ; 9
 
-; Sort also works on strings (returns a new sorted string)
+; sort on strings returns a new sorted string
 print sort "hello"                      ; ehllo
 
-; insert and remove on strings return new strings (strings are immutable)
+; insert/remove on strings return new strings (strings are immutable)
 print insert "helo" "l" 4               ; hello
 print remove "hello" 2                  ; hllo
 
-; Multiple assignment (block destructuring)
+; --- Destructuring assignment ---
+; set [a b c] block  -- position-based
 set [a b c] [1 2 3]
 print a                                 ; 1
 print b                                 ; 2
@@ -611,8 +566,8 @@ probe rest                              ; [20 30 40 50]
 
 ; --- capture: declarative keyword extraction ---
 ; capture scans a block for keywords defined by meta-words in a schema.
-; @name     — greedy: captures everything until next keyword
-; @name/N   — exact: captures N values after keyword
+;   @name     - greedy: captures everything until the next keyword
+;   @name/N   - exact: captures N values after the keyword
 
 parts: capture [source [42] then [it + 1] then [it * 2] retries 3] [
   @source @then @retries
@@ -621,20 +576,16 @@ print parts/source                      ; [42]
 probe parts/then                        ; [[it + 1] [it * 2]]
 print parts/retries                     ; 3
 
-; capture enables user-defined dialects — a function that takes
-; a block and interprets its keywords:
-;
+; capture enables user-defined dialects:
 ;   entity: function [spec [block!]] [
 ;     parts: capture spec [@name @hp @attack @defense]
-;     ctx: context []
-;     ctx/name: parts/name
-;     ctx/hp: parts/hp
-;     ctx/max-hp: parts/hp
+;     ctx: context [] ctx/name: parts/name
+;     ctx/hp: parts/hp ctx/max-hp: parts/hp
 ;     ctx
 ;   ]
-;   warrior: entity [name "Warrior" hp 100 attack 15 defense 10]
 
-; Dynamic path indexing -- use :var in a path to evaluate the variable
+; --- Dynamic path indexing ---
+; Use :var in a path to evaluate the variable as an index
 items: [10 20 30]
 i: 2
 print items/:i                            ; 20
@@ -651,40 +602,29 @@ print board/cells/:pos                    ; 3
 ; For computed indices, use pick
 print pick items (i + 1)                  ; 30
 
-; Reduce -- evaluate a block, return results as a block
-x: 10
-result: reduce [x + 1 x * 2 "hello"]
-print first result                      ; 11
-print second result                     ; 20
-
 ; --- String operations ---
-; Strings are immutable. Double-quoted. Multiline strings
-; use curly braces. Concatenation uses join (two values) or
-; rejoin (block of values).
+; Strings are immutable. Double-quoted or curly-brace (multiline).
+; Concatenation uses join (two values) or rejoin (block of values).
 
-; --- Multiline strings ---
-
+; Multiline strings
 message: {
   Hello,
   This is a multiline string.
   It preserves line breaks.
 }
 
-; --- Interpolation via rejoin ---
-; rejoin evaluates a block and joins all results into a string.
+; rejoin evaluates a block and joins results into a string
+sn: "Ray"
+sa: 30
+print rejoin ["Hello, " sn "!"]                ; Hello, Ray!
+print rejoin [sn " is " sa " years old"]       ; Ray is 30 years old
+print rejoin ["2 + 2 = " (2 + 2)]              ; 2 + 2 = 4
 
-name: "Ray"
-age: 30
-print rejoin ["Hello, " name "!"]                ; Hello, Ray!
-print rejoin [name " is " age " years old"]      ; Ray is 30 years old
-print rejoin ["2 + 2 = " (2 + 2)]               ; 2 + 2 = 4
+; rejoin/with -- join with a delimiter
+print rejoin/with [1 2 3 4 5] ", "             ; 1, 2, 3, 4, 5
+print rejoin/with ["a" "b" "c"] " - "          ; a - b - c
 
-; rejoin/with — join with a delimiter
-print rejoin/with [1 2 3 4 5] ", "              ; 1, 2, 3, 4, 5
-print rejoin/with ["a" "b" "c"] " - "           ; a - b - c
-
-; --- String functions ---
-
+; String functions
 print length "hello"                     ; 5
 print join "hello" " world"             ; hello world
 print trim "  hello  "                  ; hello
@@ -696,10 +636,7 @@ print lowercase "HELLO"                 ; hello
 print replace "hello world" "world" "Ray" ; hello Ray
 print replace "aabaa" "a" "x"          ; xxbxx (replace-all by default)
 
-; --- Series operations on strings ---
-; first, second, last, pick, find, reverse work on both
-; blocks and strings. They are the unified series interface.
-
+; Series operations on strings
 print first "hello"                     ; h
 print second "hello"                    ; e
 print last "hello"                      ; o
@@ -713,38 +650,31 @@ print find [10 20 30] 20               ; 2
 ; find/where -- first element matching a predicate
 print find/where [1 2 3 4 5] function [x] [x > 3]  ; 4
 
-; reverse -- returns new value
+; reverse returns a new value
 print reverse "hello"                   ; olleh
 print reverse [1 2 3]                   ; [3 2 1]
 
-; append -- mutates blocks in place. Splices by default.
-; Strings are immutable — use rejoin or join to build new strings:
-;   rejoin ["hello" " " "world"]   → "hello world"
-;   join "hello" " world"          → "hello world"
-
+; append mutates blocks. Splices by default. Strings are immutable:
+; build new strings with rejoin/join instead.
 spec-blk: [1 2]
 append spec-blk [3 4]                   ; splice: [1 2 3 4]
 append/only spec-blk [5 6]             ; single element: [1 2 3 4 [5 6]]
 
-; subset extracts a range (1-based start, length). Works on strings and blocks.
+; subset extracts a range (1-based start, length)
 print subset "hello world" 7 5          ; world
 probe subset [10 20 30 40 50] 2 3       ; [20 30 40]
 
 ; --- String predicates ---
-
 print starts-with? "hello world" "hello"  ; true
 print ends-with? "hello world" "world"    ; true
 print starts-with? "hello" "xyz"          ; false
 
 ; --- Escape sequences ---
-; \n = newline, \" = quote, \\ = backslash, \t = tab
-
+; \n newline  \" quote  \\ backslash  \t tab
 print "line one\nline two"
 
 ; --- Padding ---
 ; pad fills to a width. Left-pad by default, /right for right-pad.
-; Works on strings and blocks.
-
 print pad "42" 5 "0"                    ; 00042
 print pad/right "hi" 6 "."             ; hi....
 probe pad [1 2] 5 0                     ; [0 0 0 1 2]
@@ -759,49 +689,13 @@ print char (byte "Z")                   ; Z
 
 
 ; ============================================================
-; DATE & TIME FACILITIES
-; ============================================================
-; now returns the current Unix epoch as integer!.
-; time and date are context objects with accessor functions.
-;
-;   now                  -- integer! (Unix epoch seconds)
-;   time/now             -- time! (current local time)
-;   date/now             -- date! (current local date)
-;   time/hours t         -- integer! (hour component)
-;   time/minutes t       -- integer! (minute component)
-;   time/seconds t       -- integer! (second component)
-;   time/to-seconds t    -- integer! (total seconds since midnight)
-;   time/from-epoch n    -- time! (time from epoch seconds)
-;   date/from-epoch n    -- date! (date from epoch seconds)
-;   date/year d          -- integer! (year component)
-;   date/month d         -- integer! (month 1-12)
-;   date/day d           -- integer! (day of month)
-
-; Live examples:
-epoch: now
-print type epoch                        ; integer!
-
-t: time/now
-print type t                            ; time!
-print time/hours t                      ; (current hour)
-print time/minutes t                    ; (current minute)
-
-d: date/now
-print type d                            ; date!
-print date/year d                       ; (current year)
-
-
-; ============================================================
 ; COLLECTIONS: MAP & SET
 ; ============================================================
 
 ; --- Map ---
 ; map! is a hash-based key-value store for fast lookup.
 
-; Create via make
 m: make map! [name: "Ray" age: 30]
-
-; Access via path
 print m/name                              ; Ray
 print m/age                               ; 30
 
@@ -812,18 +706,40 @@ print length m                             ; 2
 ; --- Set & Charset ---
 ; set! is an unordered unique collection. charset creates a
 ; set! from a string of characters (custom character classes
-; for use in parse).
+; for @parse).
 
 vowels: charset "aeiou"
 consonants: charset "bcdfghjklmnpqrstvwxyz"
 alphanumeric: union (charset "abcdefghijklmnopqrstuvwxyz") (charset "0123456789")
 
-; Sets work with parse rules as character classes.
-; result: @parse "hello" [some vowels | some consonants]
-
-; union and intersect combine sets
+; union and intersect combine sets.
 combined: union vowels consonants
-; overlap: intersect (charset "abc") (charset "bcd")
+
+
+; ============================================================
+; DATE & TIME FACILITIES
+; ============================================================
+; now returns the current Unix epoch as integer!.
+; time and date are context objects with accessor functions.
+;
+;   now                  - integer! (Unix epoch seconds)
+;   time/now             - time! (current local time)
+;   date/now             - date! (current local date)
+;   time/hours t         - integer! (hour component)
+;   time/minutes t       - integer! (minute component)
+;   time/seconds t       - integer! (second component)
+;   time/to-seconds t    - integer! (total seconds since midnight)
+;   time/from-epoch n    - time! (time from epoch seconds)
+;   date/from-epoch n    - date! (date from epoch seconds)
+;   date/year d          - integer! (year component)
+;   date/month d         - integer! (month 1-12)
+;   date/day d           - integer! (day of month)
+
+t: time/now
+print type t                            ; time!
+d: date/now
+print type d                            ; date!
+print date/year d                       ; (current year)
 
 
 ; ============================================================
@@ -831,19 +747,9 @@ combined: union vowels consonants
 ; ============================================================
 ; Gradual typing. No implicit coercion. Three operations:
 ;
-;   is?  type! value  -- check (returns logic!)
-;   to   type! value  -- convert (scalars only, throws on failure)
-;   [param [type!]]   -- constrain (in function specs)
-;
-; Type annotations on function params are enforced at runtime.
-
-; --- @const annotation ---
-; @const marks a binding as constant. In Script mode, it behaves
-; as a normal assignment. In Lua 5.4, it emits the <const> attribute.
-;   MAX-SPEED: @const 100
-;   ; In Lua 5.4: local MAX_SPEED <const> = 100
-MAX-SPEED: @const 100
-print MAX-SPEED                          ; 100
+;   is?  type! value  - check (returns logic!)
+;   to   type! value  - convert (scalars only, throws on failure)
+;   [param [type!]]   - constrain (in function specs)
 
 ; --- Introspection ---
 print type 42                           ; integer!
@@ -851,7 +757,7 @@ print type "hello"                      ; string!
 print type [1 2 3]                      ; block!
 
 ; --- Type predicates ---
-; Every type has a predicate (name?), generated from type name.
+; Every built-in type has a predicate (name?).
 print integer? 42                       ; true
 print float? 3.14                       ; true
 print string? "hello"                   ; true
@@ -884,17 +790,15 @@ print frozen? :Point                    ; true
 print number? 3.14                      ; true (integer! or float!)
 print number? 42                        ; true
 
-; --- Type checking (is?) ---
-; is? checks whether a value matches a type. Works with
-; built-in types, union types, and custom types.
+; --- Type checking: is? ---
+; is? checks any type: built-in, union, or custom.
 print is? integer! 42                   ; true
 print is? string! 42                    ; false
 print is? number! 3.14                  ; true
 print is? number! 42                    ; true
 
-; --- Type conversion (to) ---
-; to never coerces silently. Every conversion is explicit.
-; If it can fail (string parsing), it throws a type error.
+; --- Type conversion: to ---
+; No silent coercion. Failures raise 'type errors.
 print to integer! "42"                  ; 42
 print to integer! 3.7                   ; 3 (truncate toward zero)
 print to string! 42                     ; 42
@@ -928,10 +832,61 @@ print to pair! [10 20]                  ; 10x20
 ; Logic from string
 print to logic! "true"                  ; true
 print to logic! "false"                 ; false
-; to logic! 0                           ; ERROR
-
-; Logic from none
 print to logic! none                    ; false
+
+; --- Custom types: @type ---
+; @type defines a custom type value. Four forms:
+;   @type         [type! | type!]      - union of built-ins
+;   @type/where   [type!] [guard]      - refinement with predicate
+;   @type/enum    ['a | 'b | 'c]       - enumerated lit-words (case-sensitive)
+;   @type         ['foo | 'bar]        - case-insensitive lit-word union
+
+; Union types
+id!: @type [integer! | string!]
+print is? id! 42                        ; true
+print is? id! "u-123"                   ; true
+print is? id! 3.14                      ; false
+
+; Refinement via where-guard (it is bound to the candidate value)
+positive!: @type/where [integer!] [it > 0]
+percentage!: @type/where [float!] [it >= 0.0 and it <= 1.0]
+print is? positive! 42                  ; true
+print is? positive! -5                  ; false
+print is? percentage! 0.75             ; true
+print is? percentage! 1.5              ; false
+
+; where guards MUST return logic!. Anything else raises a guard error.
+; where guards must hold for ALL union members -- split if they don't:
+;   positive!: @type/where [integer!] [it > 0]
+;   flexible!: @type [positive! | string!]
+
+; Enum (case-sensitive lit-word list)
+traffic-light-color!: @type/enum ['red | 'yellow | 'green]
+print is? traffic-light-color! 'red     ; true
+print is? traffic-light-color! 'blue    ; false
+
+; Custom types compose with parameter specs
+clamp-positive: function [n [positive!]] [n]
+print clamp-positive 42                 ; 42
+; clamp-positive -5                     ; Error [type]: n expects positive!
+
+; match works inside where guards for type dispatch
+valid-score!: @type/where [integer! | string!] [
+  match it [
+    [integer!] [(it >= 0) and (it <= 100)]
+    [string!]  [it = "N/A"]
+    default    [false]
+  ]
+]
+print is? valid-score! 85               ; true
+print is? valid-score! -5               ; false
+print is? valid-score! "N/A"            ; true
+
+; --- @const annotation ---
+; Marks a binding as constant. In interpreter: normal assignment.
+; In Lua 5.4 target: emits the <const> attribute.
+MAX-SPEED: @const 100
+print MAX-SPEED                          ; 100
 
 ; --- Math utilities ---
 print min 3 7                           ; 3
@@ -946,14 +901,14 @@ print ceil 3.2                          ; 4
 print pow 2 10                          ; 1024
 print log10 100                         ; 2.0
 
-; --- Trig (radians) ---
+; Trig (radians)
 print sin 0                             ; 0.0
 print cos 0                             ; 1.0
 print pi                                ; 3.141592653589793
 print to-degrees pi                     ; 180.0
 print to-radians 180                    ; 3.141592653589793
 
-; --- Random ---
+; Random
 random/seed 42
 print random 1.0                        ; (float in [0, 1))
 print random/int 100                    ; (integer in [1, 100])
@@ -964,13 +919,13 @@ print random/choice [10 20 30]          ; (one of 10, 20, 30)
 ; ============================================================
 ; ERROR HANDLING
 ; ============================================================
-; Errors are raised with 'error'. Protected calls with 'try'.
+; Errors are raised with error. Protected calls with try.
 ; try returns a context! with path access:
-;   result/ok       -- logic! (success or failure)
-;   result/value    -- the return value (on success)
-;   result/kind     -- lit-word! error kind (on failure)
-;   result/message  -- string! error message (on failure)
-;   result/data     -- any value attached to the error
+;   result/ok       - logic! (success or failure)
+;   result/value    - the return value (on success)
+;   result/kind     - lit-word! error kind (on failure)
+;   result/message  - string! error message (on failure)
+;   result/data     - any value attached to the error
 
 ; --- Raising errors ---
 ; error <kind:lit-word> <message:string> <data:any|none>
@@ -1000,10 +955,8 @@ either result/ok [
 ]
 ; Error: cannot divide by zero
 
-; --- Rethrow ---
+; --- rethrow ---
 ; rethrow re-raises an error from a try result context.
-; Useful when you catch, inspect, then decide to propagate.
-
 outer: try [
   inner: try [error 'user "boom" none]
   unless inner/ok [
@@ -1015,24 +968,29 @@ print outer/ok                          ; false
 print outer/message                     ; boom
 
 ; --- Standard error kinds ---
-; 'type       -- wrong type passed to function
-; 'arity      -- too few arguments
-; 'undefined  -- word has no binding
-; 'math       -- division by zero, overflow
-; 'range      -- index out of bounds
-; 'parse      -- parse failed
-; 'load       -- file not found, circular dependency
-; 'make       -- required field missing in make
-; 'self       -- attempt to rebind self
-; 'user       -- raised explicitly by user code
+; 'type       - wrong type passed to function
+; 'arity      - too few arguments
+; 'undefined  - word has no binding
+; 'math       - division by zero, overflow
+; 'range      - index out of bounds
+; 'parse      - parse failed
+; 'load       - file not found, circular dependency
+; 'import     - import resolution failure
+; 'make       - required field missing in make
+; 'object     - malformed object dialect body
+; 'frozen     - attempt to mutate an object!
+; 'self       - attempt to rebind self
+; 'dialect    - dialect misuse
+; 'stack      - recursion depth exceeded
+; 'user       - raised explicitly by user code
 
 ; --- Attempt dialect ---
 ; Resilient pipelines with error handling.
-; Each step receives the previous result as 'it'.
+; Each step receives the previous result as it.
 ;
-; Dialect keywords:
+; Keywords:
 ;   source   - initial operation
-;   then     - chain step (previous result is 'it')
+;   then     - chain step (previous result is it)
 ;   when     - guard (short-circuit to none if falsy)
 ;   catch    - handle a named error kind
 ;   retries  - retry count on error
@@ -1065,7 +1023,7 @@ result: attempt [
 ]
 print result                            ; caught
 
-; Inside catch/fallback, 'error is bound to the message string
+; Inside catch/fallback, error is bound to the message string
 result: attempt [
   source [error 'parse "bad input" none]
   catch 'parse [rejoin ["parse: " error]]
@@ -1088,103 +1046,155 @@ print retry-count                       ; 3
 
 
 ; ============================================================
-; CONTEXTS & BINDING
+; LOOP DIALECT
 ; ============================================================
-; Contexts are the universal construct. Closures, objects,
-; modules, and scopes are all contexts. Runtime type: context!
+; loop is the only looping construct. The block inside loop
+; is a dialect when it starts with for or from. Otherwise the
+; entire block is the body (infinite loop).
 ;
-; context! is a mutable scope. object! is a frozen context
-; with typed field specs (created by the object dialect).
-; freeze converts context! to object! (one-way).
+; Refinements:
+;   loop            - side effects only, returns none
+;   loop/collect    - gather body results into a block
+;   loop/fold       - accumulate: first var is accumulator
+;   loop/partition  - body is predicate; values go into
+;                     [truthy falsy] based on result
 ;
-; Created by:
-;   context [...]  - mutable context
-;   function       - parameters and local words
-;   object [...]   - frozen object with typed fields (object!)
-;   make Object [...]  - mutable instance stamped from object (context!)
-;   freeze ctx     - convert context! to object! (one-way)
+; Dialect keywords:
+;   for   - declare iteration variable(s)
+;   in    - the data to iterate over
+;   from  - counting start value
+;   to    - counting end value
+;   by    - step value (default 1 or -1 based on direction)
+;   when  - guard clause (filter)
+;   do    - required before body block
+;   it    - implicit variable when for is omitted
 
-; context creates a mutable environment
-point: context [x: 10 y: 20]
-print point/x                           ; 10
-print point/y                           ; 20
+; --- Basic iteration ---
 
-; Set-path assignment works on context!
-point/x: 30
-print point/x                           ; 30
+loop [for [item] in [1 2 3 4 5] do [print item]]
 
-; Introspection
-print words point                    ; [x y]
+; Multi-line
+loop [
+  for [item] in [6 7 8]
+  do [print item]
+]
 
-; copy/deep -- recursively copies nested blocks and contexts
-deep-src: [[1 2] [3 4]]
-deep-clone: copy/deep deep-src
-append (first deep-clone) 99
-print first deep-src                    ; [1 2] (unaffected)
-print first deep-clone                  ; [1 2 99] (independent copy)
+; --- Iterating strings ---
+loop [for [c] in "abc" do [print c]]
+; a
+; b
+; c
 
-; --- Write-through scoping ---
-; Set-words write to wherever the name exists in the scope chain.
-; If the name doesn't exist, it creates a new local binding.
-; This means functions and loops can naturally update outer variables.
+; --- Counting ---
+
+loop [for [n] from 1 to 5 do [print n]]
+; 1 2 3 4 5
+
+; Counting with step
+loop [from 0 to 10 by 5 do [print it]]
+; 0 5 10
+
+; Counting down (direction inferred)
+loop [from 5 to 1 do [print it]]
+; 5 4 3 2 1
+
+; --- Collecting ---
+
+squares: loop/collect [for [n] from 1 to 5 do [n * n]]
+probe squares                           ; [1 4 9 16 25]
+
+; --- Filtering ---
+
+evens: loop/collect [
+  for [n] in [1 2 3 4 5 6 7 8]
+  when [even? n]
+  do [n]
+]
+probe evens                             ; [2 4 6 8]
+
+; --- Folding ---
+
+total: loop/fold [for [acc n] from 1 to 10 do [acc + n]]
+print total                             ; 55
+
+; --- Partitioning ---
+
+set [p-evens p-odds] loop/partition [for [x] from 1 to 8 do [even? x]]
+probe p-evens                           ; [2 4 6 8]
+probe p-odds                            ; [1 3 5 7]
+
+; --- Break inside loop ---
+
+partial: loop/collect [
+  for [x] from 1 to 5 do [
+    if x = 4 [break]
+    x * 10
+  ]
+]
+probe partial                           ; [10 20 30]
+
+; Loop variables are scoped -- they do not exist after the loop.
+; Use loop/fold or loop/collect to carry values out.
+
+
+; ============================================================
+; MATCH DIALECT
+; ============================================================
+; Pattern matching with destructuring. First match wins.
 ;
-; Context builders (context [...], make map! [...], object [...],
-; scope [...]) are isolated -- set-words inside always create local
-; entries, never write through.
+; Pattern elements:
+;   literal      - matches exactly
+;   bare word    - captures/binds the matched value
+;   type!        - matches any value of that type
+;   'word        - matches the literal word symbol
+;   _            - wildcard, matches anything, doesn't bind
+;   (expr)       - evaluates expr, matches the result literally
+;   when [guard] - guard clause evaluated after pattern match
+;   default      - fallback if nothing else matched
 
-g-counter: 0
-g-tick: does [g-counter: g-counter + 1]
-g-tick
-g-tick
-g-tick
-print g-counter                         ; 3
+describe: function [v] [
+  match v [
+    [0]          ["zero"]
+    [integer!]   [rejoin ["int: " v]]
+    [string!]    [rejoin ["str: " v]]
+    [n [block!]] [rejoin ["block len " length n]]
+    default      ["other"]
+  ]
+]
+print describe 0                        ; zero
+print describe 42                       ; int: 42
+print describe "hi"                     ; str: hi
+print describe [1 2 3]                  ; block len 3
+print describe 3.14                     ; other
 
-; --- Assignment is by reference ---
-; Compound values (blocks, contexts, maps) are shared.
-; copy creates an independent value.
-a-block: [1 2 3]
-b-block: a-block
-append b-block 4
-print length a-block                     ; 4 (same block!)
+; --- Lit-word match ---
+print match 'north [
+  ['north] ["going up"]
+  ['south] ["going down"]
+  default  ["elsewhere"]
+]
+; going up
 
-c-block: copy a-block
-append c-block 5
-print length a-block                     ; 4 (independent)
-print length c-block                     ; 5
+; --- Destructuring blocks ---
+print match [age 30] [
+  ['age n [integer!]] [rejoin ["age: " n]]
+  default             ["unknown"]
+]
+; age: 30
 
-; --- merge ---
-; merge creates a new context from two sources. Second overwrites first.
-; Skips none values (useful with capture results).
-; merge/freeze returns an object! instead of context!.
-
-defaults: context [name: "Unknown" hp: 100 attack: 10]
-overrides: context [name: "Warrior" hp: 200]
-result: merge defaults overrides
-print result/name                       ; Warrior
-print result/hp                         ; 200
-print result/attack                     ; 10 (not in overrides, kept)
-
-; merge/deep copies blocks and contexts instead of sharing.
-
-; --- @compose ---
-; @compose evaluates parens inside a block. If a paren
-; result is a block, its contents are SPLICED in (Rebol
-; convention). Use /only to insert as a single element.
-; /deep recurses into nested blocks.
-
-val: 42
-code: @compose [print (val)]             ; => [print 42]
-print second code                       ; 42
-
-; Splice vs /only
-items: [1 2 3]
-probe @compose [before (items) after]         ; [before 1 2 3 after]
-probe @compose/only [before (items) after]    ; [before [1 2 3] after]
-
-; /deep -- evaluates parens inside nested blocks too
-inner-val: "nested"
-deep-code: @compose/deep [outer [(inner-val)] done]
-probe second deep-code                  ; [nested]
+; --- Guards ---
+classify: function [n] [
+  match n [
+    [x when [x < 0]] ["negative"]
+    [0]              ["zero"]
+    [x when [x > 100]] ["huge"]
+    default          ["normal"]
+  ]
+]
+print classify -3                       ; negative
+print classify 0                        ; zero
+print classify 42                       ; normal
+print classify 500                      ; huge
 
 
 ; ============================================================
@@ -1194,21 +1204,13 @@ probe second deep-code                  ; [nested]
 ; make stamps mutable instances (context!) from objects.
 ; Objects are immutable -- mutation raises 'frozen error.
 ;
-; Convention: objects use PascalCase -- Person, Card,
-; Reader. This distinguishes them from regular words.
+; Convention: objects use PascalCase (Person, Card, Reader)
+; to distinguish from regular words.
 ;
-; If you need runtime customization, write a constructor:
-;   make-warrior: function [name [string!]] [
-;     w: make Unit [name: name class: "warrior"]
-;     w/attack: w/attack + 5    ; modify the mutable instance
-;     w
-;   ]
-;
-; Field declarations -- three forms:
-;
-;   field/required [name [type!]]              -- one required field
-;   field/optional [name [type!] default]      -- one optional field (default evaluated)
-;   fields [                                   -- bulk declaration
+; Field declarations:
+;   field/required [name [type!]]              - one required field
+;   field/optional [name [type!] default]      - one optional field (default evaluated)
+;   fields [                                   - bulk declaration
 ;     required [name [type!] ...]
 ;     optional [name [type!] default ...]
 ;   ]
@@ -1216,7 +1218,7 @@ probe second deep-code                  ; [nested]
 ; Everything after field declarations is the body (methods).
 ; Methods access the instance via self (lexically bound).
 
-; --- Object with singular field syntax ---
+; --- Singular field syntax ---
 
 Counter: object [
   field/optional [n [integer!] 0]
@@ -1233,7 +1235,6 @@ print c/value                           ; 2
 ; --- Chain operator -> ---
 ; obj -> method args is equivalent to obj/method args.
 ; In Lua compilation, obj -> method emits obj:method().
-; Chaining: each -> passes the result to the next call.
 
 c2: make Counter []
 c2 -> increment
@@ -1255,16 +1256,16 @@ Person: object [
   ]
 ]
 
-p: make Person [name: "Ray" age: 30]
-print p/greet                           ; Hi, I'm Ray age 30
-p/birthday
-print p/age                             ; 31
+per: make Person [name: "Ray" age: 30]
+print per/greet                         ; Hi, I'm Ray age 30
+per/birthday
+print per/age                           ; 31
 
-; --- Clone from an instance ---
-p2: make p [age: 25]
-print p2/name                           ; Ray
-print p2/age                            ; 25
-print p/age                             ; 31 (original unchanged)
+; Clone from an instance
+per2: make per [age: 25]
+print per2/name                         ; Ray
+print per2/age                          ; 25
+print per/age                           ; 31
 
 ; --- Mixed required and defaulted fields ---
 
@@ -1288,7 +1289,7 @@ print acct/summary                      ; Ray: $100.00
 acct2: make Account [owner: "Jo" balance: $50.00]
 print acct2/summary                     ; Jo: $50.00
 
-; --- Bulk field declaration with fields [...] ---
+; --- Bulk field declaration ---
 
 Enemy: object [
   fields [
@@ -1309,97 +1310,55 @@ Enemy: object [
 ]
 
 goblin: make Enemy [name: "Goblin" pos: 10x20]
-print goblin/hp                          ; 100 (default)
-print goblin/state                       ; idle (default)
+print goblin/hp                         ; 100
+print goblin/state                      ; idle
 goblin/damage 25
-print goblin/hp                          ; 75
+print goblin/hp                         ; 75
 
 ; --- Auto-generation ---
 ; When assigned to a set-word, object auto-generates:
-;   person!       -- custom type predicate
-;   make-person   -- constructor function
+;   person!       - predicate type value (is? person! v)
+;   person?       - predicate function
 ;
-; Person: object [...] generates person! and make-person.
-; make-person takes required field values in declaration order.
-;
-; is? checks structural compatibility:
-;   is? :Person p    ; true if p has all Person fields
+; is? person! v is true if v has all fields of Person.
 
-; --- No object chains ---
-; make is a stamp. No delegation, no inheritance.
-; Instances don't know where they came from.
-; Compose via embedding:
+; --- No inheritance ---
+; make is a stamp. No delegation, no chains. Compose via embedding.
 ;
-; Damageable: object [
-;   field/optional [hp [integer!] 100]
-;   damage: function [amount [integer!]] [self/hp: self/hp - amount]
-; ]
-; Enemy: object [
-;   field/required [stats [context!]]
-;   field/optional [speed [float!] 40.0]
-; ]
-; goblin: make Enemy [stats: make Damageable []]
-; goblin/stats/damage 10
-; goblin/stats/hp                       ; 90
+;   Damageable: object [
+;     field/optional [hp [integer!] 100]
+;     damage: function [amount] [self/hp: self/hp - amount]
+;   ]
+;   Enemy: object [
+;     field/required [stats [context!]]
+;     field/optional [speed [float!] 40.0]
+;   ]
 
 ; --- self is bound at make time ---
 ; self is a regular word pointing to the instance. Each
-; instance's methods have their own self. self cannot be
-; rebound (self: x is an error inside methods).
-; self can be passed to functions: do-something self
-
-; --- Lifecycle hooks ---
-; @enter and @exit are meta-words that fire at scope
-; boundaries inside any evaluated block.
-;
-;   @enter [block]  - runs when entering a scope (once)
-;   @exit  [block]  - runs when leaving a scope (once, always
-;                     runs, even on error -- like finally)
-;
-; @exit is the primary resource cleanup mechanism.
-
-scope [
-  @enter [print "entering scope"]
-  @exit  [print "exiting scope"]
-  print "inside scope"
-]
-; entering scope
-; inside scope
-; exiting scope
-
-; Resource cleanup example:
-;   if true [
-;     @enter [resource: acquire-lock "database"]
-;     @exit  [release-lock resource]
-;     result: query resource "SELECT * FROM users"
-;     print result
-;   ]
+; instance's methods have their own self. self: x is a
+; 'self error inside methods.
 
 
 ; ============================================================
 ; PARSE DIALECT
 ; ============================================================
 ; Rule-based pattern matching on strings and blocks.
-; One system, two modes -- same combinators for both.
-; The only difference is what "an element" means:
-; a character in strings, a value in blocks.
+; Same combinators for both modes.
 ;
-; Parse returns a context! with:
-;   ok       -- logic! (true if rules matched full input)
+; Returns a context! with:
+;   ok       - logic! (true if rules matched full input)
 ;   plus any set-word captures and collect results.
 ;
-; Captures go into the returned context, NOT the caller's
-; scope. This is intentional -- dialects don't silently
-; modify the caller.
-;
+; Captures go into the returned context, NOT the caller's scope.
 ; Use @parse/ok? to get a bare logic! result.
 ;
 ; Combinators:
 ;   |         - ordered alternative (lowest precedence)
 ;   end       - match end of input
 ;   skip      - match any single element
-;   some      - one or more matches (greedy, backtracks like REBOL)
-;   any       - zero or more matches (greedy, backtracks like REBOL)
+;   some      - one or more (greedy, backtracks)
+;   any       - zero or more (greedy, backtracks)
 ;   opt       - zero or one match
 ;   not       - negative lookahead (doesn't consume)
 ;   ahead     - positive lookahead (doesn't consume)
@@ -1416,75 +1375,210 @@ scope [
 ;   (...)     - evaluate expression as side effect
 ;   [...]     - sub-rule grouping
 ;
-; String character classes:
-;   alpha digit space upper lower alnum newline
-;
-; Block matching extras:
-;   'word   - match literal word
-;   type!   - match by datatype
-;
-; Custom character classes:
-;   charset "abc"           - set of characters
-;   charset [alpha "_"]     - set combining classes + chars
+; String character classes: alpha digit space upper lower alnum newline
+; Block matching extras: 'word (literal word), type! (datatype)
+; Custom character classes: charset "abc", charset [alpha "_"]
 
 ; --- String parsing ---
 
-result: @parse "hello" [some alpha]
-print result/ok                         ; true
+r1: @parse "hello" [some alpha]
+print r1/ok                             ; true
 
-result: @parse "abc123" [some alpha]
-print result/ok                         ; false (digits unconsumed)
+r2: @parse "abc123" [some alpha]
+print r2/ok                             ; false (digits unconsumed)
 
-; --- Captures go into returned context ---
-
-result: @parse "user@example.com" [
+; Captures
+r3: @parse "user@example.com" [
   name: some [alpha | digit | "."]
   "@"
   domain: some [alpha | digit | "." | "-"]
 ]
-print result/ok                         ; true
-print result/name                       ; user
-print result/domain                     ; example.com
-
-; set-word inside some -- last match wins
-result: @parse "1,2,3" [some [num: some digit opt ","]]
-print result/num                        ; 3
+print r3/ok                             ; true
+print r3/name                           ; user
+print r3/domain                         ; example.com
 
 ; --- Block parsing ---
 
-result: @parse [name "Alice" age 25] [
+r4: @parse [name "Alice" age 25] [
   'name who: string!
   'age years: integer!
 ]
-print result/ok                         ; true
-print result/who                        ; Alice
-print result/years                      ; 25
+print r4/ok                             ; true
+print r4/who                            ; Alice
+print r4/years                          ; 25
 
 ; --- Collect/keep ---
-; collect/keep for explicit accumulation. Must be named
-; with a set-word -- unnamed collect discards values.
 
-result: @parse [1 "a" 2 "b" 3] [
+r5: @parse [1 "a" 2 "b" 3] [
   nums: collect [some [keep integer! | skip]]
 ]
-print result/nums                       ; [1 2 3]
+print r5/nums                           ; [1 2 3]
 
 ; --- Composable rules ---
-; Store rules in words and reference them by name.
 digit-run: [some digit]
-result: @parse "12345" digit-run
-print result/ok                         ; true
+r6: @parse "12345" digit-run
+print r6/ok                             ; true
 
 ; --- @parse/ok? refinement ---
 ; Returns bare logic! when you only care about success.
 if @parse/ok? "12345" [some digit] [print "all digits"]
 
-; --- Backtracking ---
-; some and any are greedy but backtrack on failure, like REBOL.
-; @parse "aab" [some "a" "ab"] succeeds: some matches "a",
-; then backtracks to let "ab" match the rest.
-; Caution: deeply nested some/any can cause exponential
-; backtracking on pathological inputs.
+
+; ============================================================
+; BLOCKS & HOMOICONICITY
+; ============================================================
+; Code is data. Data is code. Blocks hold either without
+; evaluating them. This is the foundation for every dialect
+; and for metaprogramming.
+
+data: [print "Hello"]
+
+; Inspect code as data
+print length data                        ; 2
+print first data                        ; print (a word!)
+print second data                       ; Hello (a string)
+
+; --- reduce: evaluate every expression ---
+; Returns a block of results.
+x: 10
+r: reduce [x + 1 x * 2 "hello"]
+print first r                           ; 11
+print second r                          ; 20
+print third-pick: pick r 3              ; hello
+
+; --- @compose: template with paren interpolation ---
+; Evaluates parens inside the block. A block result is spliced
+; (Rebol convention). Use /only to insert as a single element.
+; /deep recurses into nested blocks.
+
+val: 42
+code: @compose [print (val)]             ; => [print 42]
+print second code                       ; 42
+
+; Splice vs /only
+items-c: [1 2 3]
+probe @compose [before (items-c) after]         ; [before 1 2 3 after]
+probe @compose/only [before (items-c) after]    ; [before [1 2 3] after]
+
+; /deep -- evaluates parens inside nested blocks too
+inner-val: "nested"
+deep-code: @compose/deep [outer [(inner-val)] done]
+probe second deep-code                  ; [nested]
+
+
+; ============================================================
+; TEMPLATES
+; ============================================================
+; @template declares a compile-time macro: the body is
+; auto-wrapped in @compose, so (paren) interpolation splices
+; arguments into the produced block. Expansion happens at the
+; call site before evaluation.
+;
+; @template/deep and @template/only select @compose/deep and
+; @compose/only respectively:
+;   /deep  - interpolate inside nested blocks
+;   /only  - treat generated tokens as single elements
+
+@template unless-macro: [cond body [block!]] [
+  if not (cond) (body)
+]
+
+unless-macro (3 > 5) [print "3 is not greater than 5"]
+
+; Wrap a body with before/after logic via /deep
+@template/deep with-timing: [label [string!] body [block!]] [
+  print rejoin ["[" (label) "] start"]
+  (body)
+  print rejoin ["[" (label) "] end"]
+]
+
+with-timing "test" [
+  print 1 + 2
+]
+; [test] start
+; 3
+; [test] end
+
+
+; ============================================================
+; PREPROCESSING & COMPILATION
+; ============================================================
+; Preprocessing runs before evaluation. The preprocessor is
+; the full Kintsugi language -- not a limited macro system.
+;
+; Forms:
+;   @preprocess [block]  - evaluate block at compile time; emit
+;                          splices generated code into the output
+;   @inline [expr]       - evaluate expr at compile time, splice result
+;
+; Available inside @preprocess:
+;   system/platform  - 'script (interpreter) or 'lua (compiler)
+;   emit             - inject a block into the output program
+
+@preprocess [
+  either system/platform = 'script [
+    emit [print "Running in Script mode"]
+  ] [
+    emit [print "Running on Lua"]
+  ]
+]
+
+; Code generation -- generate get-name, get-age, get-email
+@preprocess [
+  loop [
+    for [field] in [name age email] do [
+      emit @compose [
+        (to set-word! join "get-" field) function [obj] [
+          select obj (to lit-word! field)
+        ]
+      ]
+    ]
+  ]
+]
+
+; Inline preprocess -- inject a single value
+pp-val: @inline [1 + 2]                 ; pp-val = 3 at preprocess time
+print pp-val                            ; 3
+
+; Block splicing -- @compose a whole function definition inline
+@inline [@compose [(to set-word! "pp-double") function [x] [x * 2]]]
+print pp-double 5                       ; 10
+
+; --- system: platform and environment ---
+; system is a mutable context available everywhere (not just preprocess).
+print system/platform                   ; 'script (in interpreter)
+
+; Environment variables are auto-populated from the OS:
+;   print system/env/HOME               ; /home/raycat
+;   system/env/MY_APP_MODE: "debug"     ; program-scoped, not OS-level
+
+; --- raw: emit verbatim Lua (compile-time only) ---
+; raw writes a string directly to the compiled Lua output.
+; In the interpreter, it is a no-op.
+raw "-- This is a Lua comment"
+;   raw {import "CoreLibs/graphics"}    ; Playdate SDK import
+;   raw {local ffi = require("ffi")}    ; LuaJIT FFI
+
+; --- Bindings dialect ---
+; bindings declares foreign API names for compilation targets.
+; In Script mode, bindings register placeholder natives so code
+; parses without errors. In Lua mode, they emit the correct
+; Lua paths and calling conventions.
+;
+; Each 'call binding has a fixed arity. Wrap in parens for extra args:
+;   (draw-text "hello" 10 20)
+;
+; Syntax:
+;   bindings [
+;     name  "lua.path"  'call arity       ; callable, fixed arity
+;     name  "lua.path"  'const            ; read-only value
+;     name  "lua.path"  'alias            ; local alias
+;     name  "lua.path"  'assign           ; callback assignment (1 arg)
+;     name  "lua.path"  'override         ; function definition form
+;   ]
+;
+; 'assign emits:   lua.path = function(...) ... end
+; 'override emits: function lua.path(...) ... end
 
 
 ; ============================================================
@@ -1492,19 +1586,15 @@ if @parse/ok? "12345" [some digit] [print "all digits"]
 ; ============================================================
 ; @game is the structural dialect for writing games.
 ; It handles entity groups, state, collision, and the
-; update/draw/frame loop. It does not provide a cross-platform
-; input or graphics API beyond the auto-rect entity draw.
+; update/draw loop. It emits clean target-native Lua.
 ;
 ; Target is a compile flag, not a source field:
 ;   kintsugi -c game.ktg --target=love2d
 ;   kintsugi -c game.ktg --target=playdate
 ;
-; @game is compile-time only. Using it in the REPL or
-; interpret mode is a hard error.
-;
-; The snippet below does not execute in this full-spec run
-; (there is no --target), so it is wrapped in a comment.
-; Uncomment and compile with --target=love2d to try it.
+; @game is compile-time only. Using it in interpret mode is
+; a hard error. The snippet below is wrapped in a data block
+; so this spec runs without compilation.
 
 _game-demo: [
 @game [
@@ -1514,10 +1604,9 @@ _game-demo: [
     PADDLE-SPEED: 420
   ]
 
-  ; `group 'main [...]` classifies every entity inside with the
-  ; `main` tag. It's a compile-time tag wrapper -- no runtime
-  ; scene concept. Use multiple groups to organize entities and
-  ; target them from `collide <ent> '<group> [...]`.
+  ; group 'main [...] classifies every entity with the main tag.
+  ; Compile-time tag wrapper -- no runtime scene concept. Target
+  ; groups with collide <ent> '<group> [...].
   group 'main [
     ; state block lifts to top-level locals in the output
     state [
@@ -1555,7 +1644,7 @@ _game-demo: [
     ]
 
     ; collide expands to AABB checks over tagged entities.
-    ; `it/<field>` refers to the other entity in the pair.
+    ; it/<field> refers to the other entity in the pair.
     collide ball 'paddle [
       ball/dx: negate ball/dx
       ball/dy: (ball/y - it/y) / 40
@@ -1580,49 +1669,24 @@ love/keypressed: function [key] [
 ]
 ]
 
-; Custom entity draw override (replaces the auto-rect for that entity):
-;
-;   entity player [
-;     pos 20 260  rect 12 80  color 0.9 0.9 1
-;     draw [
-;       love/graphics/setColor 1 0 0 1
-;       love/graphics/rectangle 'line self/x self/y self/w self/h
-;       love/graphics/print "P1" self/x (self/y - 12)
-;     ]
-;   ]
-;
-; Any draw block that references target-native words (love/... or
-; playdate/...) implicitly locks the file to that target. Compile
-; with the wrong --target and you get a clean unbound-name error.
+; --- destroy and _alive ---
+; Every entity context carries an implicit _alive: true field.
+; destroy self (in update) or destroy <name> (anywhere) rewrites
+; to <target>/_alive: false. Each per-entity update and draw
+; wraps in if <entity>/_alive [...], so destroyed entities
+; silently stop being processed. _alive is a reserved field name.
 
 ; --- Components via @template ---
-;
 ; A "component" is a template that expands into entity-body
 ; vocabulary. When parseEntity sees an unknown word inside an
 ; entity block, it asks the preprocessor whether the word is a
 ; registered template and splices the expansion inline.
-;
-; @template is the canonical form for named, declarative code
-; generation. The body is auto-wrapped in @compose, so (paren)
-; interpolation splices arguments into the produced block.
-;
-; Refinements /deep and /only select the @compose mode when
-; simple paren-splicing is not what you want:
-;
-;   @template/deep  ...  -> @compose/deep
-;   @template/only  ...  -> @compose/only
-;
-; Define a health component that adds hp + max-hp fields and
-; auto-destroys the entity when hp reaches zero:
 ;
 ;   @template health: [amount [integer!]] [
 ;     field hp (amount)
 ;     field max-hp (amount)
 ;     update [if self/hp <= 0 [destroy self]]
 ;   ]
-;
-; Define a timeout component that self-destructs after N frames:
-;
 ;   @template timeout: [frames [integer!]] [
 ;     field _age 0
 ;     update [
@@ -1631,162 +1695,144 @@ love/keypressed: function [key] [
 ;     ]
 ;   ]
 ;
-; Compose multiple components on one entity:
-;
+; Compose on one entity:
 ;   entity bullet [
 ;     pos 100 100  rect 4 4  color 1 1 0
 ;     health 1
 ;     timeout 120
 ;     tags [projectile]
 ;   ]
-;
-; After macro expansion, the entity body is just field / update /
-; tags forms the dialect already knows. Multiple update blocks
-; accumulate and run in declaration order each frame.
-
-; --- destroy and _alive ---
-;
-; Every entity context carries an implicit _alive: true field.
-; `destroy self` (in an update body) or `destroy <name>` (anywhere)
-; rewrites to `<target>/_alive: false`. Each per-entity update and
-; draw statement wraps in `if <entity>/_alive [...]`, so a destroyed
-; entity silently stops being processed. No runtime registry, no
-; spawn - just a skip marker that works for collision kills and
-; timeout despawn.
-;
-; `_alive` is a reserved field name; `field _alive ...` errors.
 
 ; --- collide/using for custom collision shapes ---
-;
-; Default `collide` uses AABB on pos + rect. For anything else,
+; Default collide uses AABB on pos + rect. For anything else,
 ; use /using with a user predicate:
-;
 ;   circle-hit?: function [a b] [
 ;     dx: a/x - b/x
 ;     dy: a/y - b/y
 ;     (dx * dx + dy * dy) < (a/r + b/r) * (a/r + b/r)
 ;   ]
-;
 ;   collide/using ball 'enemy circle-hit? [
 ;     destroy it
 ;     score: score + 1
 ;   ]
+
+
+; ============================================================
+; MODULES & HEADERS
+; ============================================================
+; Two primitives: import (cached module loading) and load
+; (raw file reading). Stdlib is reached ONLY via import.
+
+; --- import: the primary mechanism ---
 ;
-; The dialect calls `circle-hit? ball <other>` in place of the AABB
-; test. The collide body still gets `it/<field>` substitution and
-; alive-check wrapping.
+; import 'name                - load stdlib module as context
+; import/using 'name [syms]   - splice selected exports as bare words
+; import %path                - load a local file as context (cached)
+; import/fresh %path          - bypass cache, reload the file
+; import ['a 'b 'c]           - bulk import stdlib modules
 
+; Stdlib module (context)
+import 'math
+print math/clamp 15 0 10                ; 10
+print math/lerp 0 100 0.5               ; 50
 
-; ============================================================
-; BLOCKS & HOMOICONICITY
-; ============================================================
-; Code is data. Data is code. Blocks hold code or data
-; without evaluating.
+; Stdlib with /using (bare words)
+import/using 'math [clamp lerp]
+print clamp 42 0 10                     ; 10
+print lerp 0 100 0.25                   ; 25
+
+; Bulk
+; import ['math 'collections]
+; print math/clamp 5 0 10
+; print collections/range 1 5
+
+; Local file (path, not a lit-word)
+;   sprites: import %lib/sprites.ktg
+;   sprites/draw player
+
+; --- load: raw reader ---
 ;
-; Metaprogramming happens at compile time via @compose,
-; @parse, and @preprocess. The preprocessor is the full
-; language — it generates the static code that gets compiled.
-
-data: [print "Hello"]
-
-; Inspect code as data
-print length data                        ; 2
-print first data                        ; print (a word!)
-print second data                       ; Hello (a string)
-
-; @compose -- evaluate parens in a block template
-target: "Alice"
-code: @compose [greet (target) 42]       ; => [greet "Alice" 42]
-print second code                       ; Alice
-
-; reduce -- evaluate every expression, return results block
-result: reduce [1 + 2 3 * 4 "hello"]
-print first result                      ; 3
-print second result                     ; 12
-
-
-; ============================================================
-; TEMPLATES
-; ============================================================
-; @template declares a compile-time template: the body is
-; auto-wrapped in @compose so (paren) interpolation splices
-; arguments into the generated block. The expansion happens at
-; the call site.
+; load %file             - parse, return block! (AST)
+; load/eval %file        - evaluate, return context!
+; load/header %file      - return just the Kintsugi header block
+; load/freeze %file      - evaluate, return frozen object!
 ;
-; @template/deep and @template/only select @compose/deep and
-; @compose/only respectively -- use /deep to interpolate inside
-; nested blocks, and /only when generated tokens like set-words
-; must not themselves be composed.
+; load does NOT cache. Every call reparses the file.
+; Use import for cached context loading.
 
-@template unless: [cond body [block!]] [
-  if not (cond) (body)
-]
+; --- Module file structure ---
+;
+;   Kintsugi []                          ; header -> entrypoint
+;
+;   exports [add clamp]                  ; only these are public
+;
+;   add: function [a b] [a + b]
+;   clamp: function [val lo hi] [...]
+;   helper: function [x] [x * x]         ; not exported, private
+;
+; exports is a body-level call, not a header field.
+; If exports is never called, everything is public.
 
-unless (3 > 5) [print "3 is not greater than 5"]
+; --- Caching ---
+; import caches context values by absolute path.
+; Every consumer gets the same cached context! reference.
+; import/fresh forces a reload even if cached.
 
-; Wrap a body with before/after logic via /deep:
-@template/deep with-timing: [label [string!] body [block!]] [
-  print rejoin ["[" (label) "] start"]
-  (body)
-  print rejoin ["[" (label) "] end"]
-]
+; --- Circular dependencies ---
+; Always an error:
+;   ERROR [load]: circular dependency detected: /abs/path/to/a.ktg
 
-with-timing "test" [
-  print 1 + 2
-]
-; [test] start
-; 3
-; [test] end
+; --- save + load round-trip ---
+; save %file value writes Kintsugi literals. Functions are skipped.
+;   save %save.dat player
+;   data: load %save.dat
+;   p: make Player data
 
-
-; ============================================================
-; SCOPE
-; ============================================================
-; scope creates a lexical child scope. Variables defined inside
-; don't leak out. Works with @enter/@exit lifecycle hooks.
-
-x-outer: "visible"
-scope [
-  y-inner: "scoped"
-  print x-outer                         ; visible (parent accessible)
-]
-; y-inner does not exist here
-
-; Lifecycle hooks with scope:
-scope [
-  @enter [print "entering scope"]
-  @exit  [print "exiting scope"]
-  print "inside scope"
-]
-; entering scope
-; inside scope
-; exiting scope
+; --- Header dialect ---
+; Programs may begin with a header block. The header marks the
+; file as an entrypoint. Files without headers are modules.
+;
+; When compiling (-c), entrypoints get the runtime prelude.
+; Modules don't -- they're loaded via import.
+;
+; Header contents are optional metadata for tooling.
+; Common fields:
+;   name:       - module name (lit-word)
+;   version:    - semantic version (tuple!)
+;   date:       - last-modified date
+;   file:       - source file path
+;
+; Examples:
+;   Kintsugi []                     ; entrypoint, no metadata
+;   Kintsugi [version: 1.0.0]       ; entrypoint with metadata
+;   (no header)                     ; module
 
 
 ; ============================================================
 ; I/O
 ; ============================================================
-; read and write are the unified I/O primitives.
+; read and write are the unified filesystem primitives
+; (interpreter only -- not available on JS or compiled targets).
 ;
-; read %file              -> string (file contents)
-; read/dir %path          -> block of filenames
-; read/lines %file        -> block of strings (one per line)
-; read/stdin "prompt"     -> read line from stdin
-; write %file "content"   -> write string to file
-; print value             -> print with newline
-; print/no-newline value  -> print without newline
+; read %file              - string (file contents)
+; read/dir %path          - block of filenames
+; read/lines %file        - block of strings (one per line)
+; read/stdin "prompt"     - read a line from stdin
+; write %file "content"   - write string to file
+; print value             - print with newline
+; print/no-newline value  - print without newline
+; probe value             - print value, return value (useful in pipelines)
 ;
-; save %file value        -> serialize value to file (round-trips with load/eval)
-; load %file              -> parse file as Kintsugi data (block)
-; load/eval %file         -> evaluate -> mutable context!
+; save %file value        - serialize value to file
+; load %file              - parse file as Kintsugi data (block)
+; load/eval %file         - evaluate, return context!
 ;
-; dir? %path              -> logic! (is it a directory?)
-; file? %path             -> logic! (is it a file?)
-; exit N                  -> quit with exit code
+; dir? %path              - logic! (is it a directory?)
+; file? %path             - logic! (is it a file?)
+; exit N                  - quit with exit code
 
-; Live examples:
 print/no-newline "hello "
-print "world"                           ; hello world (on one line)
+print "world"                           ; hello world
 
 ; read/stdin example (cannot run non-interactively):
 ;   name: read/stdin "What is your name? "
@@ -1794,206 +1840,7 @@ print "world"                           ; hello world (on one line)
 
 ;   write %temp.txt "Hello from Kintsugi"
 ;   contents: read %temp.txt
-;   print contents                        ; Hello from Kintsugi
 ;   entries: read/dir %lib                ; [collections.ktg math.ktg ...]
-
-
-; ============================================================
-; PREPROCESSING & COMPILATION
-; ============================================================
-; Preprocessing runs before evaluation. The preprocessor is
-; the full Kintsugi language -- not a limited macro system.
-;
-; Two forms:
-;   @preprocess [block]  -- evaluate block; emit injects code
-;   @inline [expr]              -- inline; evaluate expr, inject result
-;
-; Available in the preprocess context:
-;   system/platform  - current target ('script or 'lua)
-;   emit             - inject a block into the output program
-
-@preprocess [
-  either system/platform = 'script [
-    emit [print "Running in Script mode"]
-  ] [
-    emit [print "Running on Lua"]
-  ]
-]
-
-; Code generation -- generates get-name, get-age, get-email
-@preprocess [
-  loop [
-    for [field] in [name age email] do [
-      emit @compose [
-        (to set-word! join "get-" field) function [obj] [
-          select obj (to lit-word! field)
-        ]
-      ]
-    ]
-  ]
-]
-
-; Inline preprocess -- inject values at preprocess time
-; @inline [expr] evaluates expr during preprocessing and splices
-; the result into the code stream. If the result is a block,
-; its contents are spliced (multiple nodes). Otherwise the
-; single value is spliced.
-pp-val: @inline [1 + 2]                        ; pp-val = 3 (computed at preprocess time)
-print pp-val                            ; 3
-
-; Block splicing -- @compose a whole function definition inline
-@inline [@compose [(to set-word! "pp-double") function [x] [x * 2]]]
-print pp-double 5                       ; 10
-
-; Platform values:
-;   interpreter          -> system/platform = 'script
-;   compiled via -c      -> system/platform = 'lua
-
-; --- system: platform and environment ---
-; system is a mutable context available everywhere (not just preprocess).
-; system/platform tells you what runtime you're on.
-; system/env gives path access to environment variables.
-
-print system/platform                   ; 'script (in interpreter)
-
-; Environment variables are auto-populated from the OS:
-; print system/env/HOME                 ; /home/raycat
-; print system/env/PATH                 ; /usr/bin:...
-
-; You can set env vars locally (program-scoped, not OS-level):
-; system/env/MY_APP_MODE: "debug"
-; print system/env/MY_APP_MODE          ; debug
-
-; --- raw: emit verbatim Lua (compile-time only) ---
-; raw writes a string directly to the compiled Lua output.
-; In the interpreter, it is a no-op.
-raw "-- This is a Lua comment"
-;   raw {import "CoreLibs/graphics"}    ; Playdate SDK import
-;   raw {local ffi = require("ffi")}    ; LuaJIT FFI
-
-; --- Bindings dialect ---
-; bindings declares foreign API names for compilation targets.
-; In Script mode, bindings register placeholder natives so
-; the code parses without errors. In Lua mode, they emit
-; the correct Lua paths and calling conventions.
-;
-; Each 'call binding has a fixed arity. For calls that need
-; more args than declared, wrap in parens:
-;   (draw-text "hello" 10 20)
-;
-; Syntax:
-;   bindings [
-;     name  "lua.path"  'call arity       ; callable, fixed arity
-;     name  "lua.path"  'const            ; read-only value
-;     name  "lua.path"  'alias            ; local alias declaration
-;     name  "lua.path"  'assign           ; callback assignment (1 arg)
-;     name  "lua.path"  'override         ; function definition form
-;   ]
-;
-; 'assign emits:   lua.path = function(...) ... end
-; 'override emits: function lua.path(...) ... end
-;
-; Example for Playdate SDK:
-;   bindings [
-;     update-sprites  "playdate.graphics.sprite.update"  'call 0
-;     draw-text       "playdate.graphics.drawText"       'call 3
-;     display-width   "playdate.display.getWidth"        'const
-;     key-pressed     "playdate.buttonIsPressed"         'call 1
-;   ]
-
-
-; ============================================================
-; MODULES & HEADERS
-; ============================================================
-; load is the universal file-reading primitive.
-; Refinements determine how the file is processed:
-;
-;   load %file             -- parse as data, return context!
-;   load/eval %file        -- evaluate + cache = context!
-;   load/header %file      -- return just the header block
-;   load/fresh %file       -- skip cache for one call
-;   import/fresh %file    -- import, bypassing cache
-;
-; import is sugar for load/eval/cache. load is
-; the primitive. Results are cached context! values,
-; cached by absolute path.
-; import/fresh forces a reload even if the module is cached.
-;
-; Example:
-;   math: load/eval %lib/math.ktg
-;   math/add 3 4                        ; 7
-;
-; --- Module file structure ---
-;
-;   Kintsugi []
-;
-;   exports [add clamp]                 ; only these are public
-;
-;   add: function [a b] [a + b]
-;   clamp: function [val lo hi] [min hi max lo val]
-;   helper: function [x] [x * x]       ; not exported, private
-;
-; exports is a body-level word, not a header field.
-; If exports is never called, everything is public.
-;
-; --- Caching ---
-; load/eval caches by fully resolved absolute path.
-; Every consumer gets the same cached context! reference.
-;
-; --- Circular dependencies ---
-; Always an error:
-;   ERROR 'load: circular dependency: %a.ktg -> %b.ktg -> %a.ktg
-;
-; --- Serialization ---
-; save %file data writes context data as Kintsugi literals.
-; Functions are skipped -- behavior comes from the object.
-;   save %save.dat player
-;   ; reload:
-;   data: load %save.dat
-;   p: make Player data
-
-; --- Header dialect ---
-; Programs may begin with a header block. The header marks
-; the file as an entrypoint. Files without headers are modules.
-;
-; When compiling (-c), entrypoints get the runtime prelude.
-; Modules don't -- they're loaded via import.
-;
-; Header contents are optional metadata for tooling.
-; No required fields.
-;
-; Common fields:
-;   name:       - module name (lit-word)
-;   version:    - semantic version (tuple!)
-;   date:       - last-modified date
-;   file:       - source file path
-;   using:      - stdlib modules to unwrap as bare words
-;
-; Examples:
-;   Kintsugi []                         ; entrypoint, no metadata
-;   Kintsugi [version: 1.0.0]          ; entrypoint with metadata
-;   Kintsugi [using: [math]]           ; unwraps std/math into scope
-;   (no header)                         ; module
-
-; --- Standard Library ---
-; The stdlib is silently namespaced under std/.
-; Always available without importing:
-;
-;   std/math/clamp 5 0 10
-;   std/math/lerp 0 100 0.5
-;   std/collections/range 1 10
-;   std/collections/unique [1 2 1 3]
-;
-; To use stdlib words without the std/ prefix, add using:
-; to the header:
-;
-;   Kintsugi [using: [math collections]]
-;   clamp 5 0 10            ; bare word, unwrapped from std/math
-;   range 1 10              ; bare word, unwrapped from std/collections
-;
-; User modules are always explicit:
-;   sprites: import %lib/sprites.ktg
-;   sprites/draw player
 
 
 ; ============================================================
@@ -2004,15 +1851,14 @@ raw "-- This is a Lua comment"
 
 ; --- For C-style developers ---
 
-; Functions consume arguments greedily.
-; No parens on calls. Functions eat N values from the stream.
+; Functions consume arguments greedily. No parens on calls.
 ; f a b means "call f with a and b", not "f; then a; then b".
 ; You cannot have optional positional arguments -- functions
 ; always consume their full arity.
 ;   add 1 2                ; calls add with 1 and 2
 ;   add 1 add 2 3          ; calls add with 1 and (add 2 3) = 5
 
-; replace replaces ALL occurrences (unlike C's strtok or JS's replace).
+; replace replaces ALL occurrences.
 print replace "aabaa" "a" "x"           ; xxbxx
 
 ; Equality is structural -- blocks, pairs, tuples compare by value.
@@ -2024,53 +1870,44 @@ print if 0 ["zero is truthy"]          ; zero is truthy
 print if "" ["empty string is truthy"] ; empty string is truthy
 print if [] ["empty block is truthy"]  ; empty block is truthy
 
-; to integer! true is ERROR.
-; Numbers and logic are different domains. Use either or
-; comparison instead.
+; to integer! true is ERROR. Numbers and logic are different
+; domains. Use either or comparison:
 ;   either flag [1] [0]                 ; correct
 ;   to integer! true                    ; ERROR
 
-; See Evaluation Model above for: no operator precedence,
-; division return type, and/or non-short-circuit behavior.
-; See Series Operations above for: append on blocks (strings are immutable).
+; and/or do not short-circuit. Both operands always evaluate.
+; Use all?/any? with a block for short-circuit behavior.
 
 ; --- For Rebol/Red developers ---
 
-; No char! type. Single characters are just string! values.
+; No char! type. Single characters are string! values.
 ; Use byte/char for code conversion:
 ;   byte "A"    -> 65
 ;   char 65     -> "A"
 
-; object uses field keyword with typed fields.
-; See Object Dialect above for the full object model.
+; object uses the field keyword with typed fields.
+; See OBJECT DIALECT above for the full object model.
 
-; first [hello] returns word!, not lit-word!
-; Extraction from blocks preserves the original type.
-; 'hello (a lit-word!) and first [hello] (a word!) are
-; different subtypes, so 'hello = first [hello] is false.
+; first [hello] returns word!, not lit-word!. 'hello (lit-word!)
+; and first [hello] (word!) are different subtypes, so
+; 'hello = first [hello] is false. Compare by name:
+;   (to string! 'hello) = (to string! first [hello])
 
-; Word equality is same-subtype only.
-; 'hello = 'hello is true (both lit-words).
-; 'hello = first [hello] is false (lit-word vs word).
-; Compare names: (to string! 'hello) = (to string! first [hello])
+; exports is a body-level call, not a header field.
 
-; exports is a body-level word, not a header field.
+; import is a NATIVE with /using and /fresh refinements.
+; import/using 'math [clamp] splices bare words into scope.
+; There is NO std/ auto-namespace -- you must import first.
 
-; See Contexts & Binding above for: set-word write-through scoping.
-; See Loop Dialect above for: loop variables are scoped.
-; See Error Handling above for: try returns a context.
-; See Parse Dialect above for: parse returns a context.
-; See Datatypes above for: money! is cents-based.
-; See Modules above for: import = load/eval/cache.
+; load does not cache. Use import for cached module loading.
 
 
 ; ============================================================
 ; PUTTING IT ALL TOGETHER
 ; ============================================================
 
-; --- Quicksort (manual) ---
-; Kintsugi has built-in sort. This shows off
-; loop/partition and recursion.
+; --- Quicksort ---
+; loop/partition + recursion.
 
 qsort: function [blk] [
   if (length blk) <= 1 [return blk]
@@ -2081,7 +1918,7 @@ qsort: function [blk] [
 
 unsorted: [3 1 4 1 5 9 2 6 5 3]
 sorted: qsort unsorted
-probe sorted                            ; 1 1 2 3 3 4 5 5 6 9
+probe sorted                            ; [1 1 2 3 3 4 5 5 6 9]
 
 ; --- Fibonacci ---
 
@@ -2097,59 +1934,9 @@ fib: function [n] [
   seq
 ]
 
-probe fib 10                            ; 0 1 1 2 3 5 8 13 21 34
+probe fib 10                            ; [0 1 1 2 3 5 8 13 21 34]
 
-; --- Subset Types with Where Guards ---
-; @type/where [base-type!] [guard] creates a type that
-; checks the base type first, then evaluates the guard with
-; `it` bound to the value.
-
-positive!: @type/where [integer!] [it > 0]
-percentage!: @type/where [float!] [it >= 0.0 and it <= 1.0]
-
-print is? positive! 42                  ; true
-print is? positive! -5                  ; false
-print is? percentage! 0.75             ; true
-print is? percentage! 1.5              ; false
-
-; where guards compose with union types
-score!: @type/where [integer! | float!] [it >= 0]
-print is? score! 100                    ; true
-print is? score! -1                     ; false
-
-; subset types work in function parameter validation
-clamp-positive: function [n [positive!]] [n]
-print clamp-positive 42                 ; 42
-; clamp-positive -5                     ; Error [type]: n expects positive!, got integer!
-
-; match works inside where guards for type dispatch
-valid-score!: @type/where [integer! | string!] [
-  match it [
-    [integer!] [(it >= 0) and (it <= 100)]
-    [string!]  [it = "N/A"]
-    default    [false]
-  ]
-]
-print is? valid-score! 85               ; true
-print is? valid-score! -5               ; false
-print is? valid-score! "N/A"            ; true
-print is? valid-score! "bad"            ; false
-
-; where guards MUST return logic!. Returning anything else is a guard error.
-; bad!: @type/where [integer!] [it + 1]  ; Error: where guard must return logic!, got integer!
-
-; where guards must be valid for ALL members of a union.
-; If a guard doesn't apply to every type in the union, split it:
-positive!: @type/where [integer!] [it > 0]
-flexible!: @type [positive! | string!]
-print is? flexible! 42                  ; true
-print is? flexible! "hello"             ; true
-print is? flexible! -5                  ; false
-
-; --- State Machine ---
-; Objects with match for state transitions.
-
-traffic-light-color!: @type/enum ['red | 'yellow | 'green]
+; --- State machine using custom types + match ---
 
 TrafficLight: object [
   field/optional [state [traffic-light-color!] 'red]
@@ -2178,8 +1965,6 @@ light/advance
 print light/display                     ; [RED] 45s
 
 ; --- Shared state via context + set-path ---
-; The idiomatic way to mutate state from inside a function
-; or loop: put state in a context, use path access.
 
 scores: context [total: 0 count: 0]
 
@@ -2201,19 +1986,17 @@ process-name: attempt [
   then [trim it]
   then [uppercase it]
 ]
-
 print process-name "  ray  "            ; RAY
 
 ; --- Collect + filter pattern ---
 
-data: [1 2 3 4 5 6 7 8 9 10]
-
+data-c: [1 2 3 4 5 6 7 8 9 10]
 big-evens: loop/collect [
-  for [n] in data
+  for [n] in data-c
   when [n > 5 and even? n]
   do [n]
 ]
-probe big-evens                         ; 6 8 10
+probe big-evens                         ; [6 8 10]
 
 ; --- Accumulator with fold ---
 
@@ -2223,11 +2006,11 @@ print sum                               ; 150
 ; --- Safe division with try ---
 
 safe-calc: function [x y] [
-  result: try [x / y]
-  either result/ok [
-    result/value
+  r: try [x / y]
+  either r/ok [
+    r/value
   ] [
-    rejoin ["ERROR: " result/message]
+    rejoin ["ERROR: " r/message]
   ]
 ]
 print safe-calc 10 3                    ; 3.333...
