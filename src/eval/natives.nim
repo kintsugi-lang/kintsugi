@@ -1045,17 +1045,6 @@ proc registerNatives*(eval: Evaluator) =
   # type checking, required field checks, and self-binding support.
   # map!/set! handling is also there.
 
-  # --- Charset (sugar for make set! from string characters) ---
-
-  ctx.native("charset", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    if args[0].kind != vkString:
-      raise KtgError(kind: "type", msg: "charset expects string!", data: nil)
-    var members = initHashSet[string]()
-    for c in args[0].strVal:
-      members.incl($c)
-    KtgValue(kind: vkSet, setMembers: members, line: 0)
-  , compilable = false)
-
   # --- Set operations ---
 
   ctx.native("union", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =

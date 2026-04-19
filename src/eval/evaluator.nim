@@ -884,7 +884,7 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
 
       # @const value — annotate following expression as a constant binding.
       # Canonical form is `name: @const value` (parallel to @type, @type/guard,
-      # @type/where, @type/enum, @compose, @template, @parse — every meta-word
+      # @type/where, @type/enum, @compose, @template — every meta-word
       # follows the set-word).
       if val.wordName == "const":
         if pos < vals.len:
@@ -921,12 +921,6 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
               results.add(v)
           results
         return ktgBlock(composeBlock(eval, arg.blockVals, ctx, deep, only))
-
-      # @parse — parsing
-      if val.wordName == "parse":
-        let input = eval.evalNext(vals, pos, ctx)
-        let rules = eval.evalNext(vals, pos, ctx)
-        return eval.parseFn(eval, input, rules)
 
       # lifecycle hooks — for now return self
       return val

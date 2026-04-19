@@ -705,17 +705,14 @@ print m/age                               ; 30
 print has? m "name"                       ; true
 print length m                             ; 2
 
-; --- Set & Charset ---
-; set! is an unordered unique collection. charset creates a
-; set! from a string of characters (custom character classes
-; for @parse).
+; --- Set ---
+; set! is an unordered unique collection. Build via make set!.
 
-vowels: charset "aeiou"
-consonants: charset "bcdfghjklmnpqrstvwxyz"
-alphanumeric: union (charset "abcdefghijklmnopqrstuvwxyz") (charset "0123456789")
+vowels: make set! ["a" "e" "i" "o" "u"]
+digits: make set! ["0" "1" "2" "3" "4" "5" "6" "7" "8" "9"]
 
 ; union and intersect combine sets.
-combined: union vowels consonants
+alphanumeric: union vowels digits
 
 
 ; ============================================================
@@ -1427,92 +1424,6 @@ print orc/hp                            ; 90
 ; instance's methods have their own self. self: x is a
 ; 'self error inside methods.
 
-
-; ============================================================
-; PARSE DIALECT
-; ============================================================
-; Rule-based pattern matching on strings and blocks.
-; Same combinators for both modes.
-;
-; Returns a context! with:
-;   ok       - logic! (true if rules matched full input)
-;   plus any set-word captures and collect results.
-;
-; Captures go into the returned context, NOT the caller's scope.
-; For a bare logic! result, bind the result and access ok:
-;   r: @parse input rules
-;   if r/ok [...]
-;
-; Combinators:
-;   |         - ordered alternative (lowest precedence)
-;   end       - match end of input
-;   skip      - match any single element
-;   some      - one or more (greedy, backtracks)
-;   any       - zero or more (greedy, backtracks)
-;   opt       - zero or one match
-;   not       - negative lookahead (doesn't consume)
-;   ahead     - positive lookahead (doesn't consume)
-;   to        - scan to (not past) a match
-;   thru      - scan through (past) a match
-;   into      - descend into nested block
-;   quote     - match literally (escape keywords)
-;   N rule    - repeat exactly N times
-;   N M rule  - repeat between N and M times
-;   collect   - wraps rule; keep inside appends to collected
-;   keep      - inside collect, appends matched value
-;   break     - exit some/any loop with success
-;   fail      - force backtracking
-;   (...)     - evaluate expression as side effect
-;   [...]     - sub-rule grouping
-;
-; String character classes: alpha digit space upper lower alnum newline
-; Block matching extras: 'word (literal word), type! (datatype)
-; Custom character classes: charset "abc", charset [alpha "_"]
-
-; --- String parsing ---
-
-r1: @parse "hello" [some alpha]
-print r1/ok                             ; true
-
-r2: @parse "abc123" [some alpha]
-print r2/ok                             ; false (digits unconsumed)
-
-; Captures
-r3: @parse "user@example.com" [
-  name: some [alpha | digit | "."]
-  "@"
-  domain: some [alpha | digit | "." | "-"]
-]
-print r3/ok                             ; true
-print r3/name                           ; user
-print r3/domain                         ; example.com
-
-; --- Block parsing ---
-
-r4: @parse [name "Alice" age 25] [
-  'name who: string!
-  'age years: integer!
-]
-print r4/ok                             ; true
-print r4/who                            ; Alice
-print r4/years                          ; 25
-
-; --- Collect/keep ---
-
-r5: @parse [1 "a" 2 "b" 3] [
-  nums: collect [some [keep integer! | skip]]
-]
-print r5/nums                           ; [1 2 3]
-
-; --- Composable rules ---
-digit-run: [some digit]
-r6: @parse "12345" digit-run
-print r6/ok                             ; true
-
-; --- Bare success check ---
-; Bind the result and access ok when you only care about success.
-r: @parse "12345" [some digit]
-if r/ok [print "all digits"]
 
 
 ; ============================================================

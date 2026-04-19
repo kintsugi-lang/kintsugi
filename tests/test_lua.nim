@@ -404,10 +404,6 @@ suite "interpreter-only natives in compiled output":
     expect EmitError:
       discard emitLua(parseSource("""write %out.txt "hi" """))
 
-  test "charset raises compile error":
-    expect EmitError:
-      discard emitLua(parseSource("""x: charset "abc" """))
-
   test "error message includes the native name":
     try:
       discard emitLua(parseSource("save %o [1]"))

@@ -12,7 +12,6 @@ type
     moduleCache*: Table[string, KtgValue]
     moduleLoading*: HashSet[string]
     macros*: HashSet[string]   ## words declared with @template
-    parseFn*: proc(eval: Evaluator, input, rules: KtgValue): KtgValue  ## @parse implementation
     typeEnv*: Table[string, CustomType]  ## phantom type environment; @type registers here
 
   Dialect* = ref object of RootObj

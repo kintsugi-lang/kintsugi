@@ -1,6 +1,6 @@
 import ../src/core/types
 import ../src/eval/[dialect, evaluator, natives]
-import ../src/dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect, parse_dialect]
+import ../src/dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect]
 
 let eval = newEvaluator()
 eval.registerNatives()
@@ -8,7 +8,6 @@ eval.registerDialect(newLoopDialect())
 eval.registerMatch()
 eval.registerObjectDialect()
 eval.registerAttempt()
-eval.registerParse()
 
 discard eval.evalString("""
   Card: object [

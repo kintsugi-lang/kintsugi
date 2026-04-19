@@ -374,7 +374,7 @@ non-empty?: @type/guard [s] [(length s) > 0]
 adult!: @type [person!] where [(positive? it/age) and it/age >= 18]
 ```
 
-The emitter validates each `@type/guard` body locally: every head-position word must resolve to a built-in compileable native or another `@type/guard`-marked user fn. Validation is single-hop; transitivity is induction. Errors surface at the `@type/guard` declaration with the exact offending word and line - never at the consumer @type. Built-in natives carry a `compilable` flag (false for `read`, `write`, `save`, `dir?`, `file?`, `exit`, `charset`).
+The emitter validates each `@type/guard` body locally: every head-position word must resolve to a built-in compileable native or another `@type/guard`-marked user fn. Validation is single-hop; transitivity is induction. Errors surface at the `@type/guard` declaration with the exact offending word and line - never at the consumer @type. Built-in natives carry a `compilable` flag (false for `read`, `write`, `save`, `dir?`, `file?`, `exit`).
 
 **Why:** Without `@type/guard`, where-guard bodies could silently call interpreter-only natives, breaking compilation. With opt-in marking, the emitter guarantees that any guard which compiles in the source also compiles in Lua, with errors local to the edit point.
 
@@ -395,7 +395,7 @@ Helpers are tree-shaken: only helpers actually used by the entrypoint and its tr
 
 ### Interpreter-Only Features
 
-`@parse` raises a compile error in the emitter — PEG parsing requires runtime evaluation that can't be statically compiled. `@compose` raises a compile error outside of `@template` and `@preprocess` (it's a compile-time primitive, not a runtime operation). `@enter` and `@exit` raise compile errors at expression position — block-scoped lifecycle hooks are interpreter-only; place pre/post code at the top/bottom of the function body instead. Seven interpreter-only natives raise compile errors with specific hints when referenced from compiled code: `read`, `write`, `save`, `dir?`, `file?` (filesystem IO), `exit` (not portable across targets), and `charset` (only exists for `@parse`). Everything else compiles.
+`@compose` raises a compile error outside of `@template` and `@preprocess` (it's a compile-time primitive, not a runtime operation). `@enter` and `@exit` raise compile errors at expression position — block-scoped lifecycle hooks are interpreter-only; place pre/post code at the top/bottom of the function body instead. Six interpreter-only natives raise compile errors with specific hints when referenced from compiled code: `read`, `write`, `save`, `dir?`, `file?` (filesystem IO), and `exit` (not portable across targets). Everything else compiles.
 
 **Why the IO + exit natives are uncompileable despite having Lua analogues:** The analogues are not portable across our three targets. LOVE2D sandboxes filesystem access through `love.filesystem`; Playdate uses `playdate.file`; standalone Lua uses `io`/`os`. Rather than silently emit a target-specific form that breaks on the other two, the emitter refuses and the user binds the right target API explicitly via the `bindings [...]` escape hatch. The same logic applies to `exit` (LOVE2D = `love.event.quit`, Playdate = no exit). Both `InterpreterOnlyNatives` in `src/emit/lua.nim` and the `compilable: false` flag on the corresponding `KtgNative` registrations in `src/eval/natives*.nim` enforce this; the two lists must agree.
 
@@ -450,7 +450,6 @@ The `@` sigil means "the language is doing something structural here." A word th
 | `@template/only` | `@template/only name: ...` | Same, but body is auto-wrapped in `@compose/only`. |
 | `@preprocess` | `@preprocess [body]` | Evaluate the body at parse time. Inside, `emit [...]` injects code into the source stream. The imperative escape hatch for code generation. |
 | `@inline` | `@inline [expr]` | Evaluate a single expression at parse time and splice the result into the source stream. |
-| `@parse` | `@parse input [rules]` | Run the parse dialect. Returns a context with `ok`, captures, and the match position. Interpreter-only; raises a compile error under `kintsugi -c`. |
 | `@game` | `@game [body]` | Compile-time game dialect. Processes `constants`, `bindings`, `group 'name [entity ... collide ... on-update ... draw ...]` and produces direct target-native Lua via a backend record. Compile-time only; requires `--target=love2d` or `--target=playdate`. |
 | `@enter` | `@enter [body]` | Lifecycle hook run when entering the enclosing `scope`/`context`. |
 | `@exit` | `@exit [body]` | Lifecycle hook run on normal or error exit from the enclosing scope. Guaranteed to run. |

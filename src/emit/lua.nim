@@ -190,13 +190,11 @@ const BuiltinTypePredicates = ["integer?", "float?", "number?", "string?",
 ## exposes `playdate.file`, and standalone Lua uses `io`/`os`. Rather than
 ## pick one and silently break the others, the emitter refuses and points
 ## users at target-native bindings via the `bindings [...]` escape hatch.
-## `charset` exists only for the @parse dialect, which is interpreter-only.
-##
 ## The `compilable: false` flag on the corresponding KtgNative registrations
 ## in `src/eval/natives*.nim` mirrors this list; both must agree.
 const InterpreterOnlyNatives = [
   "read", "write", "save", "dir?", "file?",
-  "exit", "charset",
+  "exit",
 ]
 
 proc interpreterOnlyHint(name: string): string =
@@ -210,9 +208,6 @@ proc interpreterOnlyHint(name: string): string =
   of "exit":
     "exit is not portable across targets. Use target-native calls (for " &
     "example love/event/quit on LOVE2D) from a raw binding instead."
-  of "charset":
-    "charset only exists for the @parse dialect, which is interpreter-only. " &
-    "Restructure to avoid it in compiled code."
   else:
     "this native is not available in compiled output."
 
@@ -3134,10 +3129,6 @@ proc emitExprTyped(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
     of wkMetaWord:
       let metaName = val.wordName
       # Interpreter-only dialect machinery: hard error.
-      if metaName == "parse" or metaName.startsWith("parse/"):
-        compileError("@parse",
-          "the parse dialect is interpreter-only; restructure to avoid it in compiled code",
-          val.line)
       if metaName == "compose" or metaName.startsWith("compose/"):
         compileError("@compose",
           "@compose is a compile-time feature; use it inside @template or @preprocess",

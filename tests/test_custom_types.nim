@@ -3,7 +3,7 @@
 import std/unittest
 import ../src/core/types
 import ../src/eval/[dialect, evaluator, natives]
-import ../src/dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect, parse_dialect]
+import ../src/dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect]
 
 proc makeEval(): Evaluator =
   let eval = newEvaluator()
@@ -12,7 +12,6 @@ proc makeEval(): Evaluator =
   eval.registerMatch()
   eval.registerObjectDialect()
   eval.registerAttempt()
-  eval.registerParse()
   eval
 
 # =============================================================================
@@ -336,8 +335,7 @@ suite "Custom types in match":
 suite "native compilable flag":
   test "interpreter-only natives are tagged non-compilable":
     let eval = makeEval()
-    for name in ["read", "write", "save", "dir?", "file?",
-                 "exit", "charset"]:
+    for name in ["read", "write", "save", "dir?", "file?", "exit"]:
       let val = eval.global.get(name)
       check val.kind == vkNative
       check val.nativeFn.compilable == false

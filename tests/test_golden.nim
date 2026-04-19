@@ -18,7 +18,7 @@ import ../src/emit/lua
 import ./emit_test_helper
 import ../src/eval/[evaluator, natives]
 import ../src/dialects/[loop_dialect, match_dialect, object_dialect,
-                        attempt_dialect, parse_dialect]
+                        attempt_dialect]
 
 proc hasHeader(source: string): bool =
   source.strip.startsWith("Kintsugi")
@@ -30,7 +30,6 @@ proc setupEvalForTest(): Evaluator =
   result.registerMatch()
   result.registerObjectDialect()
   result.registerAttempt()
-  result.registerParse()
   # NOT loadStdlib() - tests compile goldens that are self-contained.
 
 proc compileKtg(ktgPath: string): string =

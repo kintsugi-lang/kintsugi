@@ -866,11 +866,11 @@ suite "emitter: @type/guard validation":
   test "error message names the offending word":
     try:
       discard emitLua(parseSource("""
-        bad?: @type/guard [x] [charset x]
+        bad?: @type/guard [x] [read x]
       """))
       check false  # should have raised
     except EmitError as e:
-      check "charset" in e.msg
+      check "read" in e.msg
       check "@type/guard" in e.msg
       check "bad?" in e.msg
 

@@ -10,7 +10,7 @@
 import std/[unittest, osproc, os, strutils, sequtils]
 import ../src/core/types
 import ../src/eval/[dialect, evaluator, natives]
-import ../src/dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect, parse_dialect]
+import ../src/dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect]
 import ../src/parse/parser
 import ../src/emit/lua
 import ./emit_test_helper
@@ -22,7 +22,6 @@ proc makeEval(): Evaluator =
   eval.registerMatch()
   eval.registerObjectDialect()
   eval.registerAttempt()
-  eval.registerParse()
   eval
 
 proc interpOutput(src: string): seq[string] =

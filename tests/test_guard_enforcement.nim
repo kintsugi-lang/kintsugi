@@ -11,7 +11,7 @@
 import std/[unittest, osproc, os, strutils, sequtils]
 import ../src/eval/[evaluator, natives]
 import ../src/dialects/[loop_dialect, match_dialect, object_dialect,
-                        attempt_dialect, parse_dialect]
+                        attempt_dialect]
 import ../src/parse/parser
 import ../src/emit/lua
 import ./emit_test_helper
@@ -23,7 +23,6 @@ proc makeEval(): Evaluator =
   result.registerMatch()
   result.registerObjectDialect()
   result.registerAttempt()
-  result.registerParse()
 
 proc compileSrc(src: string, withEval = true): string =
   let eval = makeEval()

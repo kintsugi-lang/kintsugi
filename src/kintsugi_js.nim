@@ -13,7 +13,7 @@ import core/[types, version]
 import parse/parser
 import eval/[dialect, evaluator, natives]
 import emit/lua
-import dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect, parse_dialect]
+import dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect]
 
 proc setupEval(): Evaluator =
   let eval = newEvaluator()
@@ -22,7 +22,6 @@ proc setupEval(): Evaluator =
   eval.registerMatch()
   eval.registerObjectDialect()
   eval.registerAttempt()
-  eval.registerParse()
   eval
 
 proc kintsugiCompile*(source: cstring, target: cstring): cstring {.exportc.} =

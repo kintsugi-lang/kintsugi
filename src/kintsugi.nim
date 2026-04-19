@@ -13,7 +13,7 @@ import core/[types, errors]
 import parse/parser
 import eval/[dialect, evaluator, natives]
 import emit/lua
-import dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect, parse_dialect]
+import dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect]
 import core/version
 
 ## Header stripping is done on the parsed AST via `parseSourceStripped`
@@ -28,7 +28,6 @@ proc setupEval(): Evaluator =
   eval.registerMatch()
   eval.registerObjectDialect()
   eval.registerAttempt()
-  eval.registerParse()
   eval
 
 proc repl() =

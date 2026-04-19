@@ -3,7 +3,7 @@
 import unittest
 import ../src/core/types
 import ../src/eval/[dialect, evaluator, natives]
-import ../src/dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect, parse_dialect]
+import ../src/dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect]
 
 proc makeEval(): Evaluator =
   let eval = newEvaluator()
@@ -12,7 +12,6 @@ proc makeEval(): Evaluator =
   eval.registerMatch()
   eval.registerObjectDialect()
   eval.registerAttempt()
-  eval.registerParse()
   eval
 
 proc evalStr(src: string): KtgValue =

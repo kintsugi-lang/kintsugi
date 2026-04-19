@@ -8,7 +8,7 @@ import ../src/parse/[lexer, parser]
 import ../src/eval/[dialect, evaluator, natives]
 import ../src/emit/lua
 import ./emit_test_helper
-import ../src/dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect, parse_dialect]
+import ../src/dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect]
 
 proc makeEval(): Evaluator =
   let eval = newEvaluator()
@@ -17,7 +17,6 @@ proc makeEval(): Evaluator =
   eval.registerMatch()
   eval.registerObjectDialect()
   eval.registerAttempt()
-  eval.registerParse()
   eval
 
 # --- Dynamic path indexing ---

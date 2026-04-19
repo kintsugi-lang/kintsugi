@@ -4,7 +4,7 @@
 import std/[os, strutils]
 import ../src/core/types
 import ../src/eval/[dialect, evaluator, natives]
-import ../src/dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect, parse_dialect]
+import ../src/dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect]
 
 proc makeEval(): Evaluator =
   let eval = newEvaluator()
@@ -13,7 +13,6 @@ proc makeEval(): Evaluator =
   eval.registerMatch()
   eval.registerObjectDialect()
   eval.registerAttempt()
-  eval.registerParse()
   eval
 
 let specPath = currentSourcePath().parentDir / ".." / "full-spec.ktg"

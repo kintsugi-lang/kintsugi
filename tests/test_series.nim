@@ -1,7 +1,7 @@
 import std/[unittest, os]
 import ../src/core/types
 import ../src/eval/[dialect, evaluator, natives]
-import ../src/dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect, parse_dialect]
+import ../src/dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect]
 
 proc makeEval(): Evaluator =
   let eval = newEvaluator()
@@ -10,7 +10,6 @@ proc makeEval(): Evaluator =
   eval.registerMatch()
   eval.registerObjectDialect()
   eval.registerAttempt()
-  eval.registerParse()
   eval
 
 suite "String as series — pick":
@@ -119,84 +118,3 @@ suite "read / write":
     if fileExists(testFile):
       removeFile(testFile)
 
-suite "Parse dialect for lexer-like tokenization":
-  test "tokenize simple arithmetic":
-    let eval = makeEval()
-    discard eval.evalString("""
-      r: @parse "123 + 456" [
-        a: some digit
-        some space
-        op: "+"
-        some space
-        b: some digit
-      ]
-    """)
-    check $eval.evalString("r/ok") == "true"
-    check $eval.evalString("r/a") == "123"
-    check $eval.evalString("r/b") == "456"
-
-  test "tokenize word-like identifiers":
-    let eval = makeEval()
-    let ident = makeEval()
-    discard ident.evalString("""
-      r: @parse "hello-world" [
-        name: some [alpha | "-"]
-      ]
-    """)
-    check $ident.evalString("r/ok") == "true"
-    check $ident.evalString("r/name") == "hello-world"
-
-  test "collect multiple tokens":
-    let eval = makeEval()
-    discard eval.evalString("""
-      r: @parse "abc,def,ghi" [
-        words: collect [
-          keep some alpha
-          some ["," keep some alpha]
-        ]
-      ]
-    """)
-    check $eval.evalString("r/ok") == "true"
-    check $eval.evalString("r/words") == "[abc def ghi]"
-
-  test "scan to delimiter":
-    let eval = makeEval()
-    discard eval.evalString("""
-      r: @parse "key=value" [
-        k: to "="
-        "="
-        v: some [alpha | digit]
-      ]
-    """)
-    check $eval.evalString("r/ok") == "true"
-    check $eval.evalString("r/k") == "key"
-    check $eval.evalString("r/v") == "value"
-
-  test "alternatives for different token types":
-    let eval = makeEval()
-    discard eval.evalString("""
-      r: @parse "42" [
-        tokens: collect [
-          some [
-            keep some digit
-            | keep some alpha
-            | skip
-          ]
-        ]
-      ]
-    """)
-    check $eval.evalString("r/ok") == "true"
-    check $eval.evalString("first r/tokens") == "42"
-
-  test "nested block parsing for AST":
-    let eval = makeEval()
-    discard eval.evalString("""
-      r: @parse [add 1 2] [
-        op: word!
-        a: integer!
-        b: integer!
-      ]
-    """)
-    check $eval.evalString("r/ok") == "true"
-    check $eval.evalString("r/a") == "1"
-    check $eval.evalString("r/b") == "2"

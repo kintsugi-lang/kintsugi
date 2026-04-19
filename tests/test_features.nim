@@ -34,19 +34,12 @@ suite "make map!":
     discard eval.evalString("m/x: 42")
     check $eval.evalString("m/x") == "42"
 
-suite "make set! and charset":
+suite "make set!":
   test "make set! from values":
     let eval = makeEval()
     discard eval.evalString("""s: make set! ["a" "b" "c"]""")
     check $eval.evalString("""has? s "a" """) == "true"
     check $eval.evalString("""has? s "z" """) == "false"
-
-  test "charset from string":
-    let eval = makeEval()
-    discard eval.evalString("""hex: charset "0123456789abcdef" """)
-    check $eval.evalString("""has? hex "a" """) == "true"
-    check $eval.evalString("""has? hex "g" """) == "false"
-    check $eval.evalString("""has? hex "0" """) == "true"
 
   test "set length":
     let eval = makeEval()
