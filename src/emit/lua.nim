@@ -3734,37 +3734,58 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
     if val.kind == vkWord and val.wordKind == wkWord and val.wordName == "bindings":
       pos += 1
       if pos < vals.len and vals[pos].kind == vkBlock:
-        # Emit local declarations for 'alias bindings
+        # Emit local declarations for 'alias bindings. Two-pass to mirror
+        # prescanBindings: universal (outer) entries first, then the
+        # target-matching sub-block last so later `local X = ...` shadows
+        # earlier same-name aliases.
+        proc emitAliases(emitter: var LuaEmitter, entries: seq[KtgValue]) =
+          var bpos = 0
+          while bpos < entries.len:
+            # Skip target sub-blocks at this layer.
+            if bpos + 1 < entries.len and
+               entries[bpos].kind == vkWord and entries[bpos].wordKind == wkWord and
+               entries[bpos + 1].kind == vkBlock:
+              bpos += 2
+              continue
+            let bname = entries[bpos]
+            if bname.kind != vkWord or bname.wordKind != wkWord:
+              bpos += 1
+              continue
+            let bnameName = bname.wordName
+            bpos += 1
+            if bpos >= entries.len: break
+            let bpath = entries[bpos]
+            if bpath.kind != vkString:
+              bpos += 1
+              continue
+            let bpathStr = bpath.strVal
+            bpos += 1
+            if bpos >= entries.len: break
+            let bkind = entries[bpos]
+            if bkind.kind != vkWord or bkind.wordKind != wkLitWord:
+              bpos += 1
+              continue
+            let bkindName = bkind.wordName
+            bpos += 1
+            if bkindName == "call" and bpos < entries.len and entries[bpos].kind == vkInteger:
+              bpos += 1  # skip first arity
+              if bpos < entries.len and entries[bpos].kind == vkInteger:
+                bpos += 1  # skip second arity (max)
+            if bkindName == "alias":
+              emitter.ln("local " & luaName(bnameName) & " = " & bpathStr)
         let blk = vals[pos].blockVals
-        var bpos = 0
-        while bpos < blk.len:
-          if bpos >= blk.len: break
-          let bname = blk[bpos]
-          if bname.kind != vkWord or bname.wordKind != wkWord:
-            bpos += 1
-            continue
-          let bnameName = bname.wordName
-          bpos += 1
-          if bpos >= blk.len: break
-          let bpath = blk[bpos]
-          if bpath.kind != vkString:
-            bpos += 1
-            continue
-          let bpathStr = bpath.strVal
-          bpos += 1
-          if bpos >= blk.len: break
-          let bkind = blk[bpos]
-          if bkind.kind != vkWord or bkind.wordKind != wkLitWord:
-            bpos += 1
-            continue
-          let bkindName = bkind.wordName
-          bpos += 1
-          if bkindName == "call" and bpos < blk.len and blk[bpos].kind == vkInteger:
-            bpos += 1  # skip first arity
-            if bpos < blk.len and blk[bpos].kind == vkInteger:
-              bpos += 1  # skip second arity (max)
-          if bkindName == "alias":
-            e.ln("local " & luaName(bnameName) & " = " & bpathStr)
+        emitAliases(e, blk)
+        if e.target.len > 0:
+          var bpos = 0
+          while bpos < blk.len:
+            if bpos + 1 < blk.len and
+               blk[bpos].kind == vkWord and blk[bpos].wordKind == wkWord and
+               blk[bpos + 1].kind == vkBlock and
+               blk[bpos].wordName == e.target:
+              emitAliases(e, blk[bpos + 1].blockVals)
+              bpos += 2
+            else:
+              bpos += 1
         pos += 1
       continue
 
@@ -4309,12 +4330,22 @@ proc buildPrelude(e: var LuaEmitter): string =
     parts.add(stdlibLua.strip)
   parts.join("\n") & "\n\n"
 
-proc prescanBindings(e: var LuaEmitter, blk: seq[KtgValue]) =
-  ## Parse a bindings block and populate nameMap, arities, and bindingKinds.
+proc applyBindingEntries(e: var LuaEmitter, blk: seq[KtgValue]) =
+  ## Walk the entries of a bindings block (or sub-block) and register each
+  ## into nameMap / bindingKinds / bindings. Target sub-blocks (word+block
+  ## pairs) are skipped here — they're handled separately by prescanBindings.
   var pos = 0
   while pos < blk.len:
+    # Skip target sub-blocks: bare word followed by a block. Unknown target
+    # words are skipped silently — we can't verify target names at compile
+    # time, so trust the developer.
+    if pos + 1 < blk.len and
+       blk[pos].kind == vkWord and blk[pos].wordKind == wkWord and
+       blk[pos + 1].kind == vkBlock:
+      pos += 2
+      continue
+
     # Expect: name (word) luaPath (string) kind (lit-word) [arity (integer)]
-    if pos >= blk.len: break
     let nameVal = blk[pos]
     if nameVal.kind != vkWord or nameVal.wordKind != wkWord:
       pos += 1
@@ -4378,6 +4409,22 @@ proc prescanBindings(e: var LuaEmitter, blk: seq[KtgValue]) =
         e.bindings[name] = bindingFunc(0)
     else:
       discard
+
+proc prescanBindings(e: var LuaEmitter, blk: seq[KtgValue]) =
+  ## Two-pass: universal (outer) entries first, then the target-matching
+  ## sub-block last so it overrides same-name universal entries.
+  applyBindingEntries(e, blk)
+  if e.target.len > 0:
+    var pos = 0
+    while pos < blk.len:
+      if pos + 1 < blk.len and
+         blk[pos].kind == vkWord and blk[pos].wordKind == wkWord and
+         blk[pos + 1].kind == vkBlock and
+         blk[pos].wordName == e.target:
+        applyBindingEntries(e, blk[pos + 1].blockVals)
+        pos += 2
+      else:
+        pos += 1
 
 proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
   ## Recursively scan a block for function definitions and value bindings.

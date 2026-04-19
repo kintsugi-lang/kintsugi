@@ -1055,6 +1055,94 @@ suite "emitter: strict globals":
     """), target = "playdate")
     check "playdate.update" in source
 
+suite "emitter: target-scoped bindings sub-blocks":
+  test "love2d sub-block overrides universal when target=love2d":
+    let (_, source, _) = emitLuaSplit(parseSource("""
+      bindings [
+        pi "math.pi" 'const
+        love2d [
+          pi "love.math.pi" 'const
+        ]
+        playdate [
+          pi "playdate.math.pi" 'const
+        ]
+      ]
+      print pi
+    """), target = "love2d")
+    check "love.math.pi" in source
+    check "playdate.math.pi" notin source
+
+  test "playdate sub-block overrides universal when target=playdate":
+    let (_, source, _) = emitLuaSplit(parseSource("""
+      bindings [
+        pi "math.pi" 'const
+        love2d [
+          pi "love.math.pi" 'const
+        ]
+        playdate [
+          pi "playdate.math.pi" 'const
+        ]
+      ]
+      print pi
+    """), target = "playdate")
+    check "playdate.math.pi" in source
+    check "love.math.pi" notin source
+
+  test "universal applies when no target set":
+    let (_, source, _) = emitLuaSplit(parseSource("""
+      bindings [
+        pi "math.pi" 'const
+        love2d [
+          pi "love.math.pi" 'const
+        ]
+      ]
+      print pi
+    """))
+    check "math.pi" in source
+    check "love.math.pi" notin source
+
+  test "target sub-block only — no universal — works for matching target":
+    let (_, source, _) = emitLuaSplit(parseSource("""
+      bindings [
+        love2d [
+          draw "love.graphics.rectangle" 'call 5
+        ]
+      ]
+      draw "fill" 0 0 10 10
+    """), target = "love2d")
+    check "love.graphics.rectangle" in source
+
+  test "unknown target word is skipped silently":
+    # Typo or unknown platform — trust the developer, no error at compile
+    # time since we can't reach into the target runtime to validate.
+    let (_, source, _) = emitLuaSplit(parseSource("""
+      bindings [
+        pi "math.pi" 'const
+        switch [
+          pi "nintendo.pi" 'const
+        ]
+      ]
+      print pi
+    """), target = "love2d")
+    check "math.pi" in source
+    check "nintendo.pi" notin source
+
+  test "target sub-block applied last — overrides same-name universal":
+    # Even if universal appears AFTER the sub-block textually, the
+    # sub-block still wins at the matching target because target entries
+    # are applied last by design.
+    let (_, source, _) = emitLuaSplit(parseSource("""
+      bindings [
+        love2d [
+          draw "love.override" 'call 1
+        ]
+        draw "universal" 'call 1
+      ]
+      draw 0
+    """), target = "love2d")
+    check "love.override" in source
+    check "universal" notin source
+
 # --- Phase 3a invariant tests: deferred dep-file writes ----------------------
 
 suite "emitter: depWrites from import":

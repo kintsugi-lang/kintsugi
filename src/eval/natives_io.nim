@@ -451,58 +451,82 @@ proc registerIoNatives*(eval: Evaluator) =
     if args[0].kind != vkBlock:
       raise KtgError(kind: "type", msg: "bindings expects block!", data: nil)
 
+    proc applyEntries(eval: Evaluator, blk: seq[KtgValue]) =
+      var pos = 0
+      while pos < blk.len:
+        # Skip target sub-blocks (bare word + block). The interpreter has
+        # no compile target, so in this pass we only consume the outer
+        # entries; nested target sub-blocks are processed separately.
+        if pos + 1 < blk.len and
+           blk[pos].kind == vkWord and blk[pos].wordKind == wkWord and
+           blk[pos + 1].kind == vkBlock:
+          pos += 2
+          continue
+
+        let nameVal = blk[pos]
+        if nameVal.kind != vkWord or nameVal.wordKind != wkWord:
+          pos += 1
+          continue
+        let name = nameVal.wordName
+        pos += 1
+
+        if pos >= blk.len: break
+        let pathVal = blk[pos]
+        if pathVal.kind != vkString:
+          pos += 1
+          continue
+        pos += 1
+
+        if pos >= blk.len: break
+        let kindVal = blk[pos]
+        if kindVal.kind != vkWord or kindVal.wordKind != wkLitWord:
+          pos += 1
+          continue
+        let kindName = kindVal.wordName
+        pos += 1
+
+        case kindName
+        of "call":
+          var arity = 0
+          if pos < blk.len and blk[pos].kind == vkInteger:
+            arity = int(blk[pos].intVal)
+            pos += 1
+          let capturedArity = arity
+          let capturedName = name
+          eval.currentCtx.set(name, KtgValue(kind: vkNative,
+            nativeFn: KtgNative(name: capturedName, arity: capturedArity,
+              fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
+                ktgNone()
+            ), line: 0))
+        of "const":
+          eval.currentCtx.set(name, ktgNone())
+        of "alias":
+          eval.currentCtx.set(name, ktgNone())
+        of "assign":
+          let capturedName = name
+          eval.currentCtx.set(name, KtgValue(kind: vkNative,
+            nativeFn: KtgNative(name: capturedName, arity: 1,
+              fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
+                ktgNone()
+            ), line: 0))
+        else:
+          discard
+
+    # Interpreter has no target. Apply universal entries first, then every
+    # target sub-block in declaration order — placeholder natives are
+    # target-agnostic, so later definitions simply overwrite earlier ones
+    # and runtime semantics stay identical.
     let blk = args[0].blockVals
+    applyEntries(eval, blk)
     var pos = 0
     while pos < blk.len:
-      if pos >= blk.len: break
-      let nameVal = blk[pos]
-      if nameVal.kind != vkWord or nameVal.wordKind != wkWord:
-        pos += 1
-        continue
-      let name = nameVal.wordName
-      pos += 1
-
-      if pos >= blk.len: break
-      let pathVal = blk[pos]
-      if pathVal.kind != vkString:
-        pos += 1
-        continue
-      pos += 1
-
-      if pos >= blk.len: break
-      let kindVal = blk[pos]
-      if kindVal.kind != vkWord or kindVal.wordKind != wkLitWord:
-        pos += 1
-        continue
-      let kindName = kindVal.wordName
-      pos += 1
-
-      case kindName
-      of "call":
-        var arity = 0
-        if pos < blk.len and blk[pos].kind == vkInteger:
-          arity = int(blk[pos].intVal)
-          pos += 1
-        let capturedArity = arity
-        let capturedName = name
-        eval.currentCtx.set(name, KtgValue(kind: vkNative,
-          nativeFn: KtgNative(name: capturedName, arity: capturedArity,
-            fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-              ktgNone()
-          ), line: 0))
-      of "const":
-        eval.currentCtx.set(name, ktgNone())
-      of "alias":
-        eval.currentCtx.set(name, ktgNone())
-      of "assign":
-        let capturedName = name
-        eval.currentCtx.set(name, KtgValue(kind: vkNative,
-          nativeFn: KtgNative(name: capturedName, arity: 1,
-            fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-              ktgNone()
-          ), line: 0))
+      if pos + 1 < blk.len and
+         blk[pos].kind == vkWord and blk[pos].wordKind == wkWord and
+         blk[pos + 1].kind == vkBlock:
+        applyEntries(eval, blk[pos + 1].blockVals)
+        pos += 2
       else:
-        discard
+        pos += 1
 
     ktgNone()
   )

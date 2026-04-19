@@ -1581,6 +1581,27 @@ raw "-- This is a Lua comment"
 ;
 ; 'assign emits:   lua.path = function(...) ... end
 ; 'override emits: function lua.path(...) ... end
+;
+; Target-scoped sub-blocks override universals for a specific target.
+; Universal entries at the outer level apply everywhere; nested blocks
+; tagged with a target bare-word are applied LAST (after universals)
+; when the compile target matches. Unknown target words are skipped
+; silently -- the compiler can't validate target names against the
+; runtime that runs the emitted Lua.
+;
+;   bindings [
+;     ; universal (applied first, everywhere)
+;     pi "math.pi" 'const
+;
+;     love2d [
+;       ; applied last when target = love2d; overrides any universal
+;       draw "love.graphics.rectangle" 'call 5
+;     ]
+;
+;     playdate [
+;       draw "playdate.graphics.fillRect" 'call 4
+;     ]
+;   ]
 
 
 ; ============================================================
