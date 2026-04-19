@@ -263,6 +263,36 @@ const SafeConcatTypes = ["integer!", "float!", "string!", "money!"]
 const ScalarReturnTypes = ["integer!", "float!", "number!", "string!",
                             "logic!", "none!"]
 
+proc resolvesToScalar(e: LuaEmitter, typeName: string,
+                      visited: var HashSet[string]): bool =
+  ## True if `typeName` is a scalar builtin, or a custom type whose
+  ## underlying base(s) all resolve to scalars. Walks @type/where and
+  ## @type union chains; @type/enum members are lit-words (Lua strings)
+  ## so they're always scalar. Cycles short-circuit via `visited`.
+  if typeName in ScalarReturnTypes: return true
+  let base = customTypeBase(typeName)
+  if base in visited: return false
+  visited.incl(base)
+  if base notin e.customTypeRules: return false
+  let rule = e.customTypeRules[base]
+  case rule.kind
+  of ctWhere:
+    if rule.whereTypes.len == 0: return false
+    for t in rule.whereTypes:
+      if not e.resolvesToScalar(t, visited): return false
+    return true
+  of ctUnion:
+    if rule.unionTypes.len == 0: return false
+    for t in rule.unionTypes:
+      if not e.resolvesToScalar(t, visited): return false
+    return true
+  of ctEnum:
+    return true
+
+proc resolvesToScalar(e: LuaEmitter, typeName: string): bool =
+  var visited: HashSet[string]
+  e.resolvesToScalar(typeName, visited)
+
 proc isFieldSafeForConcat(e: LuaEmitter, varName, fieldName: string): bool =
   ## Check if varName.fieldName is a type safe for Lua's .. operator.
   ## Safe types: integer!, float!, string!, money! (all auto-coerce or are strings).
@@ -2972,10 +3002,11 @@ proc emitGenericCall(e: var LuaEmitter, name: string, line: int,
     else:
       resolvedLua & "(" & args.join(", ") & ")"
   # Tag calls into user functions with a declared scalar return type as
-  # lxScalar so `print`/`probe` skip the `_prettify` wrap. Kintsugi
-  # scalar types map to Lua primitives that print natively.
+  # lxScalar so `print`/`probe` skip the `_prettify` wrap. Custom types
+  # whose base resolves to a scalar (e.g. @type/where [integer!]) flatten
+  # through to scalar too — Lua prints the underlying primitive natively.
   if name in e.funcReturnTypes and
-     e.funcReturnTypes[name] in ScalarReturnTypes:
+     e.resolvesToScalar(e.funcReturnTypes[name]):
     lxScalar(callText)
   else:
     lxCall(callText)

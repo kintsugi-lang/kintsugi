@@ -1210,3 +1210,59 @@ suite "emitter: prelude dependency order":
       print foo [1 2 3]
     """))
     check "_prettify(" in source
+
+suite "emitter: scalar-return flatten through custom types":
+  test "where-refined scalar return does not emit _prettify":
+    # `positive!` is `@type/where [integer!] [...]` -> base is integer!,
+    # a scalar. Lua prints the underlying number natively.
+    let (prelude, source, _) = emitLuaSplit(parseSource("""
+      Kintsugi [name: 'where_scalar_ret]
+      positive!: @type/where [integer!] [it > 0]
+      clamp-positive: function [n [positive!] return: [positive!]] [n]
+      print clamp-positive 42
+    """))
+    check "_prettify(" notin source
+    check "function _prettify" notin prelude
+
+  test "union of scalars does not emit _prettify":
+    let (prelude, source, _) = emitLuaSplit(parseSource("""
+      Kintsugi [name: 'union_scalar_ret]
+      int-or-str!: @type [integer! | string!]
+      foo: function [n [int-or-str!] return: [int-or-str!]] [n]
+      print foo 5
+    """))
+    check "_prettify(" notin source
+    check "function _prettify" notin prelude
+
+  test "enum return does not emit _prettify":
+    # Enum members are lit-words -> Lua strings. Scalar.
+    let (prelude, source, _) = emitLuaSplit(parseSource("""
+      Kintsugi [name: 'enum_ret]
+      color!: @type/enum ['red | 'green | 'blue]
+      identity-color: function [c [color!] return: [color!]] [c]
+      c: 'red
+      print identity-color c
+    """))
+    check "_prettify(" notin source
+    check "function _prettify" notin prelude
+
+  test "chained where-refined scalar does not emit _prettify":
+    let (prelude, source, _) = emitLuaSplit(parseSource("""
+      Kintsugi [name: 'chain_scalar_ret]
+      positive!: @type/where [integer!] [it > 0]
+      big!: @type/where [positive!] [it > 100]
+      foo: function [n [big!] return: [big!]] [n]
+      print foo 500
+    """))
+    check "_prettify(" notin source
+    check "function _prettify" notin prelude
+
+  test "where-refined block! still emits _prettify":
+    # Base is block! (table). Scalar resolution stops there.
+    let (_, source, _) = emitLuaSplit(parseSource("""
+      Kintsugi [name: 'where_block_ret]
+      nonempty!: @type/where [block!] [not empty? it]
+      foo: function [b [nonempty!] return: [nonempty!]] [b]
+      print foo [1 2 3]
+    """))
+    check "_prettify(" in source
