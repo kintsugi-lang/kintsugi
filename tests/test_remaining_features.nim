@@ -11,25 +11,19 @@ proc makeEval(): Evaluator =
   eval
 
 # ============================================================
-# Feature 1: parse/ok? refinement
+# Feature 1: @parse result context — bare success check via /ok field
 # ============================================================
 
-suite "parse/ok? refinement":
-  test "parse/ok? returns true on match":
+suite "@parse bare success access":
+  test "result/ok returns true on match":
     let eval = makeEval()
-    check $eval.evalString("""@parse/ok? "hello" ["hello"]""") == "true"
+    check $eval.evalString("""r: @parse "hello" ["hello"] r/ok""") == "true"
 
-  test "parse/ok? returns false on no match":
+  test "result/ok returns false on no match":
     let eval = makeEval()
-    check $eval.evalString("""@parse/ok? "hello" ["world"]""") == "false"
+    check $eval.evalString("""r: @parse "hello" ["world"] r/ok""") == "false"
 
-  test "parse/ok? returns logic type":
-    let eval = makeEval()
-    let result = eval.evalString("""@parse/ok? "abc" ["abc"]""")
-    check result.kind == vkLogic
-    check result.boolVal == true
-
-  test "parse without /ok still returns context":
+  test "@parse returns context":
     let eval = makeEval()
     let result = eval.evalString("""@parse "abc" ["abc"]""")
     check result.kind == vkContext
@@ -104,24 +98,24 @@ suite "N M rule in parse":
   test "between N and M matches - exact range":
     let eval = makeEval()
     # 2 4 means between 2 and 4 repetitions
-    check $eval.evalString("""@parse/ok? "aaa" [2 4 "a"]""") == "true"
+    check $eval.evalString("""r: @parse "aaa" [2 4 "a"] r/ok""") == "true"
 
   test "N M rule - minimum matches":
     let eval = makeEval()
-    check $eval.evalString("""@parse/ok? "aa" [2 4 "a"]""") == "true"
+    check $eval.evalString("""r: @parse "aa" [2 4 "a"] r/ok""") == "true"
 
   test "N M rule - maximum matches":
     let eval = makeEval()
-    check $eval.evalString("""@parse/ok? "aaaa" [2 4 "a"]""") == "true"
+    check $eval.evalString("""r: @parse "aaaa" [2 4 "a"] r/ok""") == "true"
 
   test "N M rule - too few matches":
     let eval = makeEval()
-    check $eval.evalString("""@parse/ok? "a" [2 4 "a"]""") == "false"
+    check $eval.evalString("""r: @parse "a" [2 4 "a"] r/ok""") == "false"
 
   test "N M rule - exact N repetition still works":
     let eval = makeEval()
-    check $eval.evalString("""@parse/ok? "aaa" [3 "a"]""") == "true"
+    check $eval.evalString("""r: @parse "aaa" [3 "a"] r/ok""") == "true"
 
   test "N M rule with char classes":
     let eval = makeEval()
-    check $eval.evalString("""@parse/ok? "abc" [2 4 alpha]""") == "true"
+    check $eval.evalString("""r: @parse "abc" [2 4 alpha] r/ok""") == "true"

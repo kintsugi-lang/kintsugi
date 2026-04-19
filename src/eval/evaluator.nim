@@ -923,10 +923,10 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
         return ktgBlock(composeBlock(eval, arg.blockVals, ctx, deep, only))
 
       # @parse — parsing
-      if val.wordName == "parse" or val.wordName.startsWith("parse/"):
+      if val.wordName == "parse":
         let input = eval.evalNext(vals, pos, ctx)
         let rules = eval.evalNext(vals, pos, ctx)
-        return eval.parseFn(eval, input, rules, val.wordName == "parse/ok?")
+        return eval.parseFn(eval, input, rules)
 
       # lifecycle hooks — for now return self
       return val

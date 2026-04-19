@@ -639,8 +639,7 @@ proc parseSequence(s: ParseState, rules: seq[KtgValue]): bool =
 
 # --- Public API ---
 
-proc executeParse*(eval: Evaluator, input: KtgValue, rules: KtgValue,
-                   okOnly: bool = false): KtgValue =
+proc executeParse*(eval: Evaluator, input: KtgValue, rules: KtgValue): KtgValue =
   ## Execute the parse dialect on input with rules. Called by @parse.
   if rules.kind != vkBlock:
     raise KtgError(kind: "type",
@@ -670,17 +669,11 @@ proc executeParse*(eval: Evaluator, input: KtgValue, rules: KtgValue,
   let matched = state.parseSequence(rules.blockVals)
   let ok = matched and state.atEnd
 
-  if okOnly:
-    return ktgLogic(ok)
-
-  # Build result context
   let resultCtx = newContext()
   resultCtx.set("ok", ktgLogic(ok))
-
   for name, val in state.captures:
     if name != "__last_collect__":
       resultCtx.set(name, val)
-
   KtgValue(kind: vkContext, ctx: resultCtx, line: 0)
 
 proc registerParse*(eval: Evaluator) =

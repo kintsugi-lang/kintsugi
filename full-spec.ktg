@@ -1398,9 +1398,10 @@ Movable: object [
 ]
 
 Enemy: object [
-  field/required [name [string!]]
   include Damageable [hp: 100]          ; hp gets a default, still overridable
   include Movable                       ; speed already optional
+
+  field/required [name [string!]]
 ]
 
 goblin: make Enemy [name: "Goblin"]     ; hp defaults to 100
@@ -1412,8 +1413,9 @@ print goblin/speed                      ; 0.0
 
 ; Outer object redeclaration shadows the included method.
 Tough: object [
-  field/required [name [string!]]
   include Damageable [hp: 100]
+
+  field/required [name [string!]]
   damage: function [amount] [self/hp: self/hp - (amount / 2)]
 ]
 orc: make Tough [name: "Orc"]
@@ -1437,7 +1439,9 @@ print orc/hp                            ; 90
 ;   plus any set-word captures and collect results.
 ;
 ; Captures go into the returned context, NOT the caller's scope.
-; Use @parse/ok? to get a bare logic! result.
+; For a bare logic! result, bind the result and access ok:
+;   r: @parse input rules
+;   if r/ok [...]
 ;
 ; Combinators:
 ;   |         - ordered alternative (lowest precedence)
@@ -1505,9 +1509,10 @@ digit-run: [some digit]
 r6: @parse "12345" digit-run
 print r6/ok                             ; true
 
-; --- @parse/ok? refinement ---
-; Returns bare logic! when you only care about success.
-if @parse/ok? "12345" [some digit] [print "all digits"]
+; --- Bare success check ---
+; Bind the result and access ok when you only care about success.
+r: @parse "12345" [some digit]
+if r/ok [print "all digits"]
 
 
 ; ============================================================
