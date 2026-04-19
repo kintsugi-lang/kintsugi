@@ -14,7 +14,7 @@ suite "user function refinements":
     let eval = makeEval()
     discard eval.evalString("""
       greet: function [name [string!] /loud] [
-        message: join "Hello, " name
+        message: rejoin ["Hello, " name]
         if loud [message: uppercase message]
         message
       ]
@@ -41,7 +41,7 @@ suite "user function refinements":
     discard eval.evalString("""
       say: function [msg [string!] /loud /prefix tag [string!]] [
         result: msg
-        if prefix [result: join tag result]
+        if prefix [result: rejoin [tag result]]
         if loud [result: uppercase result]
         result
       ]

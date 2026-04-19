@@ -495,9 +495,24 @@ proc registerNatives*(eval: Evaluator) =
 
   # --- String operations ---
 
-  ctx.native("join", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    ktgString($args[0] & $args[1])
-  )
+  block:
+    let joinNative = KtgNative(
+      name: "join",
+      arity: 1,
+      refinements: @[RefinementSpec(name: "with", params: @[ParamSpec(name: "delim")])],
+      fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
+        let eval = getEvaluator(ep)
+        let delim = if "with" in eval.currentRefinements and args.len > 1:
+                      $args[1]
+                    else: ""
+        if args[0].kind != vkBlock:
+          raise KtgError(kind: "type", msg: "join expects block!", data: nil)
+        var parts: seq[string] = @[]
+        for v in args[0].blockVals:
+          parts.add($v)
+        ktgString(parts.join(delim))
+    )
+    ctx.set("join", KtgValue(kind: vkNative, nativeFn: joinNative, line: 0))
 
   block:
     let rejoinNative = KtgNative(
@@ -509,22 +524,20 @@ proc registerNatives*(eval: Evaluator) =
         let delim = if "with" in eval.currentRefinements and args.len > 1:
                       $args[1]
                     else: ""
-        if args[0].kind == vkBlock:
-          var parts: seq[string] = @[]
-          for v in args[0].blockVals:
-            if v.kind == vkParen:
-              parts.add($eval.evalBlock(v.parenVals, eval.currentCtx))
-            elif v.kind == vkWord and v.wordKind == wkWord:
-              if v.wordName.contains('/'):
-                let (head, segments) = parsePath(v.wordName)
-                let headVal = eval.currentCtx.get(head)
-                parts.add($eval.navigatePath(headVal, segments, eval.currentCtx))
-              else:
-                parts.add($eval.currentCtx.get(v.wordName))
-            else:
-              parts.add($v)
-          return ktgString(parts.join(delim))
-        ktgString($args[0])
+        if args[0].kind != vkBlock:
+          return ktgString($args[0])
+        # Full reduce: run the evaluator over the block, same as `reduce`,
+        # so infix operators and calls evaluate correctly. Then stringify.
+        var reduced: seq[KtgValue] = @[]
+        var pos = 0
+        while pos < args[0].blockVals.len:
+          var r = eval.evalNext(args[0].blockVals, pos, eval.currentCtx)
+          eval.applyInfix(r, args[0].blockVals, pos, eval.currentCtx)
+          reduced.add(r)
+        var parts: seq[string] = @[]
+        for v in reduced:
+          parts.add($v)
+        ktgString(parts.join(delim))
     )
     ctx.set("rejoin", KtgValue(kind: vkNative, nativeFn: rejoinNative, line: 0))
 

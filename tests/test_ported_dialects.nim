@@ -1504,7 +1504,7 @@ suite "Natives tests":
 
   test "join":
     let eval = makeEval()
-    check $eval.evalString("""join "a" "b" """) == "ab"
+    check $eval.evalString("""join ["a" "b"] """) == "ab"
 
   test "rejoin":
     let eval = makeEval()

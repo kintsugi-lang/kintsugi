@@ -703,7 +703,7 @@ suite "Do and reduce":
 suite "String operations":
   test "join":
     let eval = makeEval()
-    check $eval.evalString("join \"hello\" \" world\"") == "hello world"
+    check $eval.evalString("join [\"hello\" \" world\"]") == "hello world"
 
   test "uppercase":
     let eval = makeEval()

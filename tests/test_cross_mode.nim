@@ -253,7 +253,7 @@ suite "cross-mode: series (B1/B2 fixes)":
 
 suite "cross-mode: strings (B3 fix)":
   test "join":
-    crossCheck("""print join "hello" " world" """)
+    crossCheck("""print join ["hello" " world"] """)
 
   test "uppercase / lowercase":
     crossCheck("""print uppercase "hello" """)

@@ -970,11 +970,7 @@ registerExpr("not", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): 
 registerExpr("return", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   lxOther("return " & e.emitExpr(vals, pos)))
 
-# --- join --- two-arg string concat, prec 4 (..)
-registerExpr("join", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
-  let a = e.emitExpr(vals, pos)
-  let b = e.emitExpr(vals, pos)
-  lxInfix("tostring(" & a & ") .. tostring(" & b & ")", luaPrec("..")))
+# --- join is registered after emitLiteral is defined (see below). ---
 
 # --- Series operations ---
 registerExpr("first", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
@@ -1488,7 +1484,7 @@ proc isNumericExpr(vals: seq[KtgValue], pos: int): bool =
 # Natives with known sequence-type return values
 const StringReturnNatives = [
   "uppercase", "lowercase", "trim", "rejoin", "rejoin/with",
-  "char", "join", "to", "pad"  # pad works on both, return same type — tracked separately
+  "char", "join", "join/with", "to", "pad"  # pad works on both, return same type — tracked separately
 ]
 const BlockReturnNatives = [
   "split", "words", "keys", "values", "reduce", "copy"
@@ -1564,6 +1560,34 @@ proc emitLiteral(e: var LuaEmitter, val: KtgValue): string =
     "{" & parts.join(", ") & "}"
   else:
     raise EmitError(msg: "cannot emit literal of type " & typeName(val))
+
+# --- join ---
+# Literal per-element concat: words stay as their symbol name (no deref);
+# scalars via emitLiteral. Use `rejoin` when you want evaluation.
+proc emitJoinLiteralBlock(e: var LuaEmitter, blk: seq[KtgValue]): seq[string] =
+  result = @[]
+  for v in blk:
+    if v.kind == vkWord:
+      result.add("\"" & luaEscape(v.wordName) & "\"")
+    else:
+      result.add(emitLiteral(e, v))
+
+registerExpr("join", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  if pos >= vals.len or vals[pos].kind != vkBlock:
+    raise EmitError(msg: "join expects a block")
+  let blk = vals[pos].blockVals
+  pos += 1
+  let parts = emitJoinLiteralBlock(e, blk)
+  lxCall("table.concat({" & parts.join(", ") & "})"))
+
+registerExpr("join/with", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  if pos >= vals.len or vals[pos].kind != vkBlock:
+    raise EmitError(msg: "join/with expects a block")
+  let blk = vals[pos].blockVals
+  pos += 1
+  let delim = e.emitExpr(vals, pos)
+  let parts = emitJoinLiteralBlock(e, blk)
+  lxCall("table.concat({" & parts.join(", ") & "}, " & delim & ")"))
 
 # ---------------------------------------------------------------------------
 # Emit a Kintsugi block [...] as a Lua table literal {v1, v2, ...}
@@ -3323,7 +3347,7 @@ proc advanceWordCall(e: LuaEmitter, vals: seq[KtgValue], pos: var int,
 
   # 2 expr args
   of "min", "max", "atan2", "pow", "is?",
-     "join", "pick", "select", "has?", "split",
+     "pick", "select", "has?", "split",
      "starts-with?", "ends-with?", "sort/by", "sort/with", "find",
      "random/int/range", "to", "apply", "merge",
      "append", "append/only", "remove":
@@ -3359,11 +3383,11 @@ proc advanceWordCall(e: LuaEmitter, vals: seq[KtgValue], pos: var int,
     if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
 
   # Special: block-or-expr + optional follow-up
-  of "rejoin":
+  of "rejoin", "join":
     if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
     else: advanceExpr(e, vals, pos)
 
-  of "rejoin/with":
+  of "rejoin/with", "join/with":
     if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
     else: advanceExpr(e, vals, pos)
     advanceExpr(e, vals, pos)

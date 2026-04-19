@@ -134,7 +134,7 @@ suite "@type/enum":
   test "enum in function param":
     let eval = makeEval()
     discard eval.evalString("""direction!: @type/enum ['north | 'south | 'east | 'west]""")
-    discard eval.evalString("""describe: function [d [direction!]] [join "going " to string! d]""")
+    discard eval.evalString("""describe: function [d [direction!]] [rejoin ["going " to string! d]]""")
     check $eval.evalString("describe 'north") == "going north"
 
   test "enum rejects wrong value in function":

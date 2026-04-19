@@ -324,7 +324,7 @@ print double 2.5                        ; 5.0
 
 ; Refinements add optional behavior
 greet: function [name [string!] /loud] [
-  message: join "Hello, " name
+  message: rejoin ["Hello, " name]
   if loud [message: uppercase message]
   message
 ]
@@ -345,7 +345,7 @@ print format-val/pad 42 10               ; 42 (padded to 10)
 ; Multiple refinements
 announce: function [msg [string!] /loud /prefix tag [string!]] [
   result: msg
-  if prefix [result: join tag result]
+  if prefix [result: rejoin [tag result]]
   if loud [result: uppercase result]
   result
 ]
@@ -604,7 +604,8 @@ print pick items (i + 1)                  ; 30
 
 ; --- String operations ---
 ; Strings are immutable. Double-quoted or curly-brace (multiline).
-; Concatenation uses join (two values) or rejoin (block of values).
+; Concatenation uses rejoin (block, reduce + concat) or join (block,
+; literal concat -- no reduce, words stay as symbols).
 
 ; Multiline strings
 message: {
@@ -626,7 +627,8 @@ print rejoin/with ["a" "b" "c"] " - "          ; a - b - c
 
 ; String functions
 print length "hello"                     ; 5
-print join "hello" " world"             ; hello world
+print join ["hello" " world"]           ; hello world (literal, no reduce)
+print join/with ["a" "b" "c"] ", "      ; a, b, c (literal, with delimiter)
 print trim "  hello  "                  ; hello
 print find "hello world" "world"      ; 7
 print has? "hello world" "world"        ; true
@@ -1528,7 +1530,7 @@ with-timing "test" [
   loop [
     for [field] in [name age email] do [
       emit @compose [
-        (to set-word! join "get-" field) function [obj] [
+        (to set-word! rejoin ["get-" field]) function [obj] [
           select obj (to lit-word! field)
         ]
       ]

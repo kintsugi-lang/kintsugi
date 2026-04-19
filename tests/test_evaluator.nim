@@ -35,7 +35,7 @@ suite "variables":
 suite "strings":
   test "string operations":
     let eval = makeEval()
-    check $eval.evalString("""join "hello" " world" """) == "hello world"
+    check $eval.evalString("""join ["hello" " world"] """) == "hello world"
     check $eval.evalString("""uppercase "hello" """) == "HELLO"
     check $eval.evalString("""lowercase "HELLO" """) == "hello"
     check $eval.evalString("""trim "  hello  " """) == "hello"

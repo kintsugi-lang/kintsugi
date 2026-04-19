@@ -542,7 +542,7 @@ suite "unified series operations":
 
   test "join builds new string":
     let eval = makeEval()
-    check $eval.evalString("""join "abc" "de" """) == "abcde"
+    check $eval.evalString("""join ["abc" "de"] """) == "abcde"
 
 suite "filesystem":
   test "dir? on existing directory":
@@ -691,7 +691,7 @@ suite "attempt retries":
     let r = eval.evalString("""
       attempt [
         source [error 'network "timeout" none]
-        catch 'network [join "caught: " error]
+        catch 'network [rejoin ["caught: " error]]
       ]
     """)
     check $r == "caught: timeout"
@@ -701,7 +701,7 @@ suite "attempt retries":
     let r = eval.evalString("""
       attempt [
         source [error 'math "divide by zero" none]
-        catch 'network [join "caught: " error]
+        catch 'network [rejoin ["caught: " error]]
         fallback ["unhandled"]
       ]
     """)

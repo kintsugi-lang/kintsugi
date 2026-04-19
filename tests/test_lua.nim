@@ -296,10 +296,12 @@ suite "string operation emission":
     let code = emitLua(parseSource("""x: rejoin ["a" 1 "b"]"""))
     check ".." in code
 
-  test "join emits .. concatenation":
-    # join takes two args and concatenates them with ..
-    let code = emitLua(parseSource("""x: join "hello" " world" """))
-    check ".." in code
+  test "join emits table.concat of literals":
+    # join takes a block and literally concatenates each element
+    let code = emitLua(parseSource("""x: join ["hello" " world"] """))
+    check "table.concat" in code
+    check "\"hello\"" in code
+    check "\" world\"" in code
 
 suite "math operation emission":
   test "abs emits math.abs":

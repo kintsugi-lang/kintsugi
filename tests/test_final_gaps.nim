@@ -124,7 +124,7 @@ suite "inline preprocess @inline [expr]":
   test "@inline [expression] with string":
     let eval = makeEval()
     let result = eval.evalString("""
-      x: @inline [join "hello" " world"]
+      x: @inline [join ["hello" " world"]]
       x
     """)
     check $result == "hello world"

@@ -183,7 +183,7 @@ suite "object methods":
       Greeter: object [
         field/required [name [string!]]
         greet: function [] [
-          join "Hello, " self/name
+          rejoin ["Hello, " self/name]
         ]
       ]
       g: make Greeter [name: "World"]

@@ -192,3 +192,47 @@ suite "save":
     let content = readFile(tmpFile)
     check content == "make map! [a: 1 b: 2]"
     removeFile(tmpFile)
+
+suite "rejoin reduces block fully (REBOL-faithful)":
+  test "rejoin evaluates infix across block elements":
+    let eval = makeEval()
+    discard eval.evalString("a: 5")
+    check $eval.evalString("rejoin [a + 1]") == "6"
+
+  test "rejoin derefs words":
+    let eval = makeEval()
+    discard eval.evalString("""name: "Ray" """)
+    check $eval.evalString("""rejoin ["hi " name] """) == "hi Ray"
+
+  test "rejoin evaluates paren groups":
+    let eval = makeEval()
+    check $eval.evalString("""rejoin ["sum=" (1 + 2)] """) == "sum=3"
+
+  test "rejoin with mixed infix and literal":
+    let eval = makeEval()
+    discard eval.evalString("x: 10")
+    check $eval.evalString("""rejoin ["result: " x * 2] """) == "result: 20"
+
+  test "rejoin/with delimiter after full reduce":
+    let eval = makeEval()
+    discard eval.evalString("a: 1  b: 2  c: 3")
+    check $eval.evalString("rejoin/with [a b c] \"-\"") == "1-2-3"
+
+suite "join accepts a block (literal, no reduce)":
+  test "join concatenates block of scalars literally":
+    let eval = makeEval()
+    check $eval.evalString("""join ["a" "b" "c"] """) == "abc"
+
+  test "join on numeric block concatenates stringified":
+    let eval = makeEval()
+    check $eval.evalString("join [1 2 3]") == "123"
+
+  test "join does not dereference words":
+    # Literal concat - word symbols stay as-is.
+    let eval = makeEval()
+    discard eval.evalString("a: 99")
+    check $eval.evalString("join [a b]") == "ab"
+
+  test "join/with delimiter":
+    let eval = makeEval()
+    check $eval.evalString("""join/with ["a" "b" "c"] "," """) == "a,b,c"

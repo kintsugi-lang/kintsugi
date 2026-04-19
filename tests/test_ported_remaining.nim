@@ -65,7 +65,7 @@ suite "Preprocess — emit injects code":
         loop [
           for [field] in [name age email] do [
             emit @compose/deep [
-              (to set-word! join "get-" field) function [obj] [
+              (to set-word! rejoin ["get-" field]) function [obj] [
                 select obj (to lit-word! field)
               ]
             ]
@@ -129,7 +129,7 @@ suite "Require — basic":
     # Module with exports
     writeFile(testDir / "restricted.ktg", """
       _internal: "secret"
-      greet: function [name] [join "Hello, " name]
+      greet: function [name] [rejoin ["Hello, " name]]
       exports [greet]
     """)
 
@@ -710,7 +710,7 @@ suite "Validation — interpreter output":
     let eval = makeEval()
     eval.clearOutput()
     discard eval.evalString("""
-      print join "hello" " world"
+      print rejoin ["hello" " world"]
       print uppercase "hello"
       print lowercase "HELLO"
       print trim "  hi  "
@@ -823,7 +823,7 @@ suite "Custom types with @type":
   test "@type creates a union type":
     let eval = makeEval()
     discard eval.evalString("""string-or-none!: @type [string! | none!]""")
-    discard eval.evalString("""greet: function [name [string-or-none!]] [either none? name ["hello stranger"] [join "hello " name]]""")
+    discard eval.evalString("""greet: function [name [string-or-none!]] [either none? name ["hello stranger"] [rejoin ["hello " name]]]""")
     check $eval.evalString("""greet "Ray" """) == "hello Ray"
     check $eval.evalString("greet none") == "hello stranger"
 
