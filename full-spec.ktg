@@ -1203,11 +1203,11 @@ probe partial                           ; [10 20 30]
 
 describe: function [v] [
   match v [
-    [0]          ["zero"]
-    [integer!]   [rejoin ["int: " v]]
-    [string!]    [rejoin ["str: " v]]
-    [n [block!]] [rejoin ["block len " length n]]
-    default      ["other"]
+    [0]                 ["zero"]
+    [integer!]          [rejoin ["int: " v]]
+    [string!]           [rejoin ["str: " v]]
+    [n] when [block? n] [rejoin ["block len " length n]]
+    default             ["other"]
   ]
 ]
 print describe 0                        ; zero
@@ -1281,15 +1281,20 @@ c/increment
 c/increment
 print c/value                           ; 2
 
-; --- Chain operator -> ---
-; obj -> method args is equivalent to obj/method args.
-; In Lua compilation, obj -> method emits obj:method().
-
-c2: make Counter []
-c2 -> increment
-c2 -> increment
-c2 -> increment
-print c2 -> value                       ; 3
+; --- Chain operator -> (foreign interop only) ---
+; For Kintsugi-native objects, use /. Self is bound automatically.
+; The -> operator exists only for foreign interop: when you hold a
+; runtime value whose Lua type expects colon dispatch (e.g. a Love2D
+; Image or a Playdate sprite), `obj -> method args` emits the Lua
+; `obj:method(args)` form.
+;
+; The emitter infers dispatch for Kintsugi objects (c/increment emits
+; the correct call). -> is the escape hatch for types the emitter
+; doesn't own -- typically values returned by foreign functions.
+;
+; Example shape (not run here -- requires a Love2D binding):
+;   img: love/graphics/newImage "sprite.png"
+;   img -> draw 0 0                        ; emits img:draw(0, 0)
 
 ; --- Required fields ---
 
