@@ -251,3 +251,46 @@ suite "guards: untyped params unaffected":
       print f 5
     """)
     check "_integer_p" notin code
+
+# ============================================================
+# Return-type enforcement: custom @type returns
+# ============================================================
+
+suite "guards: return type runtime enforcement":
+  test "valid custom-type return runs cleanly":
+    let lines = luaLines("""
+      positive!: @type/where [integer!] [it > 0]
+      f: function [x return: [positive!]] [x]
+      print f 5
+    """)
+    check lines == @["5"]
+
+  test "invalid custom-type return errors at runtime":
+    let lines = luaLines("""
+      positive!: @type/where [integer!] [it > 0]
+      f: function [x return: [positive!]] [x]
+      x: -3
+      print f x
+    """)
+    let combined = lines.join("\n")
+    check "return expects positive!" in combined
+
+  test "early return respects return-type guard":
+    let lines = luaLines("""
+      positive!: @type/where [integer!] [it > 0]
+      f: function [x return: [positive!]] [
+        if x < 0 [return x]
+        x
+      ]
+      print f -3
+    """)
+    let combined = lines.join("\n")
+    check "return expects positive!" in combined
+
+  test "primitive return type does not emit runtime guard":
+    # Match param semantics: primitive enforcement is a separate gap.
+    let code = compileSrc("""
+      f: function [n [integer!] return: [integer!]] [n]
+      print f 5
+    """)
+    check "return expects" notin code

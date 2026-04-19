@@ -1171,3 +1171,42 @@ suite "emitter: prelude dependency order":
     """))
     check "_prettify(" notin source
     check "function _prettify" notin prelude
+
+  test "print of scalar-return user call does not emit _prettify":
+    # User function declaring return: [integer!]. Return is a number,
+    # Lua prints it natively. _prettify wrap is dead weight.
+    let (prelude, source, _) = emitLuaSplit(parseSource("""
+      Kintsugi [name: 'scalar_ret_print]
+      foo: function [n return: [integer!]] [n]
+      print foo 42
+    """))
+    check "_prettify(" notin source
+    check "function _prettify" notin prelude
+
+  test "print of string-return user call does not emit _prettify":
+    let (prelude, source, _) = emitLuaSplit(parseSource("""
+      Kintsugi [name: 'str_ret_print]
+      foo: function [n return: [string!]] [n]
+      print foo "hi"
+    """))
+    check "_prettify(" notin source
+    check "function _prettify" notin prelude
+
+  test "print of logic-return user call does not emit _prettify":
+    let (prelude, source, _) = emitLuaSplit(parseSource("""
+      Kintsugi [name: 'logic_ret_print]
+      foo: function [n return: [logic!]] [n]
+      print foo true
+    """))
+    check "_prettify(" notin source
+    check "function _prettify" notin prelude
+
+  test "print of block-return user call still emits _prettify":
+    # block! is a table; Lua's print would show "table: 0x...".
+    # _prettify stays for tables.
+    let (_, source, _) = emitLuaSplit(parseSource("""
+      Kintsugi [name: 'block_ret_print]
+      foo: function [n return: [block!]] [n]
+      print foo [1 2 3]
+    """))
+    check "_prettify(" in source

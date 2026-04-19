@@ -256,6 +256,13 @@ proc markConcatSafe(e: var LuaEmitter, name: string) =
 
 const SafeConcatTypes = ["integer!", "float!", "string!", "money!"]
 
+## Return types whose Lua representation is a native scalar (number,
+## string, boolean, nil) — `print`/`probe` can render these directly
+## without `_prettify`. Table-like types (block!, context!, objects)
+## stay wrapped because Lua's default `tostring` shows `table: 0x...`.
+const ScalarReturnTypes = ["integer!", "float!", "number!", "string!",
+                            "logic!", "none!"]
+
 proc isFieldSafeForConcat(e: LuaEmitter, varName, fieldName: string): bool =
   ## Check if varName.fieldName is a type safe for Lua's .. operator.
   ## Safe types: integer!, float!, string!, money! (all auto-coerce or are strings).
@@ -905,6 +912,7 @@ proc prettifyForPrint(e: var LuaEmitter, expr: LuaExpr): string =
   ##     they short-circuit-return an operand that may be a table.
   if expr.kind == lxLiteral: return expr.text
   if expr.kind == lxBool: return expr.text
+  if expr.kind == lxScalar: return expr.text
   if expr.kind == lxInfix and expr.prec >= luaPrec("=="): return expr.text
   e.useHelper("_prettify")
   "_prettify(" & expr.text & ")"
@@ -1641,14 +1649,44 @@ proc emitFuncDef(e: var LuaEmitter, specBlock, bodyBlock: seq[KtgValue]): string
       elif ps.typeName == "block!":
         e.setVarSeqType(luaName(ps.name), stBlock)
 
+  # A custom-@type return annotation triggers a runtime guard wrap.
+  # Primitive return types are intentionally not enforced here — they
+  # are the same gap noted in emitCustomTypeParamGuards.
+  let returnGuardBase =
+    if spec.returnType.len > 0:
+      let base = customTypeBase(spec.returnType)
+      if base in e.customTypeRules: base
+      else: ""
+    else: ""
+
   e.indent += 1
-  # Emit body — last expression is implicit return. Guard checks (for
-  # custom-typed params) run before the body so a failing arg errors
-  # with a useful "<param> expects <type>!, got <actual>" message
-  # instead of a misleading downstream type error.
-  let bodyStr = withCapture(e):
+  # Emit body — last expression is implicit return. Param guard checks
+  # run before the body so a failing arg errors with a useful
+  # "<param> expects <type>!, got <actual>" message instead of a
+  # misleading downstream type error.
+  let paramGuardStr = withCapture(e):
     e.emitCustomTypeParamGuards(spec)
-    e.emitBody(bodyBlock, asReturn = true)
+  var bodyStr: string
+  if returnGuardBase.len > 0:
+    e.usedTypeChecks.incl(returnGuardBase)
+    let predName = customTypePredicateName(returnGuardBase)
+    e.indent += 1
+    let innerStr = withCapture(e):
+      e.emitBody(bodyBlock, asReturn = true)
+    e.indent -= 1
+    bodyStr = paramGuardStr
+    bodyStr &= e.pad & "local _ret = (function()\n"
+    bodyStr &= innerStr
+    bodyStr &= e.pad & "end)()\n"
+    bodyStr &= e.pad & "if not " & predName & "(_ret) then\n"
+    bodyStr &= e.pad & "  error(\"return expects " & spec.returnType &
+               ", got \" .. type(_ret))\n"
+    bodyStr &= e.pad & "end\n"
+    bodyStr &= e.pad & "return _ret\n"
+  else:
+    let innerStr = withCapture(e):
+      e.emitBody(bodyBlock, asReturn = true)
+    bodyStr = paramGuardStr & innerStr
   e.indent -= 1
 
   e.locals = savedLocals
@@ -2925,12 +2963,21 @@ proc emitGenericCall(e: var LuaEmitter, name: string, line: int,
       args.add("false")
       for j in 0 ..< r.paramCount:
         args.add("nil")
-  if isMethod:
-    let dotPos = resolvedLua.rfind('.')
-    let methodLua = resolvedLua[0..<dotPos] & ":" & resolvedLua[dotPos+1..^1]
-    lxCall(methodLua & "(" & args.join(", ") & ")")
+  let callText =
+    if isMethod:
+      let dotPos = resolvedLua.rfind('.')
+      let methodLua = resolvedLua[0..<dotPos] & ":" & resolvedLua[dotPos+1..^1]
+      methodLua & "(" & args.join(", ") & ")"
+    else:
+      resolvedLua & "(" & args.join(", ") & ")"
+  # Tag calls into user functions with a declared scalar return type as
+  # lxScalar so `print`/`probe` skip the `_prettify` wrap. Kintsugi
+  # scalar types map to Lua primitives that print natively.
+  if name in e.funcReturnTypes and
+     e.funcReturnTypes[name] in ScalarReturnTypes:
+    lxScalar(callText)
   else:
-    lxCall(resolvedLua & "(" & args.join(", ") & ")")
+    lxCall(callText)
 
 proc emitExprTyped(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
                    primary: bool = false): LuaExpr =
@@ -3892,9 +3939,32 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
                 e.setVarSeqType(luaName(ps.name), stString)
               elif ps.typeName == "block!":
                 e.setVarSeqType(luaName(ps.name), stBlock)
+          # Custom-@type return annotation wraps body with a runtime guard.
+          # Primitive return types mirror the param-guard gap — not enforced.
+          let returnGuardBase =
+            if spec.returnType.len > 0:
+              let b = customTypeBase(spec.returnType)
+              if b in e.customTypeRules: b
+              else: ""
+            else: ""
+          let asRet = not (isPath or isBound or isOverride)
           e.indent += 1
           e.emitCustomTypeParamGuards(spec)
-          e.emitBody(bodyBlock, asReturn = not (isPath or isBound or isOverride))
+          if returnGuardBase.len > 0 and asRet:
+            e.usedTypeChecks.incl(returnGuardBase)
+            let predName = customTypePredicateName(returnGuardBase)
+            e.ln("local _ret = (function()")
+            e.indent += 1
+            e.emitBody(bodyBlock, asReturn = true)
+            e.indent -= 1
+            e.ln("end)()")
+            e.ln("if not " & predName & "(_ret) then")
+            e.ln("  error(\"return expects " & spec.returnType &
+                 ", got \" .. type(_ret))")
+            e.ln("end")
+            e.ln("return _ret")
+          else:
+            e.emitBody(bodyBlock, asReturn = asRet)
           e.indent -= 1
           e.locals = savedLocals
           e.varTable = savedVarTable

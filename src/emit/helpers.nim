@@ -96,6 +96,8 @@ type
     lxTableCtor  ## `{...}` literal; needs paren wrap whenever composed
     lxBool       ## guaranteed-boolean result (e.g. `is?` output); composes
                  ## safely without parens and never needs `_prettify` for print
+    lxScalar     ## guaranteed-scalar (number/string/logic/nil) non-table
+                 ## result; safe for direct print without `_prettify`
     lxOther      ## escape hatch: captured statement blocks, IIFE wrappers
 
   LuaExpr* = object
@@ -110,6 +112,7 @@ proc lxInfix*(text: string, prec: int): LuaExpr =
   LuaExpr(kind: lxInfix, text: text, prec: prec)
 proc lxTableCtor*(text: string): LuaExpr = LuaExpr(kind: lxTableCtor, text: text)
 proc lxBool*(text: string): LuaExpr = LuaExpr(kind: lxBool, text: text)
+proc lxScalar*(text: string): LuaExpr = LuaExpr(kind: lxScalar, text: text)
 proc lxOther*(text: string): LuaExpr = LuaExpr(kind: lxOther, text: text)
 
 proc projectText*(e: LuaExpr): string = e.text
