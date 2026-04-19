@@ -293,6 +293,111 @@ suite "error is arity 2":
     discard eval.evalString("r: try [error 'multi [1 2 3]]")
     check $eval.evalString("r/data") == "[1 2 3]"
 
+suite "object: include for trait-style composition":
+  test "include copies fields and methods":
+    let eval = makeEval()
+    discard eval.evalString("""
+      Damageable: object [
+        field/optional [hp [integer!] 100]
+        damage: function [amount] [self/hp: self/hp - amount]
+      ]
+      Enemy: object [
+        field/required [name [string!]]
+        include Damageable
+      ]
+    """)
+    discard eval.evalString("""goblin: make Enemy [name: "Goblin"]""")
+    check $eval.evalString("goblin/hp") == "100"
+    discard eval.evalString("goblin/damage 30")
+    check $eval.evalString("goblin/hp") == "70"
+    check $eval.evalString("goblin/name") == "Goblin"
+
+  test "include with override pins a required field to a default":
+    let eval = makeEval()
+    discard eval.evalString("""
+      Damageable: object [
+        field/required [hp [integer!]]
+        damage: function [amount] [self/hp: self/hp - amount]
+      ]
+      Enemy: object [
+        field/required [name [string!]]
+        include Damageable [hp: 100]
+      ]
+    """)
+    # hp became optional with default 100; don't need to provide at make
+    discard eval.evalString("""goblin: make Enemy [name: "Goblin"]""")
+    check $eval.evalString("goblin/hp") == "100"
+
+  test "include with override still permits make-time override":
+    let eval = makeEval()
+    discard eval.evalString("""
+      Damageable: object [
+        field/required [hp [integer!]]
+      ]
+      Enemy: object [
+        field/required [name [string!]]
+        include Damageable [hp: 100]
+      ]
+    """)
+    discard eval.evalString("""goblin: make Enemy [name: "Goblin" hp: 50]""")
+    check $eval.evalString("goblin/hp") == "50"
+
+  test "multi-include mixes several traits":
+    let eval = makeEval()
+    discard eval.evalString("""
+      Damageable: object [
+        field/optional [hp [integer!] 100]
+        damage: function [amount] [self/hp: self/hp - amount]
+      ]
+      Movable: object [
+        field/optional [speed [float!] 40.0]
+        stop: function [] [self/speed: 0.0]
+      ]
+      Enemy: object [
+        field/required [name [string!]]
+        include Damageable
+        include Movable
+      ]
+    """)
+    discard eval.evalString("""e: make Enemy [name: "Goblin"]""")
+    check $eval.evalString("e/hp") == "100"
+    check $eval.evalString("e/speed") == "40.0"
+    discard eval.evalString("e/damage 25")
+    discard eval.evalString("e/stop")
+    check $eval.evalString("e/hp") == "75"
+    check $eval.evalString("e/speed") == "0.0"
+
+  test "include errors when trait has unprovided required field":
+    let eval = makeEval()
+    discard eval.evalString("""
+      Damageable: object [field/required [hp [integer!]]]
+      Enemy: object [
+        field/required [name [string!]]
+        include Damageable
+      ]
+    """)
+    expect KtgError:
+      # hp is still required since no override at include-site
+      discard eval.evalString("""make Enemy [name: "Goblin"]""")
+
+  test "outer object's own declaration overrides included method":
+    let eval = makeEval()
+    discard eval.evalString("""
+      Damageable: object [
+        field/optional [hp [integer!] 100]
+        damage: function [amount] [self/hp: self/hp - amount]
+      ]
+      Tough: object [
+        field/required [name [string!]]
+        include Damageable
+        ; halve incoming damage
+        damage: function [amount] [self/hp: self/hp - (amount / 2)]
+      ]
+    """)
+    discard eval.evalString("""t: make Tough [name: "Orc"]""")
+    discard eval.evalString("t/damage 20")
+    check $eval.evalString("t/hp") == "90"
+
 suite "rethrow is removed":
   test "rethrow is no longer defined":
     let eval = makeEval()

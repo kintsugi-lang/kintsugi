@@ -81,12 +81,19 @@ proc parseFieldsBlock(blk: seq[KtgValue], eval: Evaluator, ctx: KtgContext): seq
 
 
 proc parseObjectBlock(blk: seq[KtgValue], bodyStart: var int,
+                       includedMethods: var OrderedTable[string, KtgValue],
                        eval: Evaluator, ctx: KtgContext): seq[FieldSpec] =
-  ## Walk the object spec block. Extract field declarations.
+  ## Walk the object spec block. Extract field declarations and inline any
+  ## `include TypeName [overrides]` traits. Included field specs merge into
+  ## the current object's specs; included methods are returned via the
+  ## `includedMethods` out-parameter for the caller to seed body evaluation.
+  ##
   ## Supports:
   ##   field/required [name [type!]]
   ##   field/optional [name [type!] default]
   ##   fields [required [...] optional [...]]
+  ##   include TypeName
+  ##   include TypeName [overrides]
   var specs: seq[FieldSpec] = @[]
   var pos = 0
 
@@ -94,6 +101,47 @@ proc parseObjectBlock(blk: seq[KtgValue], bodyStart: var int,
     let current = blk[pos]
 
     if current.kind == vkWord and current.wordKind == wkWord:
+      # include TypeName [overrides] — trait/mixin composition
+      if current.wordName == "include" and pos + 1 < blk.len and
+         blk[pos + 1].kind == vkWord and blk[pos + 1].wordKind == wkWord:
+        let typeName = blk[pos + 1].wordName
+        pos += 2
+        # Optional override block immediately follows.
+        var overrides = initTable[string, KtgValue]()
+        if pos < blk.len and blk[pos].kind == vkBlock:
+          let overrideCtx = newContext(ctx)
+          overrideCtx.localOnly = true
+          discard eval.evalBlock(blk[pos].blockVals, overrideCtx)
+          for k, v in overrideCtx.entries:
+            overrides[k] = v
+          pos += 1
+        # Resolve the included type.
+        let included = ctx.get(typeName)
+        if included.kind != vkObject:
+          raise KtgError(kind: "object",
+            msg: "include expects an object!, got " & typeName(included),
+            data: nil)
+        # Merge field specs (with overrides turning required -> optional).
+        for fs in included.obj.fieldSpecs:
+          if fs.name in overrides:
+            specs.add(FieldSpec(
+              name: fs.name, typeName: fs.typeName,
+              hasDefault: true, defaultVal: overrides[fs.name]
+            ))
+          else:
+            specs.add(fs)
+        # Stash the included object's methods for the body phase. Field
+        # entries are skipped — the outer object will seed those from
+        # fieldSpecs itself.
+        let fieldNames = block:
+          var s: HashSet[string]
+          for fs in included.obj.fieldSpecs: s.incl(fs.name)
+          s
+        for k, v in included.obj.entries:
+          if k notin fieldNames:
+            includedMethods[k] = v
+        continue
+
       # fields [...] — bulk declaration
       if current.wordName == "fields" and pos + 1 < blk.len and blk[pos + 1].kind == vkBlock:
         specs.add(parseFieldsBlock(blk[pos + 1].blockVals, eval, ctx))
@@ -152,9 +200,10 @@ proc registerObjectDialect*(eval: Evaluator) =
 
       let blk = spec.blockVals
 
-      # Parse field declarations
+      # Parse field declarations + inline any `include` traits
       var bodyStart = 0
-      var fieldSpecs = parseObjectBlock(blk, bodyStart, eval, eval.currentCtx)
+      var includedMethods = initOrderedTable[string, KtgValue]()
+      var fieldSpecs = parseObjectBlock(blk, bodyStart, includedMethods, eval, eval.currentCtx)
 
       # Build entries - start with field defaults or none
       var entries = initOrderedTable[string, KtgValue]()
@@ -163,6 +212,11 @@ proc registerObjectDialect*(eval: Evaluator) =
           entries[fs.name] = fs.defaultVal
         else:
           entries[fs.name] = ktgNone()
+
+      # Seed included methods before the body evaluates, so the outer
+      # object's own definitions override them naturally.
+      for k, v in includedMethods:
+        entries[k] = v
 
       # Evaluate the body (method definitions)
       if bodyStart < blk.len:
@@ -173,6 +227,8 @@ proc registerObjectDialect*(eval: Evaluator) =
             bodyCtx.set(fs.name, fs.defaultVal)
           else:
             bodyCtx.set(fs.name, ktgNone())
+        for k, v in includedMethods:
+          bodyCtx.set(k, v)
         let body = blk[bodyStart .. ^1]
         discard eval.evalBlock(body, bodyCtx)
         for key, val in bodyCtx.entries:

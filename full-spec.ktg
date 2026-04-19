@@ -1272,8 +1272,8 @@ print classify 500                      ; huge
 Counter: object [
   field/optional [n [integer!] 0]
 
-  increment: function [] [self/n: self/n + 1]
-  value: function [] [self/n]
+  increment: does [self/n: self/n + 1]
+  value: does [self/n]
 ]
 
 c: make Counter []
@@ -1302,10 +1302,10 @@ Person: object [
   field/required [name [string!]]
   field/required [age [integer!]]
 
-  greet: function [] [
+  greet: does [
     rejoin ["Hi, I'm " self/name " age " self/age]
   ]
-  birthday: function [] [
+  birthday: does [
     self/age: self/age + 1
   ]
 ]
@@ -1330,7 +1330,7 @@ Account: object [
   deposit: function [amount [money!]] [
     self/balance: self/balance + amount
   ]
-  summary: function [] [
+  summary: does [
     rejoin [self/owner ": " self/balance]
   ]
 ]
@@ -1376,17 +1376,49 @@ print goblin/hp                         ; 75
 ;
 ; is? person! v is true if v has all fields of Person.
 
-; --- No inheritance ---
-; make is a stamp. No delegation, no chains. Compose via embedding.
+; --- No inheritance; include for trait composition ---
+; make is a stamp. No delegation, no chains, no prototype.
+; Compose via `include TypeName [overrides]`: at object-declaration
+; time, the included object's field specs are pasted into the outer
+; object, and its methods seed the outer object's body. The outer
+; object can override any included method by redeclaring it.
 ;
-;   Damageable: object [
-;     field/optional [hp [integer!] 100]
-;     damage: function [amount] [self/hp: self/hp - amount]
-;   ]
-;   Enemy: object [
-;     field/required [stats [context!]]
-;     field/optional [speed [float!] 40.0]
-;   ]
+; Overrides at the include site pin a required field to a default,
+; turning it optional for make-time callers. Make-time overrides
+; still take precedence.
+
+Damageable: object [
+  field/required [hp [integer!]]
+  damage: function [amount] [self/hp: self/hp - amount]
+]
+
+Movable: object [
+  field/optional [speed [float!] 40.0]
+  stop: function [] [self/speed: 0.0]
+]
+
+Enemy: object [
+  field/required [name [string!]]
+  include Damageable [hp: 100]          ; hp gets a default, still overridable
+  include Movable                       ; speed already optional
+]
+
+goblin: make Enemy [name: "Goblin"]     ; hp defaults to 100
+print goblin/hp                         ; 100
+goblin/damage 30
+print goblin/hp                         ; 70
+goblin/stop
+print goblin/speed                      ; 0.0
+
+; Outer object redeclaration shadows the included method.
+Tough: object [
+  field/required [name [string!]]
+  include Damageable [hp: 100]
+  damage: function [amount] [self/hp: self/hp - (amount / 2)]
+]
+orc: make Tough [name: "Orc"]
+orc/damage 20
+print orc/hp                            ; 90
 
 ; --- self is bound at make time ---
 ; self is a regular word pointing to the instance. Each
