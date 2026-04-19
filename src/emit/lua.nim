@@ -885,20 +885,27 @@ registerExpr("is?", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): 
   var typeName = typeExpr.strip(chars = {'"'})
   if typeName.endsWith("!"):
     typeName = typeName[0..^2]
-  # Wrap only when the inner check is an `and`/`or` composition so `not is?`
-  # groups correctly. Bare single-expr checks (e.g. `type(v) == "string"`,
-  # `_foo_p(v)`) compose safely — their precedence is above `and`/`or`.
+  # Tag as lxBool so downstream print/probe can skip `_prettify` — the
+  # result is always a scalar boolean. `paren(_, luaPrec("and"))` defensively
+  # parenthesizes composed `and`/`or` bodies (primitive + where-guard) for
+  # safe composition at higher precedences.
   let innerTyped = e.emitAnyTypeCheckTyped(typeName, valExpr)
-  lxOther(paren(innerTyped, luaPrec("and"))))
+  lxBool(paren(innerTyped, luaPrec("and"))))
 
 proc prettifyForPrint(e: var LuaEmitter, expr: LuaExpr): string =
-  ## Lua's print/tostring on a table returns "table: 0x...". Wrap any
-  ## expression that isn't already string-typed in `_prettify(...)` so
-  ## blocks, contexts, pairs, and maps print like the interpreter does.
-  ## Literals print as-is; `..`-concat chains also produce strings by Lua's
-  ## operator semantics so they can skip _prettify.
+  ## Lua's print/tostring on a table returns "table: 0x...". Wrap only
+  ## expressions that could be a table. Lua prints booleans/numbers/strings/
+  ## nil natively, so any expression kind we can prove is scalar skips the
+  ## `_prettify` wrap — which also lets the helper itself stay out of the
+  ## prelude when nothing else needs it.
+  ##   - lxLiteral: bare identifier or literal; trust source shape.
+  ##   - lxBool: guaranteed boolean (e.g. `is?`).
+  ##   - lxInfix at `==`/comparison/arith/`..` precedence: Lua operator
+  ##     semantics guarantee scalar. `and`/`or` (prec 1-2) are excluded —
+  ##     they short-circuit-return an operand that may be a table.
   if expr.kind == lxLiteral: return expr.text
-  if expr.kind == lxInfix and expr.prec == luaPrec(".."): return expr.text
+  if expr.kind == lxBool: return expr.text
+  if expr.kind == lxInfix and expr.prec >= luaPrec("=="): return expr.text
   e.useHelper("_prettify")
   "_prettify(" & expr.text & ")"
 

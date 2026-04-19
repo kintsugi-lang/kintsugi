@@ -1139,3 +1139,35 @@ suite "emitter: prelude dependency order":
     check "function _equals" notin prelude
     check "function _has" notin prelude
     check "function _prettify" notin prelude
+
+  test "print of is? result does not emit _prettify":
+    # is? returns a bool. Lua's print handles bool/number/string/nil
+    # natively — only tables need _prettify. Wrapping a bool-valued
+    # expression in _prettify is dead weight and forces the prelude
+    # helper to be emitted when it isn't otherwise needed.
+    let (prelude, source, _) = emitLuaSplit(parseSource("""
+      Kintsugi [name: 'is_print]
+      print is? int! 5
+    """))
+    check "_prettify(" notin source
+    check "function _prettify" notin prelude
+
+  test "print of comparison result does not emit _prettify":
+    # `==`, `~=`, `<`, etc. are bool-producing. Same reasoning as above.
+    let (prelude, source, _) = emitLuaSplit(parseSource("""
+      Kintsugi [name: 'cmp_print]
+      x: 5
+      print x == 5
+    """))
+    check "_prettify(" notin source
+    check "function _prettify" notin prelude
+
+  test "print of numeric expression does not emit _prettify":
+    # Arithmetic yields a number. Lua prints numbers natively.
+    let (prelude, source, _) = emitLuaSplit(parseSource("""
+      Kintsugi [name: 'num_print]
+      x: 5
+      print x + 1
+    """))
+    check "_prettify(" notin source
+    check "function _prettify" notin prelude
