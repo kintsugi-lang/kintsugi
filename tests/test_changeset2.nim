@@ -141,7 +141,7 @@ suite "attempt compilation":
 
   test "attempt with fallback":
     check "pcall" in compileStr("""result: attempt [
-      source [error 'test "boom" none]
+      source [error 'test "boom"]
       fallback [0]
     ]""")
 

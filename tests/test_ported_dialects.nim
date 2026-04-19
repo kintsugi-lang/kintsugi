@@ -1288,7 +1288,7 @@ suite "Attempt tests":
     let eval = makeEval()
     check $eval.evalString("""
       attempt [
-        source [error 'bad "oops" none]
+        source [error 'bad "oops"]
         catch 'bad [42]
       ]
     """) == "42"
@@ -1297,7 +1297,7 @@ suite "Attempt tests":
     let eval = makeEval()
     check $eval.evalString("""
       attempt [
-        source [error 'bad "oops" none]
+        source [error 'bad "oops"]
         catch 'other [42]
         fallback [99]
       ]
@@ -1307,7 +1307,7 @@ suite "Attempt tests":
     let eval = makeEval()
     check $eval.evalString("""
       attempt [
-        source [error 'fail "boom" none]
+        source [error 'fail "boom"]
         fallback [0]
       ]
     """) == "0"
@@ -1331,7 +1331,7 @@ suite "Attempt tests":
       attempt [
         source [
           count: count + 1
-          if count < 3 [error 'fail "not yet" none]
+          if count < 3 [error 'fail "not yet"]
           count
         ]
         retries 5
@@ -1342,7 +1342,7 @@ suite "Attempt tests":
     let eval = makeEval()
     check $eval.evalString("""
       attempt [
-        source [error 'fail "always" none]
+        source [error 'fail "always"]
         retries 2
         fallback [0]
       ]

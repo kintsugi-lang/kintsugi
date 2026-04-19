@@ -200,8 +200,8 @@ suite "try/error":
   test "try catches division by zero":
     let eval = makeEval()
     discard eval.evalString("result: try [10 / 0]")
-    check $eval.evalString("result/ok") == "false"
-    check $eval.evalString("result/kind") == "'math"
+    check $eval.evalString("none? result/kind") == "false"
+    check $eval.evalString("result/kind") == "math"
 
 suite "loop":
   test "from/to":

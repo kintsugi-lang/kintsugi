@@ -403,8 +403,8 @@ suite "cross-mode: try":
   test "try success":
     crossCheck("""
       result: try [42]
-      print result/ok
-      print result/value
+      print none? result/kind
+      print result/data
     """)
 
 # ============================================================
@@ -589,7 +589,7 @@ suite "cross-mode: attempt":
   test "fallback on error":
     crossCheck("""
       x: attempt [
-        source [error 'bad "oops" none]
+        source [error 'bad "oops"]
         fallback [42]
       ]
       print x
@@ -598,7 +598,7 @@ suite "cross-mode: attempt":
   test "catch specific error kind":
     crossCheck("""
       x: attempt [
-        source [error 'parse "bad input" none]
+        source [error 'parse "bad input"]
         catch 'parse [0]
         fallback [-1]
       ]
@@ -608,7 +608,7 @@ suite "cross-mode: attempt":
   test "catch unrelated kind falls through to fallback":
     crossCheck("""
       x: attempt [
-        source [error 'network "offline" none]
+        source [error 'network "offline"]
         catch 'parse [0]
         fallback [-1]
       ]
@@ -631,7 +631,7 @@ suite "cross-mode: attempt":
       counter: context [n: 0]
       get-n: function [] [
         counter/n: counter/n + 1
-        either counter/n < 3 [error 'transient "not yet" none] [counter/n]
+        either counter/n < 3 [error 'transient "not yet"] [counter/n]
       ]
       x: attempt [
         source [get-n]
@@ -643,7 +643,7 @@ suite "cross-mode: attempt":
   test "retries exhausted hits fallback":
     crossCheck("""
       x: attempt [
-        source [error 'transient "always fails" none]
+        source [error 'transient "always fails"]
         retries 3
         fallback [99]
       ]

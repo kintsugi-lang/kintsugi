@@ -142,7 +142,7 @@ suite "module isolation":
       r: try [
         result: caller-local
       ]
-      either r/ok [result: caller-local] [result: 0]
+      either none? r/kind [result: caller-local] [result: 0]
       exports [result]
     """)
     defer: removeFile(modPath)

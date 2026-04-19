@@ -85,27 +85,27 @@ suite "issue 7 — to integer! from float string":
 # ============================================================
 
 suite "issue 8 — try/handle handler receives error context":
-  test "handler gets single context with kind, message, data":
+  test "handler gets single context with kind and data":
     let eval = makeEval()
     let result = eval.evalString("""
-      r: try/handle [error 'math "boom" 99] function [e] [e/message]
-      r/value
+      r: try/handle [error 'math "boom"] function [e] [e/data]
+      r/data
     """)
     check $result == "boom"
 
   test "handler can access error kind":
     let eval = makeEval()
     let result = eval.evalString("""
-      r: try/handle [error 'math "oops" none] function [e] [e/kind]
-      r/value
+      r: try/handle [error 'math "oops"] function [e] [e/kind]
+      r/data
     """)
-    check $result == "'math"  # lit-word display includes the quote
+    check $result == "math"  # bare word, no quote
 
   test "handler can access error data":
     let eval = makeEval()
     let result = eval.evalString("""
-      r: try/handle [error 'user "fail" 42] function [e] [e/data]
-      r/value
+      r: try/handle [error 'user 42] function [e] [e/data]
+      r/data
     """)
     check $result == "42"
 

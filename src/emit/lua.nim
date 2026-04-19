@@ -751,6 +751,10 @@ registerExpr("context", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var in
     lxTableCtor("{}"))
 
 registerExpr("try", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
+  # Result shape: {kind, data}. Success: kind=nil, data=value.
+  # Failure: kind=<kind string>, data=<payload>. The raised value can
+  # be a table (from our `error`) or a bare string (from a stray Lua
+  # `error("msg")` call) -- normalize both into the two-slot shape.
   if pos < vals.len and vals[pos].kind == vkBlock:
     let blk = vals[pos].blockVals
     pos += 1
@@ -762,8 +766,9 @@ registerExpr("try", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): 
       e.pad & "  local ok, result = pcall(function()\n" &
       bodyStr &
       e.pad & "  end)\n" &
-      e.pad & "  if ok then return {ok=true, value=result}\n" &
-      e.pad & "  else return {ok=false, message=result} end\n" &
+      e.pad & "  if ok then return {kind = nil, data = result}\n" &
+      e.pad & "  elseif type(result) == \"table\" then return {kind = result.kind, data = result.data}\n" &
+      e.pad & "  else return {kind = \"user\", data = result} end\n" &
       e.pad & "end)()")
   else:
     lxLit("nil"))
@@ -786,12 +791,16 @@ registerExpr("try/handle", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var
     let bodyStr = withCapture(e):
       e.emitBody(blk, asReturn = true)
     e.indent -= 1
+    # Handler receives `it` = the failure result context {kind, data}.
     lxOther("(function()\n" &
-      e.pad & "  local ok, it = pcall(function()\n" &
+      e.pad & "  local ok, result = pcall(function()\n" &
       bodyStr &
       e.pad & "  end)\n" &
-      e.pad & "  if ok then return it\n" &
+      e.pad & "  if ok then return result\n" &
       e.pad & "  else\n" &
+      e.pad & "    local it\n" &
+      e.pad & "    if type(result) == \"table\" then it = {kind = result.kind, data = result.data}\n" &
+      e.pad & "    else it = {kind = \"user\", data = result} end\n" &
       handlerBody &
       e.pad & "  end\n" &
       e.pad & "end)()")
@@ -1169,9 +1178,8 @@ registerExpr("type", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int):
 # --- error: raise a tagged error table so catch handlers can dispatch on kind ---
 registerExpr("error", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
   let kind = e.emitExpr(vals, pos)
-  let msg = e.emitExpr(vals, pos)
   let data = e.emitExpr(vals, pos)
-  lxCall("error({kind = " & kind & ", msg = " & msg & ", data = " & data & "})"))
+  lxCall("error({kind = " & kind & ", data = " & data & "})"))
 
 # --- sort ---
 registerExpr("sort", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
@@ -1402,9 +1410,8 @@ stmtHandlers["assert"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var i
 # error — as statement, raise tagged error table
 stmtHandlers["error"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int) =
   let kind = e.emitExpr(vals, pos)
-  let msg = e.emitExpr(vals, pos)
   let data = e.emitExpr(vals, pos)
-  e.ln("error({kind = " & kind & ", msg = " & msg & ", data = " & data & "})")
+  e.ln("error({kind = " & kind & ", data = " & data & "})")
 
 # exports — as statement, skip the block arg silently (no output)
 stmtHandlers["exports"] = proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int) =
@@ -3350,12 +3357,12 @@ proc advanceWordCall(e: LuaEmitter, vals: seq[KtgValue], pos: var int,
      "pick", "select", "has?", "split",
      "starts-with?", "ends-with?", "sort/by", "sort/with", "find",
      "random/int/range", "to", "apply", "merge",
-     "append", "append/only", "remove":
+     "append", "append/only", "remove", "error":
     advanceExpr(e, vals, pos)
     advanceExpr(e, vals, pos)
 
   # 3 expr args
-  of "insert", "replace", "subset", "error":
+  of "insert", "replace", "subset":
     advanceExpr(e, vals, pos)
     advanceExpr(e, vals, pos)
     advanceExpr(e, vals, pos)

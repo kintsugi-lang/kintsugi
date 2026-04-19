@@ -554,9 +554,9 @@ print b                                 ; 2
 print c                                 ; 3
 
 ; Context destructuring (by name, not position)
-ctx: context [name: "Ray" age: 30]
+ctx: context [name: "Jim" age: 30]
 set [name age] ctx
-print name                              ; Ray
+print name                              ; Jim
 print age                               ; 30
 
 ; @rest captures remaining elements into a block
@@ -615,10 +615,10 @@ message: {
 }
 
 ; rejoin evaluates a block and joins results into a string
-sn: "Ray"
+sn: "Jim"
 sa: 30
-print rejoin ["Hello, " sn "!"]                ; Hello, Ray!
-print rejoin [sn " is " sa " years old"]       ; Ray is 30 years old
+print rejoin ["Hello, " sn "!"]                ; Hello, Jim!
+print rejoin [sn " is " sa " years old"]       ; Jim is 30 years old
 print rejoin ["2 + 2 = " (2 + 2)]              ; 2 + 2 = 4
 
 ; rejoin/with -- join with a delimiter
@@ -635,7 +635,7 @@ print has? "hello world" "world"        ; true
 print split "a,b,c" ","                 ; ["a" "b" "c"]
 print uppercase "hello"                 ; HELLO
 print lowercase "HELLO"                 ; hello
-print replace "hello world" "world" "Ray" ; hello Ray
+print replace "hello world" "world" "Jim" ; hello Jim
 print replace "aabaa" "a" "x"          ; xxbxx (replace-all by default)
 
 ; Series operations on strings
@@ -697,8 +697,8 @@ print char (byte "Z")                   ; Z
 ; --- Map ---
 ; map! is a hash-based key-value store for fast lookup.
 
-m: make map! [name: "Ray" age: 30]
-print m/name                              ; Ray
+m: make map! [name: "Jim" age: 30]
+print m/name                              ; Jim
 print m/age                               ; 30
 
 ; Predicates
@@ -725,7 +725,7 @@ combined: union vowels consonants
 ; time and date are context objects with accessor functions.
 ;
 ;   now                  - integer! (Unix epoch seconds)
-;   time/now             - time! (current local time)
+;   time/now             - time! (current local time)A
 ;   date/now             - date! (current local date)
 ;   time/hours t         - integer! (hour component)
 ;   time/minutes t       - integer! (minute component)
@@ -752,6 +752,9 @@ print date/year d                       ; (current year)
 ;   is?  type! value  - check (returns logic!)
 ;   to   type! value  - convert (scalars only, throws on failure)
 ;   [param [type!]]   - constrain (in function specs)
+
+; General rule of thumb: everything is data-first unless a type! is
+; present. Then, type is first.
 
 ; --- Introspection ---
 print type 42                           ; integer!
@@ -922,52 +925,84 @@ print random/choice [10 20 30]          ; (one of 10, 20, 30)
 ; ERROR HANDLING
 ; ============================================================
 ; Errors are raised with error. Protected calls with try.
-; try returns a context! with path access:
-;   result/ok       - logic! (success or failure)
-;   result/value    - the return value (on success)
-;   result/kind     - lit-word! error kind (on failure)
-;   result/message  - string! error message (on failure)
-;   result/data     - any value attached to the error
+; try returns a result context with exactly two slots:
+;   result/kind  - none on success, lit-word! on failure
+;   result/data  - the return value on success,
+;                  or the error payload on failure
+;
+; kind doubles as success discriminator: none is falsy, so
+; unless + result/kind gives one-line happy-path unwrapping:
+;
+;   result: try [expr]
+;   unless result/kind [result/data]
 
 ; --- Raising errors ---
-; error <kind:lit-word> <message:string> <data:any|none>
+; error kind [lit-word!] payload [any!]
+; The payload is whatever you want to attach. String is typical,
+; but contexts, blocks, maps, and scalars all work -- handlers
+; inspect the shape using match or path access.
 
 safe-divide: function [x y] [
-  if y = 0 [error 'math "cannot divide by zero" none]
+  if y = 0 [error 'math "cannot divide by zero"]
   x / y
 ]
 
 ; --- try (protected call) ---
 
 result: try [safe-divide 10 2]
-print result/ok                         ; true
-print result/value                      ; 5
+print result/kind                       ; none
+print result/data                       ; 5
 
 result: try [safe-divide 10 0]
-print result/ok                         ; false
 print result/kind                       ; math
-print result/message                    ; cannot divide by zero
+print result/data                       ; cannot divide by zero
 
-; --- Pattern: check and branch on result ---
-result: try [safe-divide 10 0]
-either result/ok [
-  print rejoin ["Got: " result/value]
-] [
-  print rejoin ["Error: " result/message]
+; --- Happy path: unless result/kind ---
+; none is falsy, lit-words are truthy -- unless fires on success.
+result: try [safe-divide 10 2]
+unless result/kind [
+  print rejoin ["Got: " result/data]
 ]
-; Error: cannot divide by zero
+; Got: 5
 
-; --- rethrow ---
-; rethrow re-raises an error from a try result context.
+; --- Error path: match on kind ---
+result: try [safe-divide 10 0]
+match result/kind [
+  ['math] [print rejoin ["math error: " result/data]]
+  default [print rejoin ["result: " result/data]]
+]
+; math error: cannot divide by zero
+
+; --- Destructure ---
+set [kind data] try [safe-divide 10 0]
+if kind [print rejoin [kind " -- " data]]
+; math -- cannot divide by zero
+
+; --- Structured payloads ---
+; The payload can be any value. Handlers use path access or match
+; to interpret the shape.
+result: try [
+  error 'validation context [field: "email" value: "bad"]
+]
+print result/kind                       ; validation
+print result/data/field                 ; email
+print result/data/value                 ; bad
+
+; --- Propagating errors ---
+; If you need to re-raise, call error with the kind and data. 
 outer: try [
-  inner: try [error 'user "boom" none]
-  unless inner/ok [
+  inner: try [error 'user "boom"]
+  if inner/kind [
     print rejoin ["caught: " inner/kind]
-    rethrow inner
+    error inner/kind inner/data
   ]
 ]
-print outer/ok                          ; false
-print outer/message                     ; boom
+print outer/kind                        ; user
+print outer/data                        ; boom
+
+; Or just return the result; caller inspects.
+fetch: function [url] [try [network-call url]]
+; r: fetch "..."  ->  unless r/kind [r/data]
 
 ; --- Standard error kinds ---
 ; 'type       - wrong type passed to function
@@ -986,9 +1021,20 @@ print outer/message                     ; boom
 ; 'stack      - recursion depth exceeded
 ; 'user       - raised explicitly by user code
 
+; `try` is for one expression. As soon as you chain operations
+; where each step can fail, nested `try` gets painful:
+;
+;   r1: try [parse-input raw]
+;   if r1/kind [return r1]
+;   r2: try [validate r1/data]
+;   if r2/kind [return r2]
+;   r3: try [save r2/data]
+;   ...
+
 ; --- Attempt dialect ---
-; Resilient pipelines with error handling.
-; Each step receives the previous result as it.
+; attempt collapses the above pipeline. Each step receives the previous
+; result as `it`, errors get routed to typed catch blocks, and the
+; whole pipeline short-circuits on failure.
 ;
 ; Keywords:
 ;   source   - initial operation
@@ -1019,15 +1065,16 @@ print clean "  HELLO  "                 ; hello
 
 ; Error handling in pipelines
 result: attempt [
-  source [error 'test "fail" none]
+  source [error 'test "fail"]
   catch 'test ["caught"]
   fallback ["fallback"]
 ]
 print result                            ; caught
 
-; Inside catch/fallback, error is bound to the message string
+; Inside catch/fallback, error is bound to the payload passed to
+; `error` -- typically a string, but any value.
 result: attempt [
-  source [error 'parse "bad input" none]
+  source [error 'parse "bad input"]
   catch 'parse [rejoin ["parse: " error]]
   fallback [rejoin ["other: " error]]
 ]
@@ -1038,7 +1085,7 @@ retry-count: 0
 result: attempt [
   source [
     retry-count: retry-count + 1
-    if retry-count < 3 [error 'test "not ready" none]
+    if retry-count < 3 [error 'test "not ready"]
     "ok"
   ]
   retries 5
@@ -1187,10 +1234,10 @@ print match [age 30] [
 ; --- Guards ---
 classify: function [n] [
   match n [
-    [x when [x < 0]] ["negative"]
-    [0]              ["zero"]
-    [x when [x > 100]] ["huge"]
-    default          ["normal"]
+    [x] when [x < 0]   ["negative"]
+    [0]                ["zero"]
+    [x] when [x > 100] ["huge"]
+    default            ["normal"]
   ]
 ]
 print classify -3                       ; negative
@@ -1258,14 +1305,14 @@ Person: object [
   ]
 ]
 
-per: make Person [name: "Ray" age: 30]
-print per/greet                         ; Hi, I'm Ray age 30
+per: make Person [name: "Jim" age: 30]
+print per/greet                         ; Hi, I'm Jim age 30
 per/birthday
 print per/age                           ; 31
 
 ; Clone from an instance
 per2: make per [age: 25]
-print per2/name                         ; Ray
+print per2/name                         ; Jim
 print per2/age                          ; 25
 print per/age                           ; 31
 
@@ -1283,9 +1330,9 @@ Account: object [
   ]
 ]
 
-acct: make Account [owner: "Ray"]
+acct: make Account [owner: "Jim"]
 acct/deposit $100.00
-print acct/summary                      ; Ray: $100.00
+print acct/summary                      ; Jim: $100.00
 
 ; Override a default at creation time
 acct2: make Account [owner: "Jo" balance: $50.00]
@@ -2030,10 +2077,10 @@ print sum                               ; 150
 
 safe-calc: function [x y] [
   r: try [x / y]
-  either r/ok [
-    r/value
+  either r/kind [
+    rejoin ["ERROR: " r/data]
   ] [
-    rejoin ["ERROR: " r/message]
+    r/data
   ]
 ]
 print safe-calc 10 3                    ; 3.333...

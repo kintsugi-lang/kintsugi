@@ -56,7 +56,7 @@ suite "dynamic paths":
     discard eval.evalString("items: [1 2 3]")
     discard eval.evalString("i: 5")
     discard eval.evalString("result: try [items/:i]")
-    check $eval.evalString("result/ok") == "false"
+    check $eval.evalString("none? result/kind") == "false"
 
   test "dynamic path compiles to bracket access":
     let code = emitLua(parseSource("""
@@ -145,7 +145,7 @@ suite "strict equality ==":
   test "== on non-scalar errors":
     let eval = makeEval()
     discard eval.evalString("result: try [[1 2] == [1 2]]")
-    check $eval.evalString("result/ok") == "false"
+    check $eval.evalString("none? result/kind") == "false"
 
   test "== compiles to Lua ==":
     let code = emitLua(parseSource("x: 1 == 1"))
@@ -257,7 +257,7 @@ suite "refinement lexer":
       ]
     """)
     # Should either error or not work as refinement
-    check $eval.evalString("result/ok") == "false"
+    check $eval.evalString("none? result/kind") == "false"
 
 # --- = none compilation ---
 
@@ -413,12 +413,12 @@ suite "byte and char":
   test "byte on empty string errors":
     let eval = makeEval()
     discard eval.evalString("""result: try [byte ""]""")
-    check $eval.evalString("result/ok") == "false"
+    check $eval.evalString("none? result/kind") == "false"
 
   test "char out of range errors":
     let eval = makeEval()
     discard eval.evalString("result: try [char 300]")
-    check $eval.evalString("result/ok") == "false"
+    check $eval.evalString("none? result/kind") == "false"
 
 suite "print/no-newline":
   test "print/no-newline does not add newline":
@@ -571,7 +571,7 @@ suite "filesystem":
   test "read/dir on nonexistent errors":
     let eval = makeEval()
     discard eval.evalString("""result: try [read/dir "nonexistent"]""")
-    check $eval.evalString("result/ok") == "false"
+    check $eval.evalString("none? result/kind") == "false"
 
 suite "unified I/O":
   test "read file":
@@ -634,7 +634,7 @@ suite "unified I/O":
   test "read on nonexistent errors":
     let eval = makeEval()
     discard eval.evalString("""result: try [read %/nonexistent.txt]""")
-    check $eval.evalString("result/ok") == "false"
+    check $eval.evalString("none? result/kind") == "false"
 
 suite "replace refinements":
   test "replace all on string":
@@ -666,7 +666,7 @@ suite "attempt retries":
       attempt [
         source [
           attempts: attempts + 1
-          if attempts < 3 [error 'test "not ready" none]
+          if attempts < 3 [error 'test "not ready"]
           "success"
         ]
         retries 5
@@ -679,7 +679,7 @@ suite "attempt retries":
     let eval = makeEval()
     let r = eval.evalString("""
       attempt [
-        source [error 'test "always fails" none]
+        source [error 'test "always fails"]
         retries 2
         fallback ["gave up"]
       ]
@@ -690,7 +690,7 @@ suite "attempt retries":
     let eval = makeEval()
     let r = eval.evalString("""
       attempt [
-        source [error 'network "timeout" none]
+        source [error 'network "timeout"]
         catch 'network [rejoin ["caught: " error]]
       ]
     """)
@@ -700,7 +700,7 @@ suite "attempt retries":
     let eval = makeEval()
     let r = eval.evalString("""
       attempt [
-        source [error 'math "divide by zero" none]
+        source [error 'math "divide by zero"]
         catch 'network [rejoin ["caught: " error]]
         fallback ["unhandled"]
       ]

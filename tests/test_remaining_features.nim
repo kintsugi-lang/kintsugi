@@ -35,32 +35,33 @@ suite "parse/ok? refinement":
     check result.kind == vkContext
 
 # ============================================================
-# Feature 2: rethrow
+# Feature 2: re-raising via error with captured kind/data
+# (rethrow was removed; users pass through error kind data)
 # ============================================================
 
-suite "rethrow":
-  test "rethrow re-raises error from try result":
+suite "re-raise via error":
+  test "re-raising produces failure result":
     let eval = makeEval()
     check $eval.evalString("""
-      result: try [error 'bad "oops" none]
-      outer: try [rethrow result]
-      outer/ok
+      result: try [error 'bad "oops"]
+      outer: try [error result/kind result/data]
+      none? outer/kind
     """) == "false"
 
-  test "rethrow preserves error kind":
+  test "re-raised kind is preserved":
     let eval = makeEval()
     check $eval.evalString("""
-      result: try [error 'math "divide by zero" none]
-      outer: try [rethrow result]
+      result: try [error 'math "divide by zero"]
+      outer: try [error result/kind result/data]
       outer/kind
-    """) == "'math"
+    """) == "math"
 
-  test "rethrow preserves error message":
+  test "re-raised payload is preserved":
     let eval = makeEval()
     check $eval.evalString("""
-      result: try [error 'math "divide by zero" none]
-      outer: try [rethrow result]
-      outer/message
+      result: try [error 'math "divide by zero"]
+      outer: try [error result/kind result/data]
+      outer/data
     """) == "divide by zero"
 
 # ============================================================

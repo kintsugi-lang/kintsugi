@@ -156,7 +156,7 @@ suite "exports":
     check $eval.evalString("m/add 3 4") == "7"
     # secret should not be exported
     discard eval.evalString("r: try [m/secret]")
-    check $eval.evalString("r/ok") == "false"
+    check $eval.evalString("r/kind") != "none"
     removeFile(tmpFile)
 
 suite "save":
@@ -236,3 +236,74 @@ suite "join accepts a block (literal, no reduce)":
   test "join/with delimiter":
     let eval = makeEval()
     check $eval.evalString("""join/with ["a" "b" "c"] "," """) == "a,b,c"
+
+suite "try returns {kind data} result context":
+  test "success: kind is none, data is the value":
+    let eval = makeEval()
+    discard eval.evalString("r: try [10 + 5]")
+    check $eval.evalString("r/kind") == "none"
+    check $eval.evalString("r/data") == "15"
+
+  test "failure: kind is lit-word, data is payload":
+    let eval = makeEval()
+    discard eval.evalString("r: try [error 'math \"div by zero\"]")
+    check $eval.evalString("r/kind") == "math"
+    check $eval.evalString("r/data") == "div by zero"
+
+  test "unless result/kind unwraps happy path":
+    let eval = makeEval()
+    discard eval.evalString("r: try [42]")
+    check $eval.evalString("unless r/kind [r/data]") == "42"
+
+  test "if result/kind branches on failure":
+    let eval = makeEval()
+    discard eval.evalString("r: try [error 'net \"offline\"]")
+    check $eval.evalString("if r/kind [rejoin [r/kind \": \" r/data]]") == "net: offline"
+
+  test "destructure via set [kind data]":
+    # Context destructure is named -- field names must match.
+    let eval = makeEval()
+    discard eval.evalString("set [kind data] try [error 'parse \"bad\"]")
+    check $eval.evalString("kind") == "parse"
+    check $eval.evalString("data") == "bad"
+
+  test "structured payload passes through as data":
+    let eval = makeEval()
+    discard eval.evalString("""r: try [error 'validation context [field: "email" value: "bad"]]""")
+    check $eval.evalString("r/kind") == "validation"
+    check $eval.evalString("r/data/field") == "email"
+    check $eval.evalString("r/data/value") == "bad"
+
+  test "result has no ok, value, or message fields":
+    let eval = makeEval()
+    discard eval.evalString("r: try [1]")
+    check $eval.evalString("has? r \"ok\"") == "false"
+    check $eval.evalString("has? r \"value\"") == "false"
+    check $eval.evalString("has? r \"message\"") == "false"
+
+suite "error is arity 2":
+  test "error kind payload is sufficient":
+    let eval = makeEval()
+    discard eval.evalString("r: try [error 'x 42]")
+    check $eval.evalString("r/kind") == "x"
+    check $eval.evalString("r/data") == "42"
+
+  test "error with block payload":
+    let eval = makeEval()
+    discard eval.evalString("r: try [error 'multi [1 2 3]]")
+    check $eval.evalString("r/data") == "[1 2 3]"
+
+suite "rethrow is removed":
+  test "rethrow is no longer defined":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("rethrow none")
+
+  test "re-raising via error kind data works":
+    let eval = makeEval()
+    discard eval.evalString("""outer: try [
+      inner: try [error 'user "boom"]
+      if inner/kind [error inner/kind inner/data]
+    ]""")
+    check $eval.evalString("outer/kind") == "user"
+    check $eval.evalString("outer/data") == "boom"

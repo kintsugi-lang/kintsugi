@@ -868,10 +868,14 @@ proc registerNatives*(eval: Evaluator) =
 
   # --- Error handling ---
 
-  ctx.native("error", 3, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+  ctx.native("error", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    # Arity 2: `error <kind:lit-word> <payload:any>`. Payload is whatever
+    # the caller attaches -- typically a string, but any value works.
+    # The internal KtgError.msg is derived from the payload for Nim-side
+    # formatting (CLI error printer); user code only sees `kind` and `data`.
     let kind = if args[0].kind == vkWord: args[0].wordName else: "user"
     let msg = if args[1].kind == vkString: args[1].strVal else: $args[1]
-    raise KtgError(kind: kind, msg: msg, data: args[2])
+    raise KtgError(kind: kind, msg: msg, data: args[1])
   )
 
   block: # try with /handle refinement
@@ -886,68 +890,41 @@ proc registerNatives*(eval: Evaluator) =
         if args[0].kind != vkBlock:
           raise KtgError(kind: "type", msg: "try expects block!", data: nil)
         let hasHandle = "handle" in eval.currentRefinements
-        # Handler is args[1] when /handle is active (consumed by refinement param handling)
         var handler: KtgValue = nil
         if hasHandle and args.len > 1:
           handler = args[1]
+        # Result shape: {kind, data}. Success: kind=none, data=value.
+        # Failure: kind=lit-word, data=error payload.
         let resultCtx = newContext()
+        proc finish(ctx: KtgContext, kind: KtgValue, data: KtgValue) =
+          ctx.set("kind", kind)
+          ctx.set("data", data)
         try:
           let value = eval.evalBlock(args[0].blockVals, eval.currentCtx)
-          resultCtx.set("ok", ktgLogic(true))
-          resultCtx.set("value", value)
-          resultCtx.set("kind", ktgNone())
-          resultCtx.set("message", ktgNone())
-          resultCtx.set("data", ktgNone())
+          finish(resultCtx, ktgNone(), value)
         except KtgError as e:
-          let errKind = ktgWord(e.kind, wkLitWord)
-          let errMsg = ktgString(e.msg)
-          let errData = if e.data != nil: e.data else: ktgNone()
+          # kind is stored as a bare word so `print r/kind` reads "math"
+          # rather than "'math". Match patterns ['math] still dispatch
+          # against a bare word by name — wordKind isn't checked.
+          let errKind = ktgWord(e.kind, wkWord)
+          let errData = if e.data != nil: e.data else: ktgString(e.msg)
           if hasHandle and handler != nil and isCallable(handler):
-            # Call handler with a single error context
+            # Handler receives the failure result context (with /kind and /data).
             try:
               let errCtx = newContext()
-              errCtx.set("kind", errKind)
-              errCtx.set("message", errMsg)
-              errCtx.set("data", errData)
+              finish(errCtx, errKind, errData)
               var handlerArgs = @[KtgValue(kind: vkContext, ctx: errCtx, line: 0)]
               var handlerPos = 0
               let handlerResult = eval.callCallable(handler, handlerArgs, handlerPos, eval.currentCtx)
-              resultCtx.set("ok", ktgLogic(true))
-              resultCtx.set("value", handlerResult)
-              resultCtx.set("kind", ktgNone())
-              resultCtx.set("message", ktgNone())
-              resultCtx.set("data", ktgNone())
+              finish(resultCtx, ktgNone(), handlerResult)
             except KtgError as he:
-              resultCtx.set("ok", ktgLogic(false))
-              resultCtx.set("value", ktgNone())
-              resultCtx.set("kind", ktgWord(he.kind, wkLitWord))
-              resultCtx.set("message", ktgString(he.msg))
-              resultCtx.set("data", if he.data != nil: he.data else: ktgNone())
+              let heData = if he.data != nil: he.data else: ktgString(he.msg)
+              finish(resultCtx, ktgWord(he.kind, wkWord), heData)
           else:
-            resultCtx.set("ok", ktgLogic(false))
-            resultCtx.set("value", ktgNone())
-            resultCtx.set("kind", errKind)
-            resultCtx.set("message", errMsg)
-            resultCtx.set("data", errData)
+            finish(resultCtx, errKind, errData)
         KtgValue(kind: vkContext, ctx: resultCtx, line: 0)
     )
     ctx.set("try", KtgValue(kind: vkNative, nativeFn: tryNative, line: 0))
-
-  # --- Rethrow ---
-
-  ctx.native("rethrow", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    let val = args[0]
-    if val.kind == vkContext:
-      let kind = val.ctx.get("kind")
-      let msg = val.ctx.get("message")
-      let data = if val.ctx.has("data"): val.ctx.get("data") else: ktgNone()
-      raise KtgError(
-        kind: if kind.kind == vkWord: kind.wordName else: "user",
-        msg: if msg.kind == vkString: msg.strVal else: $msg,
-        data: data
-      )
-    raise KtgError(kind: "type", msg: "rethrow expects a try result context", data: nil)
-  )
 
   # --- Set (destructuring) ---
 

@@ -41,7 +41,7 @@ let nativeArities*: seq[tuple[name: string, arity: int]] = @[
   # Apply/Sort/Set
   ("apply", 2), ("sort", 1), ("set", 2),
   # Error handling
-  ("error", 3), ("try", 1),
+  ("error", 2), ("try", 1),
   # Match/Make
   ("match", 2), ("make", 2),
   # IO

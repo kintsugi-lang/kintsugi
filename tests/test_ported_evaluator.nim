@@ -309,63 +309,59 @@ suite "Try and error":
   test "success":
     let eval = makeEval()
     discard eval.evalString("result: try [10 + 5]")
-    check $eval.evalString("result/ok") == "true"
-    check $eval.evalString("result/value") == "15"
-    check $eval.evalString("result/kind") == "none"
-    check $eval.evalString("result/message") == "none"
-    check $eval.evalString("result/data") == "none"
+    check $eval.evalString("none? result/kind") == "true"
+    check $eval.evalString("result/data") == "15"
 
   test "division by zero":
     let eval = makeEval()
     discard eval.evalString("result: try [10 / 0]")
-    check $eval.evalString("result/ok") == "false"
-    check $eval.evalString("result/value") == "none"
+    check $eval.evalString("none? result/kind") == "false"
 
-  test "error with kind and message":
+  test "error with kind and payload":
     let eval = makeEval()
-    discard eval.evalString("result: try [error 'test-error \"oops\" none]")
-    check $eval.evalString("result/ok") == "false"
-    check $eval.evalString("result/kind") == "'test-error"
-    check $eval.evalString("result/message") == "oops"
+    discard eval.evalString("result: try [error 'test-error \"oops\"]")
+    check $eval.evalString("none? result/kind") == "false"
+    check $eval.evalString("result/kind") == "test-error"
+    check $eval.evalString("result/data") == "oops"
 
-  test "error with data":
+  test "error with block payload":
     let eval = makeEval()
-    discard eval.evalString("result: try [error 'bad \"msg\" [x: 1]]")
-    check $eval.evalString("result/ok") == "false"
+    discard eval.evalString("result: try [error 'bad [x: 1]]")
+    check $eval.evalString("none? result/kind") == "false"
     let data = eval.evalString("result/data")
     check data.kind == vkBlock
 
   test "error kind only":
     let eval = makeEval()
-    discard eval.evalString("result: try [error 'fail none none]")
-    check $eval.evalString("result/kind") == "'fail"
-    check $eval.evalString("result/message") == "none"
+    discard eval.evalString("result: try [error 'fail none]")
+    check $eval.evalString("result/kind") == "fail"
+    check $eval.evalString("result/data") == "none"
 
   test "error context":
     let eval = makeEval()
     discard eval.evalString("result: try [10 / 0]")
-    check $eval.evalString("result/ok") == "false"
-    check $eval.evalString("result/kind") == "'math"
+    check $eval.evalString("none? result/kind") == "false"
+    check $eval.evalString("result/kind") == "math"
 
   test "handle receives error and recovers":
     let eval = makeEval()
     discard eval.evalString("handler: function [e] [42]")
-    discard eval.evalString("""result: try/handle [error 'bad "oops" none] :handler""")
-    check $eval.evalString("result/ok") == "true"  # handler recovered
-    check $eval.evalString("result/value") == "42"
+    discard eval.evalString("""result: try/handle [error 'bad "oops"] :handler""")
+    check $eval.evalString("none? result/kind") == "true"  # handler recovered
+    check $eval.evalString("result/data") == "42"
 
   test "handle not called on success":
     let eval = makeEval()
     discard eval.evalString("handler: function [e] [99]")
     discard eval.evalString("result: try/handle [10 + 5] :handler")
-    check $eval.evalString("result/ok") == "true"
-    check $eval.evalString("result/value") == "15"
+    check $eval.evalString("none? result/kind") == "true"
+    check $eval.evalString("result/data") == "15"
 
   test "handle inline function":
     let eval = makeEval()
-    discard eval.evalString("""result: try/handle [error 'fail "boom" none] function [e] [e/message]""")
-    check $eval.evalString("result/ok") == "true"
-    check $eval.evalString("""result/value""") == "boom"
+    discard eval.evalString("""result: try/handle [error 'fail "boom"] function [e] [e/data]""")
+    check $eval.evalString("none? result/kind") == "true"
+    check $eval.evalString("""result/data""") == "boom"
 
 # =============================================================================
 # homoiconic.test.ts — to word types
@@ -490,11 +486,11 @@ suite "Lifecycle hooks":
       result: try [
         @enter [print "enter"]
         @exit [print "exit"]
-        error 'fail "boom" none
+        error 'fail "boom"
       ]
     """)
     check eval.output == @["enter", "exit"]
-    check $eval.evalString("result/ok") == "false"
+    check $eval.evalString("none? result/kind") == "false"
 
   test "lifecycle exit sees bindings":
     let eval = makeEval()
