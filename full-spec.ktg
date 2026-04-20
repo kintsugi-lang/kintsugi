@@ -886,8 +886,10 @@ print to logic! none                    ; false
 ; @type defines a custom type value. Four forms:
 ;   @type         [type! | type!]      - union of built-ins
 ;   @type/where   [type!] [guard]      - refinement with predicate
-;   @type/enum    ['a | 'b | 'c]       - enumerated lit-words (case-sensitive)
-;   @type         ['foo | 'bar]        - case-insensitive lit-word union
+;   @type/enum    ['a | 'b | 'c]       - enumerated lit-words (namespace + singletons)
+;   @type         ['foo]               - singleton tag (one lit-word, or mixed with types)
+; A bare @type with a pure 2+ lit-word union (`['a | 'b]`) is rejected;
+; use @type/enum for that shape.
 
 ; Union types
 id!: @type [integer! | string!]
@@ -908,10 +910,18 @@ print is? percentage! 1.5              ; false
 ;   positive!: @type/where [integer!] [it > 0]
 ;   flexible!: @type [positive! | string!]
 
-; Enum (case-sensitive lit-word list)
+; Enum (lit-word list; case-insensitive, like the rest of the language)
 traffic-light-color!: @type/enum ['red | 'yellow | 'green]
 print is? traffic-light-color! 'red     ; true
 print is? traffic-light-color! 'blue    ; false
+
+; Enum namespace: <name>/<member> is the member's value, <name>/<member>!
+; is a singleton type matching only that member.
+print traffic-light-color/red                           ; 'red
+print is? traffic-light-color/red! 'red                 ; true
+print is? traffic-light-color/red! 'green               ; false
+; Typos raise an error instead of silently returning undefined:
+;   traffic-light-color/read  ->  'read' is not a member of traffic-light-color!
 
 ; Custom types compose with parameter specs
 clamp-positive: function [n [positive!]] [n]

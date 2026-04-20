@@ -364,8 +364,8 @@ The `@` sigil means "the language is doing something structural here." A word th
 
 | Sigil | Shape | What it does |
 |-------|-------|--------------|
-| `@type` | `name!: @type [rule]` | Define a custom type (rule block like `[string! \| none!]`). |
-| `@type/enum` | `name!: @type/enum ['a \| 'b]` | Define an enum over lit-words. |
+| `@type` | `name!: @type [rule]` | Define a custom type (rule block like `[string! \| none!]`). A pure 2+ lit-word union (`['a \| 'b]`) is rejected — use `@type/enum` for that shape. |
+| `@type/enum` | `name!: @type/enum ['a \| 'b]` | Define an enum over lit-words. Exposes `name/member` as path access to each member value, and `name/member!` as a singleton type matching only that member. Member lookup is case-insensitive; typos raise a typed error. |
 | `@type/where` | `name!: @type/where [spec] [guard]` | Define a type with a validation guard expression. |
 | `@type/guard` | `name?: @type/guard [params] [body]` | Construct a function eligible to be called inside `@type` where-guard bodies. Compiler validates body for compileability. |
 | `@const` | `name: @const value` | Bind a constant. The binding may not be reassigned. Lua emits with the `<const>` attribute. |
