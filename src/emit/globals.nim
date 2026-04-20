@@ -3,8 +3,7 @@
 ## Kintsugi user code emits as Lua globals when a name isn't declared locally,
 ## isn't in the bindings dialect map, and isn't a prescanned user binding.
 ## The emitter rejects such names by default; this module holds the sets of
-## names that ARE allowed (Lua stdlib, Kintsugi reserved-word escapes, and
-## target-specific globals for LOVE2D / Playdate).
+## names that ARE allowed (Lua stdlib + Kintsugi reserved-word escapes).
 
 import std/sets
 
@@ -18,8 +17,8 @@ const LuaReserved* = [
 
 ## Lua standard globals that Kintsugi user code can reference without an
 ## explicit binding or local declaration. Anything not in this set (or in
-## bindings/locals/moduleNames/nameMap/target allowlist) is a typo or a
-## missing `bindings [...]` entry; the strict-globals pass rejects it.
+## bindings/locals/moduleNames/nameMap) is a typo or a missing
+## `bindings [...]` entry; the strict-globals pass rejects it.
 const LuaStdlibGlobals* = [
   "math", "string", "table", "io", "os", "coroutine", "debug", "package",
   "print", "tostring", "tonumber", "pairs", "ipairs", "type", "error",
@@ -28,8 +27,3 @@ const LuaStdlibGlobals* = [
   "rawlen", "collectgarbage", "dofile", "loadfile", "loadstring", "load",
   "_G", "_ENV", "_VERSION"
 ].toHashSet
-
-## Target-specific globals merged into the allowlist when the matching
-## --target flag is active.
-const Love2dGlobals* = ["love"].toHashSet
-const PlaydateGlobals* = ["playdate", "import", "json", "graphics"].toHashSet

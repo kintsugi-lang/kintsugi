@@ -24,7 +24,7 @@ proc setupEval(): Evaluator =
   eval.registerAttempt()
   eval
 
-proc kintsugiCompile*(source: cstring, target: cstring): cstring {.exportc.} =
+proc kintsugiCompile*(source: cstring): cstring {.exportc.} =
   ## Returns a JSON string `{"prelude": "...", "source": "...", "error": ...}`.
   ## Playground destructures into separate panes. On error, both prelude
   ## and source are empty and `error` carries the message; otherwise
@@ -32,9 +32,9 @@ proc kintsugiCompile*(source: cstring, target: cstring): cstring {.exportc.} =
   try:
     let ast = parseSource($source)
     let eval = setupEval()
-    let processed = eval.preprocess(ast, forCompilation = true, target = $target)
+    let processed = eval.preprocess(ast, forCompilation = true)
     # Playground ignores depWrites — `import %path` raises in the JS build.
-    let (prelude, body, _) = emitLuaSplit(processed, "", $target, eval)
+    let (prelude, body, _) = emitLuaSplit(processed, "", eval)
     cstring($(%*{"prelude": prelude, "source": body, "error": newJNull()}))
   except KtgError as e:
     cstring($(%*{"prelude": "", "source": "",

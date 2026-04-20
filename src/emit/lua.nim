@@ -122,9 +122,6 @@ type
     ## arguments at call sites. When nil, compile-time checks are
     ## skipped and guards fall through to the runtime prologue.
     eval*: Evaluator
-    ## Compile target ("", "love2d", "playdate"). Drives target-specific
-    ## global allowlists in the strict-globals diagnostic.
-    target: string
     ## Dependency .lua files produced by `import %path`. The emitter
     ## never writes these itself — it accumulates (absolutePath, luaSource)
     ## pairs here, and the caller (CLI) flushes them after emission. Keeps
@@ -354,9 +351,9 @@ proc initNativeBindings(): Table[string, BindingInfo] =
   for name in typePredNames:
     result[name & "?"] = bindingFunc(1)
 
-## Global allowlists (LuaReserved, LuaStdlibGlobals, Love2dGlobals,
-## PlaydateGlobals) live in globals.nim; luaName and other pure helpers
-## live in helpers.nim. All re-exported via import above.
+## Global allowlists (LuaReserved, LuaStdlibGlobals) live in globals.nim;
+## luaName and other pure helpers live in helpers.nim. All re-exported via
+## import above.
 
 proc resolvedName(e: LuaEmitter, name: string): string =
   ## If `name` is in the bindings nameMap, return the mapped Lua path.
@@ -383,13 +380,11 @@ proc emitAttemptExpr(e: var LuaEmitter, blk: seq[KtgValue]): string
 proc emitEitherExpr(e: var LuaEmitter, cond: string, trueBlock, falseBlock: seq[KtgValue]): string
 proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
                     compiling: HashSet[string] = initHashSet[string](),
-                    eval: Evaluator = nil,
-                    target: string = ""):
+                    eval: Evaluator = nil):
     tuple[lua: string, depWrites: seq[tuple[path: string, lua: string]]]
 proc emitLuaModuleEx(ast: seq[KtgValue], sourceDir: string,
                      compiling: HashSet[string],
-                     eval: Evaluator = nil,
-                     target: string = ""):
+                     eval: Evaluator = nil):
     tuple[lua: string, e: LuaEmitter]
 proc findExports(ast: seq[KtgValue]): seq[string]
 proc emitContextBlock(e: var LuaEmitter, vals: seq[KtgValue]): string
@@ -408,7 +403,7 @@ proc isKnownName(e: LuaEmitter, name: string): bool =
   ## natives, declared locals in the current scope chain, top-level
   ## module set-words, foreign-binding paths from the bindings dialect,
   ## Kintsugi identifiers that sanitize to Lua reserved words (prefixed
-  ## with _k_), the Lua stdlib allowlist, and target-specific globals.
+  ## with _k_), and the Lua stdlib allowlist.
   if name.len == 0: return true
   let sanitized = sanitize(name)
   if sanitized in LuaReserved: return true  # will emit as _k_<name>
@@ -418,12 +413,6 @@ proc isKnownName(e: LuaEmitter, name: string): bool =
   if luaName(name) in e.moduleNames: return true
   if name in e.guardFuncs: return true
   if name in LuaStdlibGlobals or sanitized in LuaStdlibGlobals: return true
-  case e.target
-  of "love2d":
-    if name in Love2dGlobals or sanitized in Love2dGlobals: return true
-  of "playdate":
-    if name in PlaydateGlobals or sanitized in PlaydateGlobals: return true
-  else: discard
   false
 
 proc assertKnownName(e: LuaEmitter, name: string, line: int) =
@@ -2649,7 +2638,7 @@ proc importHandlerImpl(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
       var childCompiling = e.compiling
       childCompiling.incl(absPath)
       let depDir = parentDir(absPath)
-      let (depLua, depE) = emitLuaModuleEx(depAst, depDir, childCompiling, e.eval, e.target)
+      let (depLua, depE) = emitLuaModuleEx(depAst, depDir, childCompiling, e.eval)
       e.pendingDepWrites.add((path: outPath, lua: depLua))
       for (p, l) in depE.pendingDepWrites:
         e.pendingDepWrites.add((path: p, lua: l))
@@ -3819,17 +3808,6 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
               emitter.ln("local " & luaName(bnameName) & " = " & bpathStr)
         let blk = vals[pos].blockVals
         emitAliases(e, blk)
-        if e.target.len > 0:
-          var bpos = 0
-          while bpos < blk.len:
-            if bpos + 1 < blk.len and
-               blk[bpos].kind == vkWord and blk[bpos].wordKind == wkWord and
-               blk[bpos + 1].kind == vkBlock and
-               blk[bpos].wordName == e.target:
-              emitAliases(e, blk[bpos + 1].blockVals)
-              bpos += 2
-            else:
-              bpos += 1
         pos += 1
       continue
 
@@ -4542,20 +4520,7 @@ proc expandIncludes(e: LuaEmitter, specBlock: seq[KtgValue]): seq[KtgValue] =
     pos += 1
 
 proc prescanBindings(e: var LuaEmitter, blk: seq[KtgValue]) =
-  ## Two-pass: universal (outer) entries first, then the target-matching
-  ## sub-block last so it overrides same-name universal entries.
   applyBindingEntries(e, blk)
-  if e.target.len > 0:
-    var pos = 0
-    while pos < blk.len:
-      if pos + 1 < blk.len and
-         blk[pos].kind == vkWord and blk[pos].wordKind == wkWord and
-         blk[pos + 1].kind == vkBlock and
-         blk[pos].wordName == e.target:
-        applyBindingEntries(e, blk[pos + 1].blockVals)
-        pos += 2
-      else:
-        pos += 1
 
 proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
   ## Recursively scan a block for function definitions and value bindings.
@@ -4944,8 +4909,7 @@ proc validatePass(e: var LuaEmitter, vals: seq[KtgValue])
 
 proc emitLuaModuleEx(ast: seq[KtgValue], sourceDir: string,
                      compiling: HashSet[string],
-                     eval: Evaluator = nil,
-                     target: string = ""):
+                     eval: Evaluator = nil):
     tuple[lua: string, e: LuaEmitter] =
   ## Compile a Kintsugi module to Lua and return both the source and the
   ## inner LuaEmitter, so a parent (entrypoint) compile can merge the
@@ -4961,8 +4925,7 @@ proc emitLuaModuleEx(ast: seq[KtgValue], sourceDir: string,
     sourceDir: sourceDir,
     compiling: compiling,
     moduleNames: collectModuleNames(ast),
-    eval: eval,
-    target: target
+    eval: eval
   )
   e.prescanBlock(ast)
   e.inferReturnArities(ast)
@@ -4982,13 +4945,12 @@ proc emitLuaModuleEx(ast: seq[KtgValue], sourceDir: string,
 
 proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
                     compiling: HashSet[string] = initHashSet[string](),
-                    eval: Evaluator = nil,
-                    target: string = ""):
+                    eval: Evaluator = nil):
     tuple[lua: string, depWrites: seq[tuple[path: string, lua: string]]] =
   ## Compile a module. Returns the compiled Lua and any deferred dep-file
   ## writes produced by nested `import %path` directives. Callers write
   ## those to disk themselves; the emitter never touches the filesystem.
-  let (lua, e) = emitLuaModuleEx(ast, sourceDir, compiling, eval, target)
+  let (lua, e) = emitLuaModuleEx(ast, sourceDir, compiling, eval)
   (lua: lua, depWrites: e.pendingDepWrites)
 
 proc isLiteralArg(v: KtgValue): bool =
@@ -5136,7 +5098,6 @@ proc expandStdlibIntoPrelude(e: var LuaEmitter): string =
     lua &= fnLua
 
 proc emitLuaSplit*(ast: seq[KtgValue], sourceDir: string = "",
-                   target: string = "",
                    eval: Evaluator = nil):
     tuple[prelude, source: string,
           depWrites: seq[tuple[path: string, lua: string]]] =
@@ -5157,8 +5118,7 @@ proc emitLuaSplit*(ast: seq[KtgValue], sourceDir: string = "",
     bindingKinds: initTable[string, BindingKind](),
     sourceDir: sourceDir,
     moduleNames: collectModuleNames(ast),
-    eval: eval,
-    target: target
+    eval: eval
   )
   e.prescanBlock(ast)
   e.inferReturnArities(ast)
@@ -5169,13 +5129,8 @@ proc emitLuaSplit*(ast: seq[KtgValue], sourceDir: string = "",
   e.emitBlock(ast)
   let prelude = e.buildPrelude()
   var source = e.output
-  # If there's any prelude content, the source needs to load it. Pick the
-  # right include syntax for the target.
   if prelude.len > 0:
-    let includeLine =
-      if target == "playdate": "import 'prelude'\n"
-      else: "require('prelude')\n"
-    source = includeLine & source
+    source = "require('prelude')\n" & source
   (prelude: prelude, source: source, depWrites: e.pendingDepWrites)
 
 ## The `emitLua` single-string wrapper that used to live here has been

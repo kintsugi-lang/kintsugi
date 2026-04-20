@@ -46,8 +46,8 @@ nimble test                           # run all tests
 kintsugi                              # REPL
 kintsugi file.ktg                     # run a file
 kintsugi -e 'print 1 + 2'             # evaluate expression
-kintsugi -c file.ktg --target=<love2d|playdate>              # compile to Lua
-kintsugi -c file.ktg --target=<love2d|playdate> --dry-run    # compile to Lua and print result to stdout
+kintsugi -c file.ktg                  # compile to Lua
+kintsugi -c file.ktg --dry-run        # compile to Lua and print result to stdout
 ```
 
 ## Learn Kintsugi in Y Minutes

@@ -185,16 +185,15 @@ A dialect is a block where words change meaning. `loop [for [x] in series do [bo
 
 **Why:** Dialects and templates are complementary. Templates (`@template`, `@compose`) generate code — they produce blocks that get spliced at the call site. Dialects interpret data — they receive blocks and walk them with custom rules. Dialects are not "more powerful" than templates; they solve a different problem. Use templates when you need code generation. Use dialects when you need a custom vocabulary for a domain.
 
-### Six System Dialects
+### Five System Dialects
 
 1. **Loop** — `for/in`, `from/to/by`, with `/collect`, `/fold`, `/partition` and `when` guards
 2. **Match** — Pattern matching with type checks, captures, destructuring, guards
 3. **Parse** — PEG-style parsing with backtracking (interpreter-only)
 4. **Object** — Frozen objects with typed fields, auto-constructors, `make`
 5. **Attempt** — Resilient pipelines with `source`, `then`, `when`, `catch`, `fallback`, `retries`
-6. **Game** — Compile-time EC; user supplies S. Entity groups, state, components (via `@template`), collision, update/draw wiring, destroy/`alive?`. Compile-time only.
 
-**Why:** These are the essential abstractions. Loops, pattern matching, parsing, objects, error handling, and games. Everything else is built from these.
+**Why:** These are the essential abstractions. Loops, pattern matching, parsing, objects, and error handling. Everything else is built from these.
 
 ### Dialects Return Values, Not Side Effects
 
@@ -202,83 +201,11 @@ A dialect is a block where words change meaning. `loop [for [x] in series do [bo
 
 **Why:** Explicit data flow. Visible, testable, composable.
 
-### `@game` Is Compile-Time EC; You Supply the S
+### Games Are User Code Against Bound SDKs
 
-`@game` is the dialect for writing games. In ECS terms: **Entities and Components are handled by the dialect at compile time; Systems are ordinary user code that runs at runtime.**
+Kintsugi does not ship a game dialect. Writing a game means binding the target SDK via `bindings [...]`, assigning functions to callback globals (`love/update`, `playdate/update`), and composing entities as plain `context!` values or block data. The compiler provides no entity lifecycle, no collision dispatch, no scene/state machinery - those are user-owned concerns built from the standard primitives (`function`, `context`, `loop`, `match`, `object`).
 
-The dialect knows about entities, expands components, and unrolls the update/draw loop into direct per-entity Lua. There is no runtime entity registry, no component dispatcher, no query system, no archetype table. The generated Lua reads `player.x = player.x + player.vx * dt` directly, not `for e in entities do ... end`. Systems are not a dialect concern: if you want a "movement system" you write `update [self/x: self/x + self/vx * dt]` inside a component or an entity body, and the composed update body *is* the system. The user is the scheduler.
-
-This split is the axis of responsibility. The dialect owns plumbing - how entities declare, how components compose, how callbacks wrap into target-required shapes, how `self/<field>` substitution works, how collision enumerates pairs. The user owns logic - what happens when things update, what collisions mean, what draws look like. Neither side intrudes on the other.
-
-**Consequence: no runtime entity registry is needed until something demands a dynamic entity count.** Traditional ECS needs a registry because systems iterate entities at runtime and must know which ones have which components. Kintsugi's registry is the compile pass - each entity already knows which update bodies apply to it because macro composition decided at parse time. The system runs as unrolled inline code per entity per frame. Zero lookup, zero dispatch, zero indirection. If you eventually want spawn / despawn / dynamic counts (bullet hell, runtime enemy pools), you pay for a registry and a runtime iteration loop, and the dialect will need a second output mode; until then, every game you write gets compile-time ECS composition with hand-written performance.
-
-`@game` handles entity groups, state, collision, the update/draw/frame loop, and `self/<field>` substitution inside entity update bodies. It does not provide a cross-platform input API. It does not abstract target-specific graphics primitives beyond the auto-rect default for an entity.
-
-**Target is a compile flag, not a source field.** `kintsugi -c pong.ktg --target=love2d`. The source contains `@game [...]` with no target declaration. A missing `--target` is a compile error; the REPL and interpret mode also error on `@game`, because `@game` is a compile-time-only dialect.
-
-**Input is the concession.** LOVE accepts arbitrary keyboard keys as strings. Playdate has a fixed set of integer button bitmasks. These surfaces have no honest intersection, so the dialect does not try to unify them. Inside an `update` or `on-update` block, the dev writes target-native input directly: `if love/keyboard/isDown "w" [...]` on LOVE, `if playdate/buttonIsPressed playdate/kButtonUp [...]` on Playdate. The kButton constants are regular bindings on the Playdate backend; the dev references them like any other name. A file that mentions `playdate/kButtonUp` is implicitly a Playdate file, and compiling it with `--target=love2d` fails with an unbound-name error. Honest failure beats fake portability.
-
-**Backends are data, mostly.** A `@game` backend is a record of `bindings` (a bindings block), `prelude` (top-of-file raw Lua), `framePrelude` (top-of-update raw Lua for things like `dt` and screen clear), `emitCallbacks` (how user update/draw bodies wrap into target-required callback shapes), `drawEntity` (target-optimal auto-rect emission for a standard entity), and `storesColor` (whether to extract `cr/cg/cb` fields at all — monochrome targets drop them). Adding a new target means writing a new backend record.
-
-**Clean Lua out.** Generated Lua calls target SDK functions directly. No shim helpers, no dead state, no indirection. When the dev opens `pong.lua` to hand-extend it, they see `love.graphics.rectangle("fill", player.x, player.y, player.w, player.h)` or `playdate.graphics.fillRect(player.x, player.y, player.w, player.h)` — the same function they would have written by hand. `@game` gives you plumbing; what it outputs is yours.
-
-**Components are templates.** An entity body is a linear sequence of component calls: `pos`, `rect`, `color`, `field`, `update`, `draw`, `tags`. The dialect recognizes these directly. To add a new component — `health`, `velocity`, `timeout`, `gravity`, whatever — you write an `@template` that expands into dialect vocabulary. When `parseEntity` encounters an unknown word inside an entity body, it asks the preprocessor whether the word is a registered template; if so, the template expands into the inline stream and parsing continues.
-
-```
-@template health: [amount [integer!]] [
-  field hp (amount)
-  field max-hp (amount)
-]
-
-entity player [pos 20 40  rect 12 12  health 25]
-```
-
-`@template` auto-wraps the body in `@compose`, so paren interpolation splices arguments directly. Refinements `/deep` and `/only` select `@compose/deep` and `@compose/only` respectively, for cases where nested interpolation or per-value splicing is required. For code generation that needs branching, iteration, or file I/O — anything beyond a declarative rewrite — use `@preprocess [emit [...]]` instead.
-
-**Destroy is a skip marker, not a registry operation.** Every entity context carries an implicit `alive?: true` field. `destroy self` inside an update body, `destroy it` inside a collide body, and `destroy <name>` anywhere rewrite at dialect-expand time to `<target>/alive?: false`. Per-entity update and draw statements wrap in `if <entity>/alive? [...]`; collision pair tests include both sides' alive state in the guard condition. This is compile-time enough to model "entity is dead, stop processing it" without requiring a runtime entity registry or spawn/despawn machinery. Games that need dynamic entity counts — bullet hell, spawners, projectile pools — will eventually need a registry and the associated runtime loop; that's a bigger commitment and a separate dialect decision to make when a real game demands it.
-
-**Collision has an override seam.** The default collision test is an AABB between two entities' `pos` + `rect`. When that's not enough — circles, swept collisions, distance thresholds, per-pixel tests — use the `/using` refinement: `collide/using ball 'enemy circle-hit? [body]`. The dialect emits the user's predicate as the test in place of the AABB, with the same `it/<field>` substitution in the body. Default is what you want 80% of the time; the override is there for the 20% where it isn't.
-
-**Why:** A game dialect that pretends to hide the target makes every game worse on every target. `@game` only hides what's the same across targets — structure — and leaves surface concerns alone. Most game code is structure, so most game code is portable. The parts that are not portable are where the dev would have made a platform-specific decision anyway. The dialect respects that by not lying. Components, destroy, and collision override all follow the same pattern: the common case is built in, the uncommon case gets an escape hatch, and neither the dialect nor the runtime grows machinery to hide the difference.
-
-### `@game` Stops Where Runtime Begins
-
-Two patterns that other game frameworks bake into their core — runtime entity spawn/despawn and scene transitions — are deliberately not in `@game`. They aren't "deferred features" waiting on implementation; they're **user-owned concerns** that don't need a dialect form because Kintsugi's primitives already express them cleanly. The dialect ships `group 'name [entity ...]` as a compile-time tag wrapper, not a runtime scene concept — every entity inside a group gets the group name appended to its `tags`, making it addressable via `collide <ent> '<group> [...]` and any other tag-based lookup. That is the entirety of the "scene" feature in the dialect.
-
-**Runtime entity spawn/despawn = a list, a function, a loop.** Kintsugi has `[]` (block), `append` (push), `loop` (iteration), `function` (callable values), `context` (record values with field access). That is all the machinery a runtime entity system needs. The standard pattern is shipped as `lib/entities.ktg`:
-
-```
-spawn-entity: function [e] [append entities e  e]
-run-updates:  function [dt] [loop [for [e] in entities do [if e/alive? [if has? e 'update [e/update e dt]]]]]
-run-draws:    function [] [loop [for [e] in entities do [if e/alive? [if has? e 'draw [e/draw e]]]]]
-cull-dead:    function [] [alive: copy []  loop [for [e] in entities do [if e/alive? [append alive e]]]  entities: alive]
-```
-
-Users write factory functions that return `context` values with `update`, `draw`, and `alive?` fields. `spawn-entity` adds them to the list. The `@game` `on-update` block calls `run-updates dt` and `cull-dead`; the `draw` block calls `run-draws`. The dialect contributes nothing - the runtime entity system is plain Kintsugi composing existing primitives.
-
-The reason the dialect doesn't grow a `runtime` flag, an `@archetype` form, or a `spawn` keyword is that **any auto-generation locks in shape decisions** (free-list vs swap-and-pop vs pools? when does cull run? how is iteration ordered? how does collision interact?). Different games want different shapes - bullet hells want pools, RTS-style games want stable references, puzzle games want nothing at all. The dialect picking one shape forecloses the others. Plain functions don't.
-
-The pattern also coexists with `@game`'s static entities. The `player`, `score-display`, and any other compile-time-known singleton stays unrolled and lean. Dynamic bullets and particles iterate the runtime list. Two categories of entity, one Lua output that mixes flat field access with table iteration. Both clean, neither pretending to be the other.
-
-**Scene transitions = state plus alive flags.** Same answer. A `state [game-phase: 'menu]` declaration, an `on-update` block that watches the phase and toggles entities' `alive?` flags, and you have scene switching. Combine that with `group 'menu [...]` and `group 'play [...]` so you can address whole subsets of entities at once:
-
-```
-on-update [
-  ; assume the menu cursor entity is in `group 'menu` and
-  ; the player entity is in `group 'play`.
-  cursor/alive?: game-phase = 'menu
-  player/alive?: game-phase = 'playing
-  if all? [game-phase = 'menu  love/keyboard/isDown "space"] [game-phase: 'playing]
-]
-```
-
-Per-entity update and draw guards already skip inactive entities. Multi-scene games are "which subset of entities is currently running." No runtime scene registry, no `set-scene` function, no scene table. Same pattern works for pause overlays, boss intros, temporary invincibility, anything that gates entities by state.
-
-**The principle:** `@game` provides compile-time E and C; everything that runs at runtime is user code. Scene management runs at runtime. Spawn/despawn runs at runtime. Pools, free-lists, broadphase collision, archetype dispatch, all runtime. The dialect doesn't grow to fit them. Kintsugi's existing primitives (block, function, context, loop, set-words, paths) are the building material; users assemble what their game needs.
-
-**The cost of this principle:** dynamic features are more verbose than they would be in a dialect that bakes them in. Spawning a bullet is `spawn-entity make-bullet self/x self/y 500.0` instead of `spawn 'bullet [...]`. Scene switching is explicit state assignment plus `group`-tagged `alive?` flags instead of a `set-scene` runtime call. Reuse via factory functions instead of archetype declarations. The user is doing work the dialect could do for them.
-
-**The benefit of this principle:** the dialect stays small and the user stays in control. There is no version where `@game`'s opinions about runtime entity management collide with what a particular game wants. The dialect can never lock you out of a shape you need, because it has no runtime-shape opinions to lock you out with. When a game wants something different - a pool, a registry, a per-tag spatial hash - the user writes it as plain Kintsugi and it composes with everything else. The dialect doesn't need a feature flag, an opt-in directive, or a backend change.
+**Why:** Earlier versions shipped an `@game` dialect that bundled entity groups, collision, auto-wired update/draw, tag dispatch, and per-target backends. It was removed because (1) the cross-target portability story required two backends just to stay valuable, and most games ship to one target; (2) the dialect fought the language's homoiconic introspection pitch - entities weren't inspectable until the compiler had seen them with a target flag; (3) game code grows additively (globals -> tables -> helpers -> dispatch) and the dialect forced the final shape up-front. Without it, Kintsugi games look like plain Lua-target code: a bindings block, some `function`s assigned to SDK callback slots, and whatever local structure the developer wants.
 
 ---
 
@@ -450,7 +377,6 @@ The `@` sigil means "the language is doing something structural here." A word th
 | `@template/only` | `@template/only name: ...` | Same, but body is auto-wrapped in `@compose/only`. |
 | `@preprocess` | `@preprocess [body]` | Evaluate the body at parse time. Inside, `emit [...]` injects code into the source stream. The imperative escape hatch for code generation. |
 | `@inline` | `@inline [expr]` | Evaluate a single expression at parse time and splice the result into the source stream. |
-| `@game` | `@game [body]` | Compile-time game dialect. Processes `constants`, `bindings`, `group 'name [entity ... collide ... on-update ... draw ...]` and produces direct target-native Lua via a backend record. Compile-time only; requires `--target=love2d` or `--target=playdate`. |
 | `@enter` | `@enter [body]` | Lifecycle hook run when entering the enclosing `scope`/`context`. |
 | `@exit` | `@exit [body]` | Lifecycle hook run on normal or error exit from the enclosing scope. Guaranteed to run. |
 

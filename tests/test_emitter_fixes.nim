@@ -1054,22 +1054,13 @@ suite "emitter: split prelude + source":
     check "require('prelude')" notin source
     check "import 'prelude'" notin source
 
-  test "playdate target uses import directive":
-    let (prelude, source, _) = emitLuaSplit(parseSource("""
-      print [1 2 3]
-    """), target = "playdate")
-    check prelude.len > 0
-    check "import 'prelude'" in source
-    check "require('prelude')" notin source
-
-
 # --- Phase 1 invariant tests: strict-globals diagnostic ----------------------
 
 suite "emitter: strict globals":
   test "undeclared bare word raises EmitError":
     # Phase 1 invariant: a word that isn't in bindings, locals,
-    # moduleNames, the Lua stdlib allowlist, or a target allowlist
-    # must compile-error rather than emit a silent Lua global.
+    # moduleNames, or the Lua stdlib allowlist must compile-error
+    # rather than emit a silent Lua global.
     expect EmitError:
       discard emitLua(parseSource("no-such-global"))
 
@@ -1091,101 +1082,6 @@ suite "emitter: strict globals":
       v: clamp 15 0 10
     """))
     check "clamp(15, 0, 10)" in code
-
-  test "playdate target allows playdate globals":
-    let (_, source, _) = emitLuaSplit(parseSource("""
-      bindings [update "playdate.update" 'assign]
-      update: function [] [playdate/update]
-    """), target = "playdate")
-    check "playdate.update" in source
-
-suite "emitter: target-scoped bindings sub-blocks":
-  test "love2d sub-block overrides universal when target=love2d":
-    let (_, source, _) = emitLuaSplit(parseSource("""
-      bindings [
-        pi "math.pi" 'const
-        love2d [
-          pi "love.math.pi" 'const
-        ]
-        playdate [
-          pi "playdate.math.pi" 'const
-        ]
-      ]
-      print pi
-    """), target = "love2d")
-    check "love.math.pi" in source
-    check "playdate.math.pi" notin source
-
-  test "playdate sub-block overrides universal when target=playdate":
-    let (_, source, _) = emitLuaSplit(parseSource("""
-      bindings [
-        pi "math.pi" 'const
-        love2d [
-          pi "love.math.pi" 'const
-        ]
-        playdate [
-          pi "playdate.math.pi" 'const
-        ]
-      ]
-      print pi
-    """), target = "playdate")
-    check "playdate.math.pi" in source
-    check "love.math.pi" notin source
-
-  test "universal applies when no target set":
-    let (_, source, _) = emitLuaSplit(parseSource("""
-      bindings [
-        pi "math.pi" 'const
-        love2d [
-          pi "love.math.pi" 'const
-        ]
-      ]
-      print pi
-    """))
-    check "math.pi" in source
-    check "love.math.pi" notin source
-
-  test "target sub-block only — no universal — works for matching target":
-    let (_, source, _) = emitLuaSplit(parseSource("""
-      bindings [
-        love2d [
-          draw "love.graphics.rectangle" 'call 5
-        ]
-      ]
-      draw "fill" 0 0 10 10
-    """), target = "love2d")
-    check "love.graphics.rectangle" in source
-
-  test "unknown target word is skipped silently":
-    # Typo or unknown platform — trust the developer, no error at compile
-    # time since we can't reach into the target runtime to validate.
-    let (_, source, _) = emitLuaSplit(parseSource("""
-      bindings [
-        pi "math.pi" 'const
-        switch [
-          pi "nintendo.pi" 'const
-        ]
-      ]
-      print pi
-    """), target = "love2d")
-    check "math.pi" in source
-    check "nintendo.pi" notin source
-
-  test "target sub-block applied last — overrides same-name universal":
-    # Even if universal appears AFTER the sub-block textually, the
-    # sub-block still wins at the matching target because target entries
-    # are applied last by design.
-    let (_, source, _) = emitLuaSplit(parseSource("""
-      bindings [
-        love2d [
-          draw "love.override" 'call 1
-        ]
-        draw "universal" 'call 1
-      ]
-      draw 0
-    """), target = "love2d")
-    check "love.override" in source
-    check "universal" notin source
 
 # --- Phase 3a invariant tests: deferred dep-file writes ----------------------
 

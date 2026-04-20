@@ -36,9 +36,9 @@ Candidates, ranked by signal:
 - **Asteroids** — vector math (pair arithmetic), wrapping, spawner logic. Stresses the pair type and math stdlib hard.
 - **Match-3** — grid, `loop/collect`, `match` for piece types, score accumulation. Exercises the collection ops we just added parity for.
 
-Recommendation: **Breakout**. Smallest scope, broadest language surface. Target LOVE2D; bindings already exist in `lib/love2d.ktg`.
+Recommendation: **Breakout**. Smallest scope, broadest language surface. Target LOVE2D; write a `bindings [...]` block for the SDK surface the game uses.
 
-**Update 2026-04-15:** The @game dialect (phases 1-5 of roadmap-game-dialect.md) is complete. Pong runs on both LOVE2D and Playdate targets. 648 LOC across game_dialect.nim, game_backend.nim, game_playdate.nim. 38+ tests passing. Breakout has not been started yet.
+**Update 2026-04-20:** The @game dialect (previously phases 1-5 of roadmap-game-dialect.md) was removed. Games are now written as plain Kintsugi against developer-owned `bindings [...]` blocks. No lib/love2d or lib/playdate shipped - the developer binds the surface they need. See `examples/pong/main.ktg` for the reference shape.
 
 ### 2. Feature freeze on the language itself
 
@@ -70,7 +70,7 @@ Each entry is a unit of understanding earned. After three or four entries, there
 ## Concrete first session
 
 1. Commit the current state. Clean checkpoint.
-2. Create `examples/breakout/` and start the game. Use `lib/love2d.ktg`.
+2. Create `examples/breakout/` and start the game. Copy the `bindings [...]` block from `examples/pong/main.ktg` as a starting point.
 3. Structure it minimally: paddle, ball, bricks, game loop. Get a ball bouncing first.
 4. When friction hits, stop. Write the notebook entry. Decide: work around, fix, or break freeze. Log it.
 5. End session when the ball bounces off paddle and walls. Don't chase "done" yet.
@@ -99,7 +99,6 @@ The files most likely to surface issues during the build:
 - `src/dialects/loop_dialect.nim` — game loops use this constantly
 - `src/dialects/match_dialect.nim` — state machines, collision response
 - `src/dialects/object_dialect.nim` — game entities
-- `lib/love2d.ktg` — LÖVE2D bindings; likely gaps here
 - `lib/math.ktg` — vector math
 
 ## What to re-read before starting
