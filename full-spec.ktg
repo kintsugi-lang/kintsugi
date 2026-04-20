@@ -631,13 +631,13 @@ print empty? empty-parts/order          ; true
 ;   interleave: loop [for [k] in parts/order do [dispatch k]]
 
 ; --- Dynamic path indexing ---
-; Use :var in a path to evaluate the variable as an index
+; Use :var in a path to read via a variable index.
 items: [10 20 30]
 i: 2
 print items/:i                            ; 20
 
-; Dynamic set-path
-items/:i: 99
+; Mutation goes through `poke` — no dynamic set-path sugar.
+poke items i 99
 print items/:i                            ; 99
 
 ; Works with nested paths

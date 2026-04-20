@@ -3927,6 +3927,12 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
     if val.kind == vkWord and val.wordKind == wkSetWord:
       let rawName = val.wordName
       let isPath = rawName.contains('/')
+      # Dynamic set-path sugar (foo/:i: rhs) was removed — use `poke`.
+      # Read-path `foo/:i` still compiles via emitPath.
+      if isPath and rawName.contains("/:"):
+        raise EmitError(msg:
+          "dynamic set-path (" & rawName & ":) is no longer supported; " &
+          "use `poke " & rawName.split('/')[0] & " <index> <value>`")
       let isBound = rawName in e.nameMap
       let name = if isBound:
                    e.nameMap[rawName]

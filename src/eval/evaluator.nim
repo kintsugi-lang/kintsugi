@@ -653,33 +653,7 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
         for i in 0 ..< segments.len - 1:
           let seg = segments[i]
           try:
-            # Dynamic get-word segment in set-path
-            if seg.startsWith(":"):
-              let varName = seg[1..^1]
-              let idx = ctx.get(varName)
-              if current.kind == vkBlock:
-                if idx.kind == vkInteger:
-                  let j = int(idx.intVal)
-                  if j >= 1 and j <= current.blockVals.len:
-                    current = current.blockVals[j - 1]
-                  else:
-                    raise KtgError(kind: "range",
-                      msg: "index " & $j & " out of range", data: idx)
-                else:
-                  raise KtgError(kind: "type",
-                    msg: "block index must be integer!", data: idx)
-              elif current.kind == vkContext:
-                current = current.ctx.get($idx)
-              elif current.kind == vkMap:
-                let key = $idx
-                if key in current.mapEntries:
-                  current = current.mapEntries[key]
-                else:
-                  raise KtgError(kind: "undefined", msg: key & " not found in map", data: nil)
-              else:
-                raise KtgError(kind: "type",
-                  msg: "cannot navigate path on " & typeName(current), data: current)
-            elif current.kind == vkContext:
+            if current.kind == vkContext:
               current = current.ctx.get(seg)
             elif current.kind == vkMap:
               if seg in current.mapEntries:
@@ -700,43 +674,7 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
         # Set on the final target
         let lastSeg = segments[^1]
         try:
-          # Dynamic get-word as final segment
-          if lastSeg.startsWith(":"):
-            let varName = lastSeg[1..^1]
-            let idx = ctx.get(varName)
-            if current.kind == vkBlock:
-              if idx.kind == vkInteger:
-                let j = int(idx.intVal)
-                if j >= 1 and j <= current.blockVals.len:
-                  current.blockVals[j - 1] = rhs
-                else:
-                  raise KtgError(kind: "range",
-                    msg: "index " & $j & " out of range", data: idx)
-              else:
-                raise KtgError(kind: "type",
-                  msg: "block index must be integer!", data: idx)
-            elif current.kind == vkContext:
-              let dynKey = $idx
-              if current.ctx.fieldSpecs.len > 0:
-                for fs in current.ctx.fieldSpecs:
-                  if fs.name == dynKey and fs.typeName != "":
-                    let actual = typeName(rhs)
-                    if not eval.typeMatches(actual, fs.typeName, rhs, ctx):
-                      raise KtgError(kind: "type",
-                        msg: "field '" & dynKey & "' expects " & fs.typeName & ", got " & actual,
-                        data: rhs, line: val.line)
-                    break
-              current.ctx.set(dynKey, rhs)
-            elif current.kind == vkMap:
-              current.mapEntries[$idx] = rhs
-            elif current.kind == vkObject:
-              raise KtgError(kind: "frozen",
-                msg: "cannot mutate object! directly; use `make Type [field: value]` to stamp a mutable context from the template",
-                data: nil)
-            else:
-              raise KtgError(kind: "type",
-                msg: "cannot set on " & typeName(current), data: current)
-          elif current.kind == vkContext:
+          if current.kind == vkContext:
             if current.ctx.fieldSpecs.len > 0:
               for fs in current.ctx.fieldSpecs:
                 if fs.name == lastSeg and fs.typeName != "":

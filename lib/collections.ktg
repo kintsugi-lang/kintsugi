@@ -89,7 +89,7 @@ partition: function [data [block!] n [integer!] /by key-fn] [
     loop [for [item] in data do [
       key: to string! (key-fn item)
       unless has? groups 'key [
-        groups/:key: []
+        poke groups key []
       ]
       append groups/:key item
     ]]
@@ -180,9 +180,9 @@ tally: function [data [block!]] [
   loop [for [item] in data do [
     key: to string! item
     either has? counts key [
-      counts/:key: counts/:key + 1
+      poke counts key counts/:key + 1
     ] [
-      counts/:key: 1
+      poke counts key 1
     ]
   ]]
   counts

@@ -31,12 +31,12 @@ suite "dynamic paths":
     """)
     check $r == "20"
 
-  test "set via dynamic path":
+  test "poke replaces dynamic set-path":
     let eval = makeEval()
     discard eval.evalString("""
       items: [10 20 30]
       i: 2
-      items/:i: 99
+      poke items i 99
     """)
     check $eval.evalString("items/:i") == "99"
     check $eval.evalString("items") == "[10 99 30]"
