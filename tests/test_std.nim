@@ -67,12 +67,20 @@ suite "merge":
     """)
     check r.intVal == 1
 
-  test "merge with capture":
+  test "merge with capture (flattened)":
+    # capture returns block-of-blocks per keyword. The caller layers
+    # required/default semantics on top. Here we build a supplied
+    # context with only the keys that captured, then merge onto
+    # defaults so unset keys keep the default values.
     let eval = makeEval()
     let r = eval.evalString("""
       defaults: context [name: "Unknown" hp: 100 attack: 10]
       parts: capture [name "Warrior" hp 200] [@name @hp @attack]
-      result: merge defaults parts
+      supplied: context []
+      unless empty? parts/name   [supplied/name: first first parts/name]
+      unless empty? parts/hp     [supplied/hp: first first parts/hp]
+      unless empty? parts/attack [supplied/attack: first first parts/attack]
+      result: merge defaults supplied
       result
     """)
     check r.ctx.get("name").strVal == "Warrior"
@@ -132,7 +140,13 @@ suite "entity dialect pattern":
     let r = eval.evalString("""
       entity: function [spec [block!]] [
         defaults: context [name: "Unknown" hp: 100 attack: 10 defense: 5]
-        result: merge defaults (capture spec [@name @hp @attack @defense])
+        parts: capture spec [@name @hp @attack @defense]
+        supplied: context []
+        unless empty? parts/name    [supplied/name: first first parts/name]
+        unless empty? parts/hp      [supplied/hp: first first parts/hp]
+        unless empty? parts/attack  [supplied/attack: first first parts/attack]
+        unless empty? parts/defense [supplied/defense: first first parts/defense]
+        result: merge defaults supplied
         result/max-hp: result/hp
         result
       ]

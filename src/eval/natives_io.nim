@@ -553,6 +553,19 @@ proc registerIoNatives*(eval: Evaluator) =
     ctx.set("system", KtgValue(kind: vkContext, ctx: systemCtx, line: 0))
 
   # --- capture: declarative keyword extraction from blocks ---
+  #
+  # Schema entries:
+  #   @name                     - greedy: each match is a block of
+  #                               values between this keyword and the
+  #                               next meta-word keyword in data
+  #   @name [type1! type2! ...] - shape: each match is a block of N
+  #                               typed values immediately after the
+  #                               keyword; wrong count or type errors
+  #
+  # Result is a context where every schema keyword's field is a
+  # block of matches. Each match is itself a block. Zero matches is
+  # an empty block, not none. capture stays stateless -- callers
+  # layer required/optional/default on top.
 
   ctx.native("capture", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     if args[0].kind != vkBlock:
@@ -565,89 +578,81 @@ proc registerIoNatives*(eval: Evaluator) =
 
     type CaptureSpec = object
       keyword: string
-      bindName: string
-      exact: int
+      shape: seq[string]  ## type names per slot; empty = greedy
 
     var specs: seq[CaptureSpec] = @[]
     var allKeywords: seq[string] = @[]
 
-    for s in schema:
+    # Parse schema: meta-word, optionally followed by a shape block.
+    var si = 0
+    while si < schema.len:
+      let s = schema[si]
       if s.kind != vkWord or s.wordKind != wkMetaWord:
+        si += 1
         continue
-      let fullName = s.wordName
-      let parts = fullName.split('/')
-      var keyword = fullName
-      var exact = -1
-
-      if parts.len >= 2:
-        var allDigits = true
-        for c in parts[^1]:
-          if c notin {'0'..'9'}:
-            allDigits = false
-            break
-        if allDigits and parts[^1].len > 0:
-          exact = parseInt(parts[^1])
-          keyword = parts[0 .. ^2].join("/")
-
-      specs.add(CaptureSpec(keyword: keyword, bindName: keyword, exact: exact))
+      let keyword = s.wordName
+      si += 1
+      var shape: seq[string] = @[]
+      if si < schema.len and schema[si].kind == vkBlock:
+        for t in schema[si].blockVals:
+          if t.kind == vkType:
+            shape.add(t.typeName)
+          else:
+            raise KtgError(kind: "type",
+              msg: "capture shape spec expects type! slots for @" & keyword,
+              data: nil)
+        si += 1
+      specs.add(CaptureSpec(keyword: keyword, shape: shape))
       allKeywords.add(keyword)
 
+    # Seed every declared keyword with an empty block of matches.
     let resultCtx = newContext()
-
     for spec in specs:
-      resultCtx.set(spec.bindName, ktgNone())
+      resultCtx.set(spec.keyword, ktgBlock(@[]))
+
+    proc appendMatch(ctx: KtgContext, key: string, match: KtgValue) =
+      let existing = ctx.get(key)
+      var all = existing.blockVals
+      all.add(match)
+      ctx.set(key, ktgBlock(all))
 
     var pos = 0
     while pos < data.len:
       let val = data[pos]
-
       var matched = false
       for spec in specs:
         if val.kind == vkWord and val.wordKind == wkWord and val.wordName == spec.keyword:
           pos += 1
           matched = true
-
-          if spec.exact >= 0:
-            var captured: seq[KtgValue] = @[]
-            for j in 0 ..< spec.exact:
-              if pos < data.len:
-                captured.add(data[pos])
-                pos += 1
-            let existing = resultCtx.get(spec.bindName)
-            if existing.kind == vkNone:
-              if captured.len == 1:
-                resultCtx.set(spec.bindName, captured[0])
-              else:
-                resultCtx.set(spec.bindName, ktgBlock(captured))
-            else:
-              var collected: seq[KtgValue] = @[]
-              if existing.kind == vkBlock:
-                for v in existing.blockVals:
-                  collected.add(v)
-              else:
-                collected.add(existing)
-              for v in captured:
-                collected.add(v)
-              resultCtx.set(spec.bindName, ktgBlock(collected))
+          if spec.shape.len > 0:
+            # Shape spec: consume exactly N typed values.
+            var slots: seq[KtgValue] = @[]
+            for slotType in spec.shape:
+              if pos >= data.len:
+                raise KtgError(kind: "type",
+                  msg: "capture: @" & spec.keyword & " expects " &
+                       $spec.shape.len & " values, ran out of input",
+                  data: nil)
+              let v = data[pos]
+              if typeName(v) != slotType:
+                raise KtgError(kind: "type",
+                  msg: "capture: @" & spec.keyword & " slot expects " &
+                       slotType & ", got " & typeName(v),
+                  data: v)
+              slots.add(v)
+              pos += 1
+            appendMatch(resultCtx, spec.keyword, ktgBlock(slots))
           else:
+            # Greedy: consume values until next schema keyword word.
             var captured: seq[KtgValue] = @[]
             while pos < data.len:
               let cur = data[pos]
               if cur.kind == vkWord and cur.wordKind == wkWord and
-                 cur.wordName in allKeywords and cur.wordName != spec.keyword:
+                 cur.wordName in allKeywords:
                 break
-              if cur.kind == vkWord and cur.wordKind == wkWord and
-                 cur.wordName == spec.keyword:
-                pos += 1
-                continue
               captured.add(cur)
               pos += 1
-            if captured.len == 0:
-              resultCtx.set(spec.bindName, ktgNone())
-            elif captured.len == 1:
-              resultCtx.set(spec.bindName, captured[0])
-            else:
-              resultCtx.set(spec.bindName, ktgBlock(captured))
+            appendMatch(resultCtx, spec.keyword, ktgBlock(captured))
           break
 
       if not matched:

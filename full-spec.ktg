@@ -565,24 +565,62 @@ print first-item                        ; 10
 probe rest                              ; [20 30 40 50]
 
 ; --- capture: declarative keyword extraction ---
-; capture scans a block for keywords defined by meta-words in a schema.
-;   @name     - greedy: captures everything until the next keyword
-;   @name/N   - exact: captures N values after the keyword
+; capture scans a block for meta-word keywords in a schema and
+; returns a context where every field is a block of matches.
+;
+; Schema entries:
+;   @name                     - greedy: each match is a block of
+;                               values between this keyword and
+;                               the next meta-word keyword in data
+;   @name [type1! type2!...]  - shape: each match is a block of N
+;                               typed values immediately after the
+;                               keyword; wrong count or type errors
+;
+; The result shape is uniform:
+;   result/keyword is ALWAYS a block of matches.
+;   Each match is ALWAYS a block (of values or typed slots).
+;   Zero matches -> empty block.
+;
+; capture itself is stateless. It does not know about required vs
+; optional, defaults, or at-most-once. Callers layer those on top
+; using the result blocks.
 
 parts: capture [source [42] then [it + 1] then [it * 2] retries 3] [
-  @source @then @retries
+  @source
+  @then
+  @retries [integer!]
 ]
-print parts/source                      ; [42]
-probe parts/then                        ; [[it + 1] [it * 2]]
-print parts/retries                     ; 3
 
-; capture enables user-defined dialects:
-;   entity: function [spec [block!]] [
-;     parts: capture spec [@name @hp @attack @defense]
-;     ctx: context [] ctx/name: parts/name
-;     ctx/hp: parts/hp ctx/max-hp: parts/hp
-;     ctx
-;   ]
+; Every field is a block of matches.
+probe parts/source                      ; [[[42]]]
+probe parts/then                        ; [[[it + 1]] [[it * 2]]]
+probe parts/retries                     ; [[3]]
+
+; Drill with first / pick. parts/source's first match is [[42]];
+; its first value is the block [42].
+print first first parts/source          ; [42]
+print first pick parts/then 2           ; [it * 2]
+
+; Shape specs validate and destructure tuples at capture time.
+handlers: capture [catch 'net [retry] catch 'parse [log] fallback ["boom"]] [
+  @catch [lit-word! block!]
+  @fallback
+]
+; First catch match is ['net [retry]] (typed tuple).
+probe first handlers/catch              ; ['net [retry]]
+print first first handlers/catch        ; 'net
+probe second first handlers/catch       ; [retry]
+
+; Absent keywords give an empty block, never none.
+empty-parts: capture [] [@source @then]
+print empty? empty-parts/source         ; true
+print empty? empty-parts/then           ; true
+
+; Callers layer semantics:
+;   required:  if empty? parts/source [error 'dialect "source required"]
+;   default:   retries: either empty? parts/retries [0] [first first parts/retries]
+;   once:      source-body: first first first parts/source
+;   many:      steps: loop/collect [for [t] in parts/then do [first t]]
 
 ; --- Dynamic path indexing ---
 ; Use :var in a path to evaluate the variable as an index
