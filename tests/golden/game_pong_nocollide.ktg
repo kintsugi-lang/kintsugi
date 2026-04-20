@@ -7,7 +7,8 @@ Kintsugi [name: 'pong-nocollide]
     PADDLE-SPEED: 420
     BALL-SPEED: 350
   ]
-  group 'main [
+  tags [main]
+  
     state [
       paused?: false
     ]
@@ -30,7 +31,6 @@ Kintsugi [name: 'pong-nocollide]
         self/x: self/x + (BALL-SPEED * dt)
       ]
     ]
-  ]
   go 'main
 ]
 

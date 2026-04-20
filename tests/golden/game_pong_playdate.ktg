@@ -7,7 +7,8 @@ Kintsugi [name: 'pong]
     PADDLE-SPEED: 420
     BALL-ACCEL: 20
   ]
-  group 'main [
+  tags [main]
+  
     state [
       paused?: false
       player-score: 0
@@ -68,6 +69,5 @@ Kintsugi [name: 'pong]
     draw [
       playdate/graphics/drawText rejoin [player-score "   " cpu-score] 380 20
     ]
-  ]
   go 'main
 ]
