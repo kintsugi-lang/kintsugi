@@ -96,6 +96,61 @@ suite "insert/remove on strings":
     let eval = makeEval()
     check $eval.evalString("""remove "hello" 5""") == "hell"
 
+suite "poke":
+  test "poke block by integer index writes through":
+    let eval = makeEval()
+    discard eval.evalString("obj: [1 2 3]")
+    discard eval.evalString("poke obj 2 99")
+    check $eval.evalString("obj") == "[1 99 3]"
+
+  test "poke block returns the written value":
+    let eval = makeEval()
+    discard eval.evalString("obj: [1 2 3]")
+    check $eval.evalString("poke obj 1 42") == "42"
+
+  test "poke block out-of-range errors":
+    let eval = makeEval()
+    discard eval.evalString("obj: [1 2 3]")
+    expect KtgError:
+      discard eval.evalString("poke obj 5 99")
+
+  test "poke block with non-integer key errors":
+    let eval = makeEval()
+    discard eval.evalString("obj: [1 2 3]")
+    expect KtgError:
+      discard eval.evalString("""poke obj "foo" 99""")
+
+  test "poke string by integer index writes a char":
+    let eval = makeEval()
+    discard eval.evalString("""s: "hello" """)
+    discard eval.evalString("""poke s 1 "H" """)
+    check $eval.evalString("s") == "Hello"
+
+  test "poke map by key writes through":
+    let eval = makeEval()
+    discard eval.evalString("""m: make map! [a: 1 b: 2]""")
+    discard eval.evalString("""poke m 'a 99""")
+    check $eval.evalString("""m/a""") == "99"
+
+  test "poke map creates missing key":
+    let eval = makeEval()
+    discard eval.evalString("""m: make map! [a: 1]""")
+    discard eval.evalString("""poke m 'b 2""")
+    check $eval.evalString("""m/b""") == "2"
+
+  test "poke context by word key writes through":
+    let eval = makeEval()
+    discard eval.evalString("""c: context [x: 1 y: 2]""")
+    discard eval.evalString("""poke c 'x 99""")
+    check $eval.evalString("""c/x""") == "99"
+
+  test "poke variable name drives the index":
+    let eval = makeEval()
+    discard eval.evalString("obj: [1 2 3]")
+    discard eval.evalString("i: 2")
+    discard eval.evalString("poke obj i 99")
+    check $eval.evalString("obj") == "[1 99 3]"
+
 suite "read / write":
   let testFile = getTempDir() / "kintsugi_test_rw.txt"
 

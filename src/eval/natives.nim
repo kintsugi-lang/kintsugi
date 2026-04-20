@@ -314,6 +314,52 @@ proc registerNatives*(eval: Evaluator) =
     seriesAt(args[0], idx, "pick")
   )
 
+  ctx.native("poke", 3, proc(args: seq[KtgValue], ep: pointer): KtgValue =
+    ## Indexed mutation. Block / string take integer index (1-based);
+    ## map / context take a word (lit-word or word value) as key. Returns
+    ## the value written so callers can chain.
+    let target = args[0]
+    let key = args[1]
+    let value = args[2]
+    case target.kind
+    of vkBlock:
+      if key.kind != vkInteger:
+        raise KtgError(kind: "type",
+          msg: "poke on block! expects integer! key, got " & typeName(key),
+          data: key)
+      let i = int(key.intVal)
+      if i < 1 or i > target.blockVals.len:
+        raise KtgError(kind: "range",
+          msg: "poke index " & $i & " out of range (1.." & $target.blockVals.len & ")",
+          data: key)
+      target.blockVals[i - 1] = value
+    of vkString:
+      if key.kind != vkInteger:
+        raise KtgError(kind: "type",
+          msg: "poke on string! expects integer! key, got " & typeName(key),
+          data: key)
+      let i = int(key.intVal)
+      if i < 1 or i > target.strVal.len:
+        raise KtgError(kind: "range",
+          msg: "poke index " & $i & " out of range (1.." & $target.strVal.len & ")",
+          data: key)
+      if value.kind != vkString or value.strVal.len != 1:
+        raise KtgError(kind: "type",
+          msg: "poke on string! expects a one-char string! value",
+          data: value)
+      target.strVal[i - 1] = value.strVal[0]
+    of vkMap:
+      let k = if key.kind == vkWord: key.wordName else: $key
+      target.mapEntries[k] = value
+    of vkContext:
+      let k = if key.kind == vkWord: key.wordName else: $key
+      target.ctx.set(k, value)
+    else:
+      raise KtgError(kind: "type",
+        msg: "poke not supported on " & typeName(target), data: target)
+    value
+  )
+
   block:
     let appendNative = KtgNative(
       name: "append",
