@@ -1738,12 +1738,12 @@ love/keypressed: function [key] [
 ]
 ]
 
-; --- destroy and _alive ---
-; Every entity context carries an implicit _alive: true field.
+; --- destroy and alive? ---
+; Every entity context carries an implicit alive?: true field.
 ; destroy self (in update) or destroy <name> (anywhere) rewrites
-; to <target>/_alive: false. Each per-entity update and draw
-; wraps in if <entity>/_alive [...], so destroyed entities
-; silently stop being processed. _alive is a reserved field name.
+; to <target>/alive?: false. Each per-entity update and draw
+; wraps in if <entity>/alive? [...], so destroyed entities
+; silently stop being processed. alive? is a reserved field name.
 
 ; --- Components via @template ---
 ; A "component" is a template that expands into entity-body
