@@ -869,6 +869,27 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
             if not hasBar:
               isStruct = true
 
+        # Reject bare @type with a 2+ lit-word union (`@type ['a | 'b]`) —
+        # this shape is what `@type/enum` exists for. Singleton tags
+        # (`@type ['foo]`) and mixed unions (`@type [integer! | 'none]`)
+        # remain allowed.
+        if val.wordName == "type" and not isStruct:
+          var litCount = 0
+          var hasNonLit = false
+          for rv in ruleVals:
+            if rv.kind == vkWord and rv.wordKind == wkLitWord:
+              inc litCount
+            elif (rv.kind == vkWord and rv.wordKind == wkWord and rv.wordName == "|") or
+                 (rv.kind == vkOp and rv.opSymbol == "|"):
+              discard
+            else:
+              hasNonLit = true
+              break
+          if litCount >= 2 and not hasNonLit:
+            raise KtgError(kind: "type",
+              msg: "@type with a 2+ lit-word union requires @type/enum",
+              data: nil)
+
         let ct = CustomType(
           rule: ruleVals,
           guard: guardBlock,
@@ -1025,67 +1046,40 @@ proc matchesCustomType*(eval: Evaluator, value: KtgValue, ct: CustomType, ctx: K
       i += 1
     return true
 
-  # Non-enum lit-word matching: @type ['north | 'south | 'east | 'west]
-  # Case-INSENSITIVE (REBOL style) — use @type/enum for case-sensitive
-  var hasLitWords = false
+  # Union rule: walk each element. Lit-words match by name (case-insensitive);
+  # type names match by actual/builtin/custom resolution. | separators skipped.
+  # A guard (set by @type/where) runs on any successful base match.
+  proc checkGuard(eval: Evaluator, ct: CustomType, value: KtgValue,
+                  ctx: KtgContext): bool =
+    if ct.guard.len == 0: return true
+    let guardCtx = ctx.child
+    guardCtx.set("it", value)
+    let guardResult = eval.evalBlock(ct.guard, guardCtx)
+    if guardResult.kind != vkLogic:
+      raise KtgError(kind: "type",
+        msg: "where guard must return logic!, got " & typeName(guardResult),
+        data: guardResult)
+    guardResult.boolVal
+
+  var hasMember = false
+  let actual = typeName(value)
   for rv in ct.rule:
     if rv.kind == vkWord and rv.wordKind == wkLitWord:
-      hasLitWords = true
-      break
-  if hasLitWords:
-    for rv in ct.rule:
-      if rv.kind == vkWord and rv.wordKind == wkLitWord:
-        if value.kind == vkWord and value.wordKind == wkLitWord and
-           toLower(value.wordName) == toLower(rv.wordName):  # case-insensitive
-          return true
+      hasMember = true
+      if value.kind == vkWord and value.wordKind == wkLitWord and
+         toLower(value.wordName) == toLower(rv.wordName):
+        return checkGuard(eval, ct, value, ctx)
+    elif rv.kind == vkType:
+      hasMember = true
+      let tn = rv.typeName
+      if actual == tn or typeMatchesBuiltin(actual, tn) or
+         eval.matchesCustomTypeByName(value, tn, ctx):
+        return checkGuard(eval, ct, value, ctx)
+
+  if hasMember:
     return false
 
-  # Union type: [string! | none!] or [integer! | float!]
-  # Split on | and check if value matches any
-  var typeNames: seq[string] = @[]
-  for rv in ct.rule:
-    if rv.kind == vkType:
-      typeNames.add(rv.typeName)
-
-  if typeNames.len > 0:
-    let actual = typeName(value)
-    for tn in typeNames:
-      if actual == tn:
-        if ct.guard.len > 0:
-          let guardCtx = ctx.child
-          guardCtx.set("it", value)
-          let guardResult = eval.evalBlock(ct.guard, guardCtx)
-          if guardResult.kind != vkLogic:
-            raise KtgError(kind: "type",
-              msg: "where guard must return logic!, got " & typeName(guardResult),
-              data: guardResult)
-          return guardResult.boolVal
-        return true
-      if typeMatchesBuiltin(actual, tn):
-        if ct.guard.len > 0:
-          let guardCtx = ctx.child
-          guardCtx.set("it", value)
-          let guardResult = eval.evalBlock(ct.guard, guardCtx)
-          if guardResult.kind != vkLogic:
-            raise KtgError(kind: "type",
-              msg: "where guard must return logic!, got " & typeName(guardResult),
-              data: guardResult)
-          return guardResult.boolVal
-        return true
-      if eval.matchesCustomTypeByName(value, tn, ctx):
-        if ct.guard.len > 0:
-          let guardCtx = ctx.child
-          guardCtx.set("it", value)
-          let guardResult = eval.evalBlock(ct.guard, guardCtx)
-          if guardResult.kind != vkLogic:
-            raise KtgError(kind: "type",
-              msg: "where guard must return logic!, got " & typeName(guardResult),
-              data: guardResult)
-          return guardResult.boolVal
-        return true
-    return false
-
-  # If no type names found in rule but we have a guard, check guard only
+  # No checkable member in rule but a guard — run guard only.
   if ct.guard.len > 0:
     let guardCtx = ctx.child
     guardCtx.set("it", value)

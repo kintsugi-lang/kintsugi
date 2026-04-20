@@ -1,6 +1,6 @@
 ## Custom type system tests for @type, @type/where, @type/enum
 
-import std/unittest
+import std/[unittest, strutils]
 import ../src/core/types
 import ../src/eval/[dialect, evaluator, natives]
 import ../src/dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect]
@@ -151,12 +151,44 @@ suite "@type/enum":
     check $eval.evalString("is? status! 'ACTIVE") == "true"
     check $eval.evalString("is? status! 'unknown") == "false"
 
-  test "non-enum @type lit-words are case-INSENSITIVE":
+  test "bare @type with 2+ lit-word union errors (must use @type/enum)":
     let eval = makeEval()
-    discard eval.evalString("""direction!: @type ['north | 'south | 'east | 'west]""")
-    check $eval.evalString("is? direction! 'north") == "true"
-    check $eval.evalString("is? direction! 'NORTH") == "true"   # case insensitive
-    check $eval.evalString("is? direction! 'North") == "true"   # case insensitive
+    expect KtgError:
+      discard eval.evalString("""direction!: @type ['north | 'south | 'east | 'west]""")
+
+  test "bare @type with two lit-words also errors":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("""yn!: @type ['yes | 'no]""")
+
+  test "@type error message names @type/enum":
+    let eval = makeEval()
+    try:
+      discard eval.evalString("""dir!: @type ['n | 's]""")
+      check false  # should have raised
+    except KtgError as e:
+      check "@type/enum" in e.msg
+
+  test "@type with single lit-word tag is still allowed":
+    let eval = makeEval()
+    discard eval.evalString("""missing!: @type ['missing]""")
+    check $eval.evalString("is? missing! 'missing") == "true"
+    check $eval.evalString("is? missing! 'other") == "false"
+
+  test "@type with mixed lit-word and builtin is still allowed":
+    let eval = makeEval()
+    discard eval.evalString("""maybe!: @type [integer! | 'none]""")
+    check $eval.evalString("is? maybe! 42") == "true"
+    check $eval.evalString("is? maybe! 'none") == "true"
+    check $eval.evalString("""is? maybe! "hello" """) == "false"
+
+  test "@type with 2+ lit-words mixed with builtin is still allowed":
+    let eval = makeEval()
+    discard eval.evalString("""status!: @type [integer! | 'ok | 'err]""")
+    check $eval.evalString("is? status! 0") == "true"
+    check $eval.evalString("is? status! 'ok") == "true"
+    check $eval.evalString("is? status! 'err") == "true"
+    check $eval.evalString("is? status! 'other") == "false"
 
 # =============================================================================
 # is? with custom types

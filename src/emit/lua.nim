@@ -4767,6 +4767,23 @@ proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
                              guardBody: vals[i + 3].blockVals)
             i += 4
             continue
+          # Plain @type: reject 2+ lit-word unions (require @type/enum).
+          # Singleton tags and mixed unions pass through.
+          block validateLitUnion:
+            var litCount = 0
+            var hasNonLit = false
+            for rv in ruleBlk:
+              if rv.kind == vkWord and rv.wordKind == wkLitWord:
+                inc litCount
+              elif (rv.kind == vkWord and rv.wordKind == wkWord and rv.wordName == "|") or
+                   (rv.kind == vkOp and rv.opSymbol == "|"):
+                discard
+              else:
+                hasNonLit = true
+                break
+            if litCount >= 2 and not hasNonLit:
+              raise EmitError(msg:
+                "@type with a 2+ lit-word union requires @type/enum")
           # Plain @type: union of built-in or custom type names
           var bases: seq[string]
           for rv in ruleBlk:

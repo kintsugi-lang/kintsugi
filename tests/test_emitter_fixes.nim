@@ -909,6 +909,13 @@ suite "emitter: synthesized type predicates":
     check "function _dir_p(it)" in code
     check "string.lower(it) == \"n\"" in code
 
+  test "bare @type with 2+ lit-word union errors at emit":
+    expect EmitError:
+      discard emitLua(parseSource("""
+        dir!: @type ['n | 's]
+        print dir!
+      """))
+
   test "transitive composition pulls in dependency predicates":
     let code = emitLua(parseSource("""
       positive!: @type/where [integer!] [it > 0]
