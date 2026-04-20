@@ -970,12 +970,12 @@ proc matchesCustomType*(eval: Evaluator, value: KtgValue, ct: CustomType, ctx: K
   ## Check if a value matches a custom type definition.
   if ct.isEnum:
     # Enum: rule contains ['north | 'south | 'east | 'west]
-    # Value must be a lit-word matching one of the enum members
-    # @type/enum forces CASE-SENSITIVE matching
+    # Value must be a lit-word matching one of the enum members.
+    # Case-insensitive, matching language-wide word equality.
     for rv in ct.rule:
       if rv.kind == vkWord and rv.wordKind == wkLitWord:
         if value.kind == vkWord and value.wordKind == wkLitWord and
-           value.wordName == rv.wordName:  # exact case match
+           toLower(value.wordName) == toLower(rv.wordName):
           return true
     return false
 

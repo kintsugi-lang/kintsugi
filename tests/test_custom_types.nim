@@ -143,12 +143,13 @@ suite "@type/enum":
     expect KtgError:
       discard eval.evalString("describe 'up")
 
-  test "enum is case-SENSITIVE":
+  test "enum is case-INSENSITIVE (matches language-wide word equality)":
     let eval = makeEval()
     discard eval.evalString("""status!: @type/enum ['Active | 'Inactive | 'Pending]""")
     check $eval.evalString("is? status! 'Active") == "true"
-    check $eval.evalString("is? status! 'active") == "false"  # case mismatch
-    check $eval.evalString("is? status! 'ACTIVE") == "false"  # case mismatch
+    check $eval.evalString("is? status! 'active") == "true"
+    check $eval.evalString("is? status! 'ACTIVE") == "true"
+    check $eval.evalString("is? status! 'unknown") == "false"
 
   test "non-enum @type lit-words are case-INSENSITIVE":
     let eval = makeEval()

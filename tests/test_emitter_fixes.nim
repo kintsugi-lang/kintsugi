@@ -907,7 +907,7 @@ suite "emitter: synthesized type predicates":
       if is? dir! 'n [print "yes"]
     """))
     check "function _dir_p(it)" in code
-    check "it == \"n\"" in code
+    check "string.lower(it) == \"n\"" in code
 
   test "transitive composition pulls in dependency predicates":
     let code = emitLua(parseSource("""

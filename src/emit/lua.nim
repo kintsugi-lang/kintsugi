@@ -142,7 +142,8 @@ type
       whereTypes*: seq[string]      ## base type names ANDed with guard
       guardBody*: seq[KtgValue]     ## body block using `it`
     of ctEnum:
-      enumMembers*: seq[string]     ## lit-word names (case-sensitive)
+      enumMembers*: seq[string]     ## lit-word names, stored lowercased for
+                                    ## case-insensitive matching
 
   SeqType* = enum
     stUnknown
@@ -858,8 +859,9 @@ proc emitCustomTypeCheck(e: var LuaEmitter, typeName, valExpr: string): string =
   of ctEnum:
     if rule.enumMembers.len == 0: return "false"
     var parts: seq[string]
+    let lowered = "string.lower(" & valExpr & ")"
     for m in rule.enumMembers:
-      parts.add(valExpr & " == \"" & m & "\"")
+      parts.add(lowered & " == \"" & m & "\"")
     parts.join(" or ")
 
 proc emitCustomTypePredicateDecl(e: var LuaEmitter, typeName: string): string =
@@ -893,7 +895,7 @@ proc emitCustomTypePredicateDecl(e: var LuaEmitter, typeName: string): string =
   of ctEnum:
     var parts: seq[string]
     for m in rule.enumMembers:
-      parts.add("it == \"" & m & "\"")
+      parts.add("string.lower(it) == \"" & m & "\"")
     let body = if parts.len == 0: "false" else: parts.join(" or ")
     "function " & fnName & "(it)\n  return " & body & "\nend"
 
@@ -4750,7 +4752,7 @@ proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
             var members: seq[string]
             for rv in ruleBlk:
               if rv.kind == vkWord and rv.wordKind == wkLitWord:
-                members.add(rv.wordName)
+                members.add(rv.wordName.toLowerAscii)
             e.customTypeRules[baseName] =
               CustomTypeRule(kind: ctEnum, enumMembers: members)
             i += 3
@@ -4977,7 +4979,7 @@ proc matchesCustomRule(e: LuaEmitter, rule: CustomTypeRule, arg: KtgValue): bool
     false
   of ctEnum:
     if arg.kind == vkWord and arg.wordKind == wkLitWord:
-      return arg.wordName in rule.enumMembers
+      return arg.wordName.toLowerAscii in rule.enumMembers
     false
   of ctWhere:
     # Base-type gate: the arg's kind must satisfy one of the whereTypes
