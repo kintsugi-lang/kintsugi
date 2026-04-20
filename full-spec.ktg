@@ -569,21 +569,26 @@ probe rest                              ; [20 30 40 50]
 ; returns a context where every field is a block of matches.
 ;
 ; Schema entries:
-;   @name                     - greedy: each match is a block of
-;                               values between this keyword and
-;                               the next meta-word keyword in data
-;   @name [type1! type2!...]  - shape: each match is a block of N
-;                               typed values immediately after the
-;                               keyword; wrong count or type errors
+;   @name                     - greedy: each match captures values
+;                               between this keyword and the next
+;                               meta-word keyword in data
+;   @name [T]                 - 1-slot shape: type-check the next
+;                               value; match is the value itself
+;   @name [T1 T2 ...]         - N-slot shape: match is a tuple block
+;                               of N typed values
 ;
-; The result shape is uniform:
-;   result/keyword is ALWAYS a block of matches.
-;   Each match is ALWAYS a block (of values or typed slots).
-;   Zero matches -> empty block.
+; Match shapes (no extra nesting):
+;   1 captured token   -> match is the token directly
+;   N captured tokens  -> match is a block of the tokens
+;   0 captured tokens  -> match is an empty block
+;   N-slot shape       -> match is a block of N slots (tuple)
 ;
-; capture itself is stateless. It does not know about required vs
-; optional, defaults, or at-most-once. Callers layer those on top
-; using the result blocks.
+; result/order is a synthesized block of lit-words listing every
+; keyword encounter in source order. Use it to reconstruct
+; interleaved dialect sequences.
+;
+; capture is stateless: no required, no default, no strict. Callers
+; layer those on top using first / empty? / pick and result/order.
 
 parts: capture [source [42] then [it + 1] then [it * 2] retries 3] [
   @source
@@ -591,36 +596,39 @@ parts: capture [source [42] then [it + 1] then [it * 2] retries 3] [
   @retries [integer!]
 ]
 
-; Every field is a block of matches.
-probe parts/source                      ; [[[42]]]
-probe parts/then                        ; [[[it + 1]] [[it * 2]]]
-probe parts/retries                     ; [[3]]
+; Fields: block of matches, unwrapped match shape.
+probe parts/source                      ; [[42]]
+probe parts/then                        ; [[it + 1] [it * 2]]
+probe parts/retries                     ; [3]
+probe parts/order                       ; ['source 'then 'then 'retries]
 
-; Drill with first / pick. parts/source's first match is [[42]];
-; its first value is the block [42].
-print first first parts/source          ; [42]
-print first pick parts/then 2           ; [it * 2]
+; Drill with first / pick.
+print first parts/source                ; [42]
+print first parts/retries               ; 3
+print first pick parts/then 2           ; it
 
 ; Shape specs validate and destructure tuples at capture time.
 handlers: capture [catch 'net [retry] catch 'parse [log] fallback ["boom"]] [
   @catch [lit-word! block!]
   @fallback
 ]
-; First catch match is ['net [retry]] (typed tuple).
+; First catch match is ['net [retry]] (2-slot tuple).
 probe first handlers/catch              ; ['net [retry]]
-print first first handlers/catch        ; 'net
+print first first handlers/catch        ; net
 probe second first handlers/catch       ; [retry]
+print first handlers/fallback           ; boom
 
-; Absent keywords give an empty block, never none.
+; Absent keywords give an empty block.
 empty-parts: capture [] [@source @then]
 print empty? empty-parts/source         ; true
-print empty? empty-parts/then           ; true
+print empty? empty-parts/order          ; true
 
 ; Callers layer semantics:
-;   required:  if empty? parts/source [error 'dialect "source required"]
-;   default:   retries: either empty? parts/retries [0] [first first parts/retries]
-;   once:      source-body: first first first parts/source
-;   many:      steps: loop/collect [for [t] in parts/then do [first t]]
+;   required:   if empty? parts/source [error 'dialect "source required"]
+;   default:    retries: either empty? parts/retries [0] [first parts/retries]
+;   once:       source-body: first parts/source
+;   many:       loop [for [t] in parts/then do [print t]]
+;   interleave: loop [for [k] in parts/order do [dispatch k]]
 
 ; --- Dynamic path indexing ---
 ; Use :var in a path to evaluate the variable as an index

@@ -67,19 +67,17 @@ suite "merge":
     """)
     check r.intVal == 1
 
-  test "merge with capture (flattened)":
-    # capture returns block-of-blocks per keyword. The caller layers
-    # required/default semantics on top. Here we build a supplied
-    # context with only the keys that captured, then merge onto
-    # defaults so unset keys keep the default values.
+  test "merge with capture":
+    # capture's match shape: single-value matches are the value directly.
+    # parts/name = ["Warrior"], so first parts/name is the string.
     let eval = makeEval()
     let r = eval.evalString("""
       defaults: context [name: "Unknown" hp: 100 attack: 10]
       parts: capture [name "Warrior" hp 200] [@name @hp @attack]
       supplied: context []
-      unless empty? parts/name   [supplied/name: first first parts/name]
-      unless empty? parts/hp     [supplied/hp: first first parts/hp]
-      unless empty? parts/attack [supplied/attack: first first parts/attack]
+      unless empty? parts/name   [supplied/name: first parts/name]
+      unless empty? parts/hp     [supplied/hp: first parts/hp]
+      unless empty? parts/attack [supplied/attack: first parts/attack]
       result: merge defaults supplied
       result
     """)
@@ -142,10 +140,10 @@ suite "entity dialect pattern":
         defaults: context [name: "Unknown" hp: 100 attack: 10 defense: 5]
         parts: capture spec [@name @hp @attack @defense]
         supplied: context []
-        unless empty? parts/name    [supplied/name: first first parts/name]
-        unless empty? parts/hp      [supplied/hp: first first parts/hp]
-        unless empty? parts/attack  [supplied/attack: first first parts/attack]
-        unless empty? parts/defense [supplied/defense: first first parts/defense]
+        unless empty? parts/name    [supplied/name: first parts/name]
+        unless empty? parts/hp      [supplied/hp: first parts/hp]
+        unless empty? parts/attack  [supplied/attack: first parts/attack]
+        unless empty? parts/defense [supplied/defense: first parts/defense]
         result: merge defaults supplied
         result/max-hp: result/hp
         result

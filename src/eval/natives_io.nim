@@ -555,17 +555,21 @@ proc registerIoNatives*(eval: Evaluator) =
   # --- capture: declarative keyword extraction from blocks ---
   #
   # Schema entries:
-  #   @name                     - greedy: each match is a block of
-  #                               values between this keyword and the
-  #                               next meta-word keyword in data
-  #   @name [type1! type2! ...] - shape: each match is a block of N
-  #                               typed values immediately after the
-  #                               keyword; wrong count or type errors
+  #   @name                     - greedy: each match is the value
+  #                               (or block of values) captured
+  #                               between this keyword and the next
+  #                               meta-word keyword in data
+  #   @name [T]                 - single-slot shape: type-check then
+  #                               match = the value itself
+  #   @name [T1 T2 ...]         - multi-slot shape: match = block of
+  #                               N typed values as a tuple
   #
   # Result is a context where every schema keyword's field is a
-  # block of matches. Each match is itself a block. Zero matches is
-  # an empty block, not none. capture stays stateless -- callers
-  # layer required/optional/default on top.
+  # block of matches, plus an `order` field listing the keywords
+  # encountered in source order. Single-value matches are NOT wrapped
+  # in an extra block -- the match IS the captured value directly.
+  # Zero matches -> empty block. Stateless: callers layer
+  # required/optional/default on top.
 
   ctx.native("capture", 2, proc(args: seq[KtgValue], ep: pointer): KtgValue =
     if args[0].kind != vkBlock:
@@ -606,9 +610,13 @@ proc registerIoNatives*(eval: Evaluator) =
       allKeywords.add(keyword)
 
     # Seed every declared keyword with an empty block of matches.
+    # `order` is a synthesized field listing source-order keyword
+    # occurrences (as lit-words) so callers can reconstruct
+    # interleaved dialect sequences.
     let resultCtx = newContext()
     for spec in specs:
       resultCtx.set(spec.keyword, ktgBlock(@[]))
+    var orderBlock: seq[KtgValue] = @[]
 
     proc appendMatch(ctx: KtgContext, key: string, match: KtgValue) =
       let existing = ctx.get(key)
@@ -624,6 +632,7 @@ proc registerIoNatives*(eval: Evaluator) =
         if val.kind == vkWord and val.wordKind == wkWord and val.wordName == spec.keyword:
           pos += 1
           matched = true
+          orderBlock.add(ktgWord(spec.keyword, wkLitWord))
           if spec.shape.len > 0:
             # Shape spec: consume exactly N typed values.
             var slots: seq[KtgValue] = @[]
@@ -641,7 +650,12 @@ proc registerIoNatives*(eval: Evaluator) =
                   data: v)
               slots.add(v)
               pos += 1
-            appendMatch(resultCtx, spec.keyword, ktgBlock(slots))
+            # Single-slot shapes: match is the value directly.
+            # Multi-slot shapes: match is the N-tuple as a block.
+            if slots.len == 1:
+              appendMatch(resultCtx, spec.keyword, slots[0])
+            else:
+              appendMatch(resultCtx, spec.keyword, ktgBlock(slots))
           else:
             # Greedy: consume values until next schema keyword word.
             var captured: seq[KtgValue] = @[]
@@ -652,11 +666,17 @@ proc registerIoNatives*(eval: Evaluator) =
                 break
               captured.add(cur)
               pos += 1
-            appendMatch(resultCtx, spec.keyword, ktgBlock(captured))
+            # One captured token: match = that token directly.
+            # Many or zero captured tokens: match = block of them.
+            if captured.len == 1:
+              appendMatch(resultCtx, spec.keyword, captured[0])
+            else:
+              appendMatch(resultCtx, spec.keyword, ktgBlock(captured))
           break
 
       if not matched:
         pos += 1
 
+    resultCtx.set("order", ktgBlock(orderBlock))
     KtgValue(kind: vkContext, ctx: resultCtx, line: 0)
   )
