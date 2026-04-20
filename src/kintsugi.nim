@@ -159,6 +159,16 @@ proc runFile(path: string) =
 
 # --- Compiler ---
 
+proc refuseInterpreterTarget(path, content: string) =
+  ## Files whose Kintsugi header declares `target: 'interpreter` are
+  ## interpret-mode only. The compiler refuses them loudly rather than
+  ## emitting partial Lua for code that relies on interpreter-only
+  ## features (e.g. `@compose` at runtime, `read`, `write`).
+  if headerTarget(content) == "interpreter":
+    echo "Error: " & path &
+      " declares target: 'interpreter and cannot be compiled to Lua"
+    quit(1)
+
 proc compileOne(path: string, outPath: string = "") =
   ## Compile a single .ktg file. Entrypoints (with `Kintsugi [...]` header)
   ## emit two files: the source and a sibling prelude.lua containing all
@@ -170,6 +180,7 @@ proc compileOne(path: string, outPath: string = "") =
     quit(1)
 
   let content = readFile(path)
+  refuseInterpreterTarget(path, content)
   let (ast, isEntrypoint) = parseSourceStripped(content)
   let eval = setupEval()
   let processed = eval.preprocess(ast, forCompilation = true)
@@ -214,6 +225,7 @@ proc compilePath(path: string, outPath: string = "") =
 proc dryRunPath(path: string) =
   proc dryOne(f: string) =
     let content = readFile(f)
+    refuseInterpreterTarget(f, content)
     let (ast, isEntrypoint) = parseSourceStripped(content)
     let eval = setupEval()
     let processed = eval.preprocess(ast, forCompilation = true)

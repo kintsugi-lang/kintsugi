@@ -84,3 +84,22 @@ proc stripKintsugiHeader*(ast: seq[KtgValue]): (seq[KtgValue], bool) =
 proc parseSourceStripped*(src: string): (seq[KtgValue], bool) =
   ## Lex + parse + strip entrypoint header. Returns (bodyAst, isEntrypoint).
   stripKintsugiHeader(parseSource(src))
+
+proc headerTarget*(src: string): string =
+  ## Returns the value of `target:` from the Kintsugi header as a bare
+  ## name, or "" if no header is present or no target is declared. The
+  ## header value must be a lit-word (e.g. `target: 'interpreter`).
+  let ast = parseSource(src)
+  if ast.len < 2 or ast[0].kind != vkWord or
+     not ast[0].wordName.startsWith("Kintsugi") or
+     ast[1].kind != vkBlock:
+    return ""
+  let header = ast[1].blockVals
+  var i = 0
+  while i < header.len:
+    if header[i].kind == vkWord and header[i].wordKind == wkSetWord and
+       header[i].wordName == "target" and i + 1 < header.len and
+       header[i + 1].kind == vkWord and header[i + 1].wordKind == wkLitWord:
+      return header[i + 1].wordName
+    i += 1
+  ""

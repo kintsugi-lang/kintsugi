@@ -9,3 +9,6 @@ tests/test_*
 !tests/test_*.nim
 # nim-built main binary when compiling src/kintsugi.nim directly
 src/kintsugi
+# Playdate SDK reference docs - local cache, not repo content
+docs/Inside Playdate.html
+docs/Inside Playdate_files/
