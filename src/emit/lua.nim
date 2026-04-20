@@ -79,6 +79,11 @@ type
     ## prescan so `include TypeName` can splice a referenced object's fields
     ## and methods into an outer object at declaration time.
     objectSpecBlocks: Table[string, seq[KtgValue]]
+    ## Set while emitting a function value that sits on an object's
+    ## method slot. emitFuncDef uses it to seed `self` as a local in
+    ## the method's own function scope, so strict-globals accepts
+    ## self/... path references inside the body.
+    inObjectMethod: bool
     ## Custom types that have is? checks — only these need _type tags.
     usedTypeChecks: HashSet[string]
     ## Per-scope variable type / sequence / concat-safety tracking.
@@ -1311,11 +1316,17 @@ registerExpr("object", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int
               parts.add(fieldName & " = nil")
           i += 2
           continue
-      # set-word: method or computed field
+      # set-word: method or computed field. Method bodies can reference
+      # `self`; flag the emitter so emitFuncDef adds self to the function's
+      # own locals after the per-fn reset. self is bound at make time
+      # (see make's emission) on every function-valued field.
       if v.kind == vkWord and v.wordKind == wkSetWord:
         i += 1
         let fieldName = luaName(v.wordName)
+        let wasMethod = e.inObjectMethod
+        e.inObjectMethod = true
         let value = e.emitExpr(specBlock, i)
+        e.inObjectMethod = wasMethod
         parts.add(fieldName & " = " & value)
         continue
       i += 1
@@ -1678,7 +1689,13 @@ proc emitCustomTypeParamGuards(e: var LuaEmitter, spec: ParsedFuncSpec) =
 proc emitFuncDef(e: var LuaEmitter, specBlock, bodyBlock: seq[KtgValue]): string =
   ## Parse a function spec [a b] and body [...] into a Lua function expression.
   let spec = parseFuncSpec(specBlock)
-  let params = spec.allLuaParams()
+  var params = spec.allLuaParams()
+
+  # Object methods take self as an implicit first param. Callers using
+  # Lua colon syntax (`obj:method(args)`) auto-pass obj as self.
+  let isMethod = e.inObjectMethod
+  if isMethod:
+    params.insert("self", 0)
 
   let paramStr = params.join(", ")
   var funcStr = "function(" & paramStr & ")\n"
@@ -1688,7 +1705,13 @@ proc emitFuncDef(e: var LuaEmitter, specBlock, bodyBlock: seq[KtgValue]): string
   # per-fn state that gets restored on exit.
   let savedLocals = e.locals
   let savedVarTable = e.varTable
+  let savedInMethod = e.inObjectMethod
   e.locals = initHashSet[string]()
+  # Object method bodies implicitly see `self`. Consume the flag so
+  # nested anonymous functions inside the body don't inherit it.
+  if savedInMethod:
+    e.locals.incl("self")
+    e.inObjectMethod = false
   # Parameters are locals in the function scope, and potentially callable
   for p in params:
     e.locals.incl(p)
@@ -1756,6 +1779,7 @@ proc emitFuncDef(e: var LuaEmitter, specBlock, bodyBlock: seq[KtgValue]): string
 
   e.locals = savedLocals
   e.varTable = savedVarTable
+  e.inObjectMethod = savedInMethod
 
   # Record arity for this function (caller will associate with name)
   funcStr &= bodyStr
@@ -2971,6 +2995,20 @@ proc resolvePathCall(e: var LuaEmitter, name: string, line: int,
   let headBinding = e.getBinding(head)
   if fullBinding.isUnknown and headBinding.isUnknown:
     e.assertKnownName(head, line)
+  # Object method dispatch: `obj/method args` where obj is a tracked
+  # instance of a known object type whose `method` field is a function.
+  # Emit Lua colon syntax so self is auto-passed.
+  if parts.len == 2 and e.hasVarType(head):
+    let typeKey = e.varType(head)
+    if typeKey in e.objectFields:
+      for f in e.objectFields[typeKey]:
+        if f.name == luaName(parts[1]) and f.arity >= 0:
+          var args: seq[string] = @[]
+          for i in 0 ..< f.arity:
+            args.add(e.emitExpr(vals, pos))
+          return PathResolution(
+            lua: luaName(head) & ":" & f.name & "(" & args.join(", ") & ")",
+            isFullCall: true)
   if fullBinding.isFunction and not fullBinding.isUnknown:
     var args: seq[string] = @[]
     for i in 0 ..< fullBinding.arity:
@@ -4678,7 +4716,8 @@ proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
                 continue
             # set-word: method or computed field. Extract method arity from
             # `function [spec] [body]` / `does [body]` so `->` can consume
-            # the correct number of args.
+            # the correct number of args. Flag the method context so the
+            # function's scope seeds `self` as a local (bound at make time).
             if specBlock[si].kind == vkWord and specBlock[si].wordKind == wkSetWord:
               let fieldName = luaName(specBlock[si].wordName)
               si += 1
@@ -4692,7 +4731,10 @@ proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
                 elif specBlock[si].wordName == "does":
                   fArity = 0
               var fpos = si
+              let wasMethod = e.inObjectMethod
+              e.inObjectMethod = true
               let value = e.emitExpr(specBlock, fpos)
+              e.inObjectMethod = wasMethod
               si = fpos
               fields.add((name: fieldName, default: value, fieldType: "", arity: fArity))
               continue

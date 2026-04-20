@@ -487,6 +487,18 @@ suite "cross-mode: contexts and functions":
       print add5 10
     """)
 
+  test "object method using self compiles":
+    crossCheck("""
+      Counter: object [
+        field/optional [n [integer!] 0]
+        increment: function [] [self/n: self/n + 1]
+      ]
+      c: make Counter []
+      c/increment
+      c/increment
+      print c/n
+    """)
+
 # ============================================================
 # Loop refinements
 # ============================================================
