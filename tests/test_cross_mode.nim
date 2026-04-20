@@ -670,3 +670,29 @@ suite "cross-mode: attempt":
       ]
       print x
     """)
+
+# ============================================================
+# @type/enum namespace + singletons
+# ============================================================
+
+suite "cross-mode: enum namespace":
+  test "namespace access returns lit-word value (compare via equality)":
+    crossCheck("""
+      direction!: @type/enum ['north | 'south | 'east | 'west]
+      print (direction/north) = 'north
+      print (direction/south) = 'north
+    """)
+
+  test "singleton type in is? check":
+    crossCheck("""
+      direction!: @type/enum ['north | 'south | 'east | 'west]
+      print is? direction/north! 'north
+      print is? direction/north! 'south
+    """)
+
+  test "singleton type narrows a function param":
+    crossCheck("""
+      direction!: @type/enum ['north | 'south | 'east | 'west]
+      face-north: function [d [direction/north!]] [d = 'north]
+      print face-north 'north
+    """)

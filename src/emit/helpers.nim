@@ -240,8 +240,10 @@ proc primitiveTypeCheck*(typeName, valExpr: string): string =
   primitiveTypeCheckTyped(typeName, valExpr).text
 
 proc customTypePredicateName*(typeName: string): string =
-  ## Lua name for a synthesized custom-type predicate.
-  "_" & typeName.replace("-", "_") & "_p"
+  ## Lua name for a synthesized custom-type predicate. Enum singleton
+  ## keys carry a `/` (e.g. `direction/north`) — convert to `_` so the
+  ## result is a valid Lua identifier.
+  "_" & typeName.replace("-", "_").replace("/", "_") & "_p"
 
 proc customTypeBase*(typeName: string): string =
   ## Strip trailing `!` and normalize to kebab-case for customTypeRules lookup.

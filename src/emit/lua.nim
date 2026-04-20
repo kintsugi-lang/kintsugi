@@ -2981,6 +2981,21 @@ proc resolvePathCall(e: var LuaEmitter, name: string, line: int,
   ## head when neither the full path nor the head is a known binding.
   let parts = name.split('/')
   let head = parts[0]
+  # Enum namespace access: `direction/north` resolves to the member's
+  # lit-word value, emitted as a Lua string. Prescan registers
+  # `<base>/<member>` in customTypeRules; presence there is the signal.
+  if parts.len == 2 and name in e.customTypeRules:
+    let rule = e.customTypeRules[name]
+    if rule.kind == ctEnum and rule.enumMembers.len == 1:
+      return PathResolution(lua: "\"" & rule.enumMembers[0] & "\"",
+                            isFullCall: false)
+  # Typo safety: head is an enum namespace but member is unknown.
+  # Raise a dedicated compile error rather than letting strict globals
+  # complain about an undeclared identifier.
+  if parts.len == 2 and (head & "!") in e.customTypeRules and
+     e.customTypeRules[head & "!"].kind == ctEnum:
+    raise EmitError(msg:
+      "'" & parts[1] & "' is not a member of " & head & "!")
   let path = emitPath(name)
   let fullBinding = e.getBinding(name)
   let headBinding = e.getBinding(head)
@@ -4755,6 +4770,13 @@ proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
                 members.add(rv.wordName.toLowerAscii)
             e.customTypeRules[baseName] =
               CustomTypeRule(kind: ctEnum, enumMembers: members)
+            # Register singleton types: `<base>/<member>` as a single-
+            # member enum rule. Enables is?/match/param-guard lookups of
+            # the form `direction/north!` via the usual customTypeRules
+            # dispatch without a separate code path.
+            for m in members:
+              e.customTypeRules[baseName & "/" & m] =
+                CustomTypeRule(kind: ctEnum, enumMembers: @[m])
             i += 3
             continue
           if metaName == "type/where" and i + 3 < vals.len and

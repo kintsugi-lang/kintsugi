@@ -916,6 +916,27 @@ suite "emitter: synthesized type predicates":
         print dir!
       """))
 
+  test "enum namespace access emits member as lit-word string":
+    let code = emitLua(parseSource("""
+      dir!: @type/enum ['north | 'south]
+      print dir/north
+    """))
+    check "\"north\"" in code
+
+  test "enum singleton predicate emitted for is? call":
+    let code = emitLua(parseSource("""
+      dir!: @type/enum ['north | 'south]
+      if is? dir/north! 'north [print "yes"]
+    """))
+    check "function _dir_north_p(it)" in code
+
+  test "enum namespace typo errors at emit":
+    expect EmitError:
+      discard emitLua(parseSource("""
+        dir!: @type/enum ['north | 'south]
+        print dir/nroth
+      """))
+
   test "transitive composition pulls in dependency predicates":
     let code = emitLua(parseSource("""
       positive!: @type/where [integer!] [it > 0]
