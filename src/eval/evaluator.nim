@@ -531,6 +531,24 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
           pos += 1
           return pathDialect.interpret(blk.blockVals, eval, ctx, segments)
 
+        # Enum namespace: head is unbound but head! is a registered enum.
+        # direction/north -> the lit-word value 'north (case-insensitive member
+        # lookup). Typos raise a typed error so enums behave like namespaces
+        # rather than silently returning undefined.
+        if segments.len == 1 and not ctx.has(head):
+          let enumParentName = head & "!"
+          if enumParentName in eval.typeEnv and
+             eval.typeEnv[enumParentName].isEnum:
+            let seg = segments[0]
+            let parent = eval.typeEnv[enumParentName]
+            for rv in parent.rule:
+              if rv.kind == vkWord and rv.wordKind == wkLitWord and
+                 toLower(rv.wordName) == toLower(seg):
+                return ktgWord(rv.wordName, wkLitWord, val.line)
+            raise KtgError(kind: "type",
+              msg: "'" & seg & "' is not a member of " & enumParentName,
+              data: nil, line: val.line)
+
         let headVal = ctx.get(head)
 
         # if head is a native, treat segments as refinements
@@ -607,6 +625,16 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
       # vkType literals, so `is? name! v` picks up the rule via typeEnv.
       if rhs.kind == vkType and rhs.customType != nil and
          val.wordName.endsWith("!") and not val.wordName.contains('/'):
+        # Enum namespaces reuse the parent's name-without-! for path access
+        # (direction/north). If that name is already bound as a value, the
+        # namespace would collide with it — refuse at decl time.
+        if rhs.customType.isEnum:
+          let nsName = val.wordName[0 ..< val.wordName.len - 1]
+          if ctx.has(nsName):
+            raise KtgError(kind: "collision",
+              msg: "cannot register enum namespace '" & nsName &
+                   "' — name already bound",
+              data: nil, line: val.line)
         eval.typeEnv[val.wordName] = rhs.customType
         return rhs
 
@@ -1099,12 +1127,37 @@ proc typeMatchesBuiltin*(actual, expected: string): bool =
   of "any-block!": actual in ["block!", "paren!", "path!"]
   else: false
 
+proc resolveEnumSingleton*(eval: Evaluator, typeName: string): CustomType =
+  ## `parent/member!` where `parent!` is a registered enum resolves to a
+  ## synthetic singleton type matching only `member` (case-insensitive).
+  ## Returns nil if `typeName` is not in enum-namespace shape. Raises if
+  ## `parent!` is a known enum but `member` is not a declared member —
+  ## this is the typo-safety hook.
+  if '/' notin typeName or not typeName.endsWith("!"):
+    return nil
+  let parts = typeName.split('/')
+  if parts.len != 2: return nil
+  let parentName = parts[0] & "!"
+  if parentName notin eval.typeEnv: return nil
+  let parent = eval.typeEnv[parentName]
+  if not parent.isEnum: return nil
+  let memberStr = parts[1][0 ..< parts[1].len - 1]  # strip trailing !
+  for rv in parent.rule:
+    if rv.kind == vkWord and rv.wordKind == wkLitWord and
+       toLower(rv.wordName) == toLower(memberStr):
+      return CustomType(rule: @[ktgWord(rv.wordName, wkLitWord)], isEnum: true)
+  raise KtgError(kind: "type",
+    msg: "'" & memberStr & "' is not a member of " & parentName, data: nil)
+
 proc matchesCustomTypeByName*(eval: Evaluator, value: KtgValue, typeName: string, ctx: KtgContext): bool =
   ## Phantom type lookup. typeEnv is authoritative. Legacy fallbacks handle
   ## object auto-gen (predicate function) and pre-phantom code that still
   ## stores a customType as a value.
   if typeName in eval.typeEnv:
     return eval.matchesCustomType(value, eval.typeEnv[typeName], ctx)
+  let singleton = eval.resolveEnumSingleton(typeName)
+  if singleton != nil:
+    return eval.matchesCustomType(value, singleton, ctx)
   if ctx.has(typeName):
     let typeVal = ctx.get(typeName)
     if typeVal.customType != nil:

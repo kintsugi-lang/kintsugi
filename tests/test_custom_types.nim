@@ -143,6 +143,58 @@ suite "@type/enum":
     expect KtgError:
       discard eval.evalString("describe 'up")
 
+  test "enum exposes namespace access: direction/north is lit-word value":
+    let eval = makeEval()
+    discard eval.evalString("""direction!: @type/enum ['north | 'south | 'east | 'west]""")
+    check $eval.evalString("direction/north") == "'north"
+    check $eval.evalString("(direction/north) = 'north") == "true"
+
+  test "enum namespace access is case-insensitive on the member":
+    let eval = makeEval()
+    discard eval.evalString("""direction!: @type/enum ['north | 'south | 'east | 'west]""")
+    check $eval.evalString("direction/NORTH") == "'north"
+
+  test "enum namespace rejects non-member with helpful error":
+    let eval = makeEval()
+    discard eval.evalString("""direction!: @type/enum ['north | 'south | 'east | 'west]""")
+    expect KtgError:
+      discard eval.evalString("direction/nroth")
+
+  test "enum exposes singleton types: direction/north! matches only 'north":
+    let eval = makeEval()
+    discard eval.evalString("""direction!: @type/enum ['north | 'south | 'east | 'west]""")
+    check $eval.evalString("is? direction/north! 'north") == "true"
+    check $eval.evalString("is? direction/north! 'NORTH") == "true"
+    check $eval.evalString("is? direction/north! 'south") == "false"
+    check $eval.evalString("is? direction/north! 42") == "false"
+
+  test "enum singleton type rejects non-member in declaration":
+    let eval = makeEval()
+    discard eval.evalString("""direction!: @type/enum ['north | 'south | 'east | 'west]""")
+    expect KtgError:
+      discard eval.evalString("is? direction/nroth! 'north")
+
+  test "enum singleton type in function param narrows":
+    let eval = makeEval()
+    discard eval.evalString("""direction!: @type/enum ['north | 'south | 'east | 'west]""")
+    discard eval.evalString("""face-north: function [d [direction/north!]] [d]""")
+    check $eval.evalString("face-north 'north") == "'north"
+    expect KtgError:
+      discard eval.evalString("face-north 'south")
+
+  test "enum union type still accepts all members":
+    let eval = makeEval()
+    discard eval.evalString("""direction!: @type/enum ['north | 'south | 'east | 'west]""")
+    check $eval.evalString("is? direction! 'north") == "true"
+    check $eval.evalString("is? direction! 'south") == "true"
+    check $eval.evalString("is? direction! 'unknown") == "false"
+
+  test "enum namespace collision errors at decl":
+    let eval = makeEval()
+    discard eval.evalString("""direction: 42""")
+    expect KtgError:
+      discard eval.evalString("""direction!: @type/enum ['north | 'south | 'east | 'west]""")
+
   test "enum is case-INSENSITIVE (matches language-wide word equality)":
     let eval = makeEval()
     discard eval.evalString("""status!: @type/enum ['Active | 'Inactive | 'Pending]""")

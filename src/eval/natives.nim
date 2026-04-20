@@ -201,6 +201,13 @@ proc registerNatives*(eval: Evaluator) =
       if tn in eval.typeEnv:
         return ktgLogic(eval.matchesCustomType(value, eval.typeEnv[tn], eval.currentCtx))
 
+      # Enum-namespace singleton: parent/member! where parent! is an enum.
+      # Raises on invalid member (typo safety).
+      if '/' in tn:
+        let singleton = eval.resolveEnumSingleton(tn)
+        if singleton != nil:
+          return ktgLogic(eval.matchesCustomType(value, singleton, eval.currentCtx))
+
       # Built-in type: direct match
       if tn in builtinTypes:
         return ktgLogic(typeName(value) == tn)
