@@ -385,11 +385,13 @@ proc emitAttemptExpr(e: var LuaEmitter, blk: seq[KtgValue]): string
 proc emitEitherExpr(e: var LuaEmitter, cond: string, trueBlock, falseBlock: seq[KtgValue]): string
 proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
                     compiling: HashSet[string] = initHashSet[string](),
-                    eval: Evaluator = nil):
+                    eval: Evaluator = nil,
+                    target: string = ""):
     tuple[lua: string, depWrites: seq[tuple[path: string, lua: string]]]
 proc emitLuaModuleEx(ast: seq[KtgValue], sourceDir: string,
                      compiling: HashSet[string],
-                     eval: Evaluator = nil):
+                     eval: Evaluator = nil,
+                     target: string = ""):
     tuple[lua: string, e: LuaEmitter]
 proc findExports(ast: seq[KtgValue]): seq[string]
 proc emitContextBlock(e: var LuaEmitter, vals: seq[KtgValue]): string
@@ -4944,13 +4946,16 @@ proc extractHeaderTarget(ast: seq[KtgValue]): string =
 
 proc emitLuaModuleEx(ast: seq[KtgValue], sourceDir: string,
                      compiling: HashSet[string],
-                     eval: Evaluator = nil):
+                     eval: Evaluator = nil,
+                     target: string = ""):
     tuple[lua: string, e: LuaEmitter] =
   ## Compile a Kintsugi module to Lua and return both the source and the
   ## inner LuaEmitter, so a parent (entrypoint) compile can merge the
   ## module's used helper / type-predicate / stdlib-symbol sets into its
   ## own prelude. Modules emit no prelude themselves; helpers come from
   ## the entrypoint's prelude.lua at runtime.
+  let resolvedTarget =
+    if target.len > 0: target else: extractHeaderTarget(ast)
   var e = LuaEmitter(
     indent: 0,
     output: "",
@@ -4961,7 +4966,7 @@ proc emitLuaModuleEx(ast: seq[KtgValue], sourceDir: string,
     compiling: compiling,
     moduleNames: collectModuleNames(ast),
     eval: eval,
-    target: extractHeaderTarget(ast),
+    target: resolvedTarget,
   )
   e.prescanBlock(ast)
   e.inferReturnArities(ast)
@@ -4981,12 +4986,13 @@ proc emitLuaModuleEx(ast: seq[KtgValue], sourceDir: string,
 
 proc emitLuaModule*(ast: seq[KtgValue], sourceDir: string = "",
                     compiling: HashSet[string] = initHashSet[string](),
-                    eval: Evaluator = nil):
+                    eval: Evaluator = nil,
+                    target: string = ""):
     tuple[lua: string, depWrites: seq[tuple[path: string, lua: string]]] =
   ## Compile a module. Returns the compiled Lua and any deferred dep-file
   ## writes produced by nested `import %path` directives. Callers write
   ## those to disk themselves; the emitter never touches the filesystem.
-  let (lua, e) = emitLuaModuleEx(ast, sourceDir, compiling, eval)
+  let (lua, e) = emitLuaModuleEx(ast, sourceDir, compiling, eval, target)
   (lua: lua, depWrites: e.pendingDepWrites)
 
 proc isLiteralArg(v: KtgValue): bool =
@@ -5135,7 +5141,8 @@ proc expandStdlibIntoPrelude(e: var LuaEmitter): string =
     lua &= fnLua
 
 proc emitLuaSplit*(ast: seq[KtgValue], sourceDir: string = "",
-                   eval: Evaluator = nil):
+                   eval: Evaluator = nil,
+                   target: string = ""):
     tuple[prelude, source: string,
           depWrites: seq[tuple[path: string, lua: string]]] =
   ## Compile a Kintsugi entrypoint into the runtime-support prelude, the
@@ -5147,6 +5154,13 @@ proc emitLuaSplit*(ast: seq[KtgValue], sourceDir: string = "",
   ## args against custom-typed params — failing guards raise EmitError.
   ## Non-literal args fall through to the runtime prologue emitted at
   ## the top of each typed function.
+  ##
+  ## `target` overrides the header-derived target. Callers that strip
+  ## the `Kintsugi [...]` header before emission (CLI compile path)
+  ## must pass it explicitly; callers that keep the header can leave
+  ## it empty and let extractHeaderTarget read it off the AST.
+  let resolvedTarget =
+    if target.len > 0: target else: extractHeaderTarget(ast)
   var e = LuaEmitter(
     indent: 0,
     output: "",
@@ -5156,7 +5170,7 @@ proc emitLuaSplit*(ast: seq[KtgValue], sourceDir: string = "",
     sourceDir: sourceDir,
     moduleNames: collectModuleNames(ast),
     eval: eval,
-    target: extractHeaderTarget(ast),
+    target: resolvedTarget,
   )
   e.prescanBlock(ast)
   e.inferReturnArities(ast)

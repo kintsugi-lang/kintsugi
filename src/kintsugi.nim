@@ -184,6 +184,7 @@ proc compileOne(path: string, outPath: string = "") =
 
   let content = readFile(path)
   refuseInterpreterTarget(path, content)
+  let headerTgt = headerTarget(content)
   let (ast, isEntrypoint) = parseSourceStripped(content)
   let eval = setupEval()
   let processed = eval.preprocess(ast, forCompilation = true)
@@ -195,7 +196,7 @@ proc compileOne(path: string, outPath: string = "") =
 
   if isEntrypoint:
     let (preludeLua, sourceLua, depWrites) =
-      emitLuaSplit(processed, sourceDir, eval)
+      emitLuaSplit(processed, sourceDir, eval, headerTgt)
     writeFile(resolvedOut, sourceLua)
     echo "Compiled: " & path & " -> " & resolvedOut
     if preludeLua.len > 0:
@@ -206,7 +207,7 @@ proc compileOne(path: string, outPath: string = "") =
       writeFile(dep.path, dep.lua)
   else:
     let (luaCode, depWrites) =
-      emitLuaModule(processed, sourceDir, eval = eval)
+      emitLuaModule(processed, sourceDir, eval = eval, target = headerTgt)
     writeFile(resolvedOut, luaCode)
     echo "Compiled: " & path & " -> " & resolvedOut
     for dep in depWrites:
@@ -230,6 +231,7 @@ proc dryRunPath(path: string) =
   proc dryOne(f: string) =
     let content = readFile(f)
     refuseInterpreterTarget(f, content)
+    let headerTgt = headerTarget(content)
     let (ast, isEntrypoint) = parseSourceStripped(content)
     let eval = setupEval()
     let processed = eval.preprocess(ast, forCompilation = true)
@@ -237,7 +239,7 @@ proc dryRunPath(path: string) =
     let sourceDir = parentDir(absolutePath(f))
     if isEntrypoint:
       let (preludeLua, sourceLua, _) =
-        emitLuaSplit(processed, sourceDir, eval)
+        emitLuaSplit(processed, sourceDir, eval, headerTgt)
       if preludeLua.len > 0:
         echo ";; --- prelude.lua ---"
         echo preludeLua
@@ -245,7 +247,7 @@ proc dryRunPath(path: string) =
       echo sourceLua
     else:
       echo ";; --- " & extractFilename(f).changeFileExt("lua") & " (module) ---"
-      echo emitLuaModule(processed, sourceDir, eval = eval).lua
+      echo emitLuaModule(processed, sourceDir, eval = eval, target = headerTgt).lua
 
   if dirExists(path):
     for f in collectKtgFiles(path):
