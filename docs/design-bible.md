@@ -120,7 +120,7 @@ No implicit type conversions. `to target-type! value` for all conversions. Faile
 
 ### Blocks Are Inert Data
 
-`[1 2 3]` returns itself unevaluated. `(1 + 2)` evaluates. This is homoiconicity — code and data are the same structure. When you pass a block to `loop` or `parse`, you're passing data. The dialect interprets it; the parent evaluator doesn't.
+`[1 2 3]` returns itself unevaluated. `(1 + 2)` evaluates. This is homoiconicity — code and data are the same structure. When you pass a block to `loop` or `match`, you're passing data. The dialect interprets it; the parent evaluator doesn't.
 
 **Why:** This enables dialects. A dialect receives `[keyword1 arg1 keyword2 arg2]` as data and walks it with its own rules. Set-words inside a dialect block are interpreted by the dialect, not by the parent. No collision, no surprise mutations.
 
@@ -185,19 +185,18 @@ A dialect is a block where words change meaning. `loop [for [x] in series do [bo
 
 **Why:** Dialects and templates are complementary. Templates (`@template`) generate code — they produce blocks that get spliced at the call site. Dialects interpret data — they receive blocks and walk them with custom rules. Dialects are not "more powerful" than templates; they solve a different problem. Use templates when you need code generation. Use dialects when you need a custom vocabulary for a domain.
 
-### Five System Dialects
+### Four System Dialects
 
 1. **Loop** — `for/in`, `from/to/by`, with `/collect`, `/fold`, `/partition` and `when` guards
 2. **Match** — Pattern matching with type checks, captures, destructuring, guards
-3. **Parse** — PEG-style parsing with backtracking (interpreter-only)
-4. **Object** — Frozen objects with typed fields, auto-constructors, `make`
-5. **Attempt** — Resilient pipelines with `source`, `then`, `when`, `catch`, `fallback`, `retries`
+3. **Object** — Frozen objects with typed fields, auto-constructors, `make`
+4. **Attempt** — Resilient pipelines with `source`, `then`, `when`, `catch`, `fallback`, `retries`
 
-**Why:** These are the essential abstractions. Loops, pattern matching, parsing, objects, and error handling. Everything else is built from these.
+**Why:** These are the essential abstractions. Loops, pattern matching, objects, and error handling. Everything else is built from these.
 
 ### Dialects Return Values, Not Side Effects
 
-`loop/collect` returns a block. `parse` returns a context. Dialects don't silently mutate the caller's scope. The caller assigns: `result: parse data [...]`.
+`loop/collect` returns a block. `match` returns the matched branch's value. Dialects don't silently mutate the caller's scope. The caller assigns: `result: match value [...]`.
 
 **Why:** Explicit data flow. Visible, testable, composable.
 
@@ -322,7 +321,7 @@ Helpers are tree-shaken: only helpers actually used by the entrypoint and its tr
 
 ### Interpreter-Only Features
 
-`@enter` and `@exit` raise compile errors at expression position — block-scoped lifecycle hooks are interpreter-only; place pre/post code at the top/bottom of the function body instead. Six interpreter-only natives raise compile errors with specific hints when referenced from compiled code: `read`, `write`, `save`, `dir?`, `file?` (filesystem IO), and `exit` (not portable across targets). Everything else compiles.
+Six interpreter-only natives raise compile errors with specific hints when referenced from compiled code: `read`, `write`, `save`, `dir?`, `file?` (filesystem IO), and `exit` (not portable across targets). Everything else compiles.
 
 **Why the IO + exit natives are uncompileable despite having Lua analogues:** The analogues are not portable across our three targets. LOVE2D sandboxes filesystem access through `love.filesystem`; Playdate uses `playdate.file`; standalone Lua uses `io`/`os`. Rather than silently emit a target-specific form that breaks on the other two, the emitter refuses and the user binds the right target API explicitly via the `bindings [...]` escape hatch. The same logic applies to `exit` (LOVE2D = `love.event.quit`, Playdate = no exit). Both `InterpreterOnlyNatives` in `src/emit/lua.nim` and the `compilable: false` flag on the corresponding `KtgNative` registrations in `src/eval/natives*.nim` enforce this; the two lists must agree.
 
