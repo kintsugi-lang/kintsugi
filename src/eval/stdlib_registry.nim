@@ -5,6 +5,7 @@ import ../parse/parser
 const stdlibModules* = {
   "math": staticRead("../../lib/math.ktg"),
   "collections": staticRead("../../lib/collections.ktg"),
+  "coroutine": staticRead("../../lib/coroutine.ktg"),
 }.toTable
 
 proc stripModuleHeader*(source: string): string =
@@ -88,6 +89,20 @@ proc spliceSelectedFunctions*(moduleName: string, symbols: seq[string]): seq[Ktg
           if r in defNames and r notin needed:
             needed.incl(r)
             changed = true
+
+  # Always include top-level `bindings [...]` forms. Binding modules (e.g.
+  # coroutine) expose foreign calls rather than functions, and the whole
+  # point of importing one is to get its binding table.
+  var i = 0
+  while i < ast.len:
+    if ast[i].kind == vkWord and ast[i].wordKind == wkWord and
+       ast[i].wordName == "bindings" and
+       i + 1 < ast.len and ast[i + 1].kind == vkBlock:
+      result.add(ast[i])
+      result.add(ast[i + 1])
+      i += 2
+      continue
+    i += 1
 
   for d in defs:
     if d.name in needed:

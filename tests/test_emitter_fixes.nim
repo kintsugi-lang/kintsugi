@@ -946,6 +946,19 @@ suite "emitter: synthesized type predicates":
     """))
     check "local gfx <const> = playdate.graphics" in code
 
+  test "coroutine module emits coroutine.* path calls":
+    let code = emitLua(parseSource("""
+      Kintsugi []
+      import 'coroutine
+      producer: coroutine/create function [] [coroutine/yield 1]
+      coroutine/resume producer 0
+      coroutine/status producer
+    """))
+    check "coroutine.create(" in code
+    check "coroutine.resume(" in code
+    check "coroutine.yield(" in code
+    check "coroutine.status(" in code
+
   test "transitive composition pulls in dependency predicates":
     let code = emitLua(parseSource("""
       positive!: @type/where [integer!] [it > 0]

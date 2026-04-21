@@ -1,0 +1,13 @@
+Kintsugi [name: 'coroutine]
+
+; Lua-target only. The interpreter installs no-op stubs via the
+; `bindings` native; real coroutine semantics require compiling
+; to Lua.
+
+bindings [
+  coroutine/create  "coroutine.create"  'call 1
+  coroutine/resume  "coroutine.resume"  'call 2
+  coroutine/yield   "coroutine.yield"   'call 1
+  coroutine/status  "coroutine.status"  'call 1
+  coroutine/wrap    "coroutine.wrap"    'call 1
+]
