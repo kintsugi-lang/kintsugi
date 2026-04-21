@@ -13,6 +13,7 @@ type
     moduleLoading*: HashSet[string]
     macros*: HashSet[string]   ## words declared with @template
     typeEnv*: Table[string, CustomType]  ## phantom type environment; @type registers here
+    emitStack*: seq[ref seq[KtgValue]]   ## one queue per active @preprocess; @emit pushes to the top
 
   Dialect* = ref object of RootObj
     name*: string

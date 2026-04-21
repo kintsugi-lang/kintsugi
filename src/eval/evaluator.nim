@@ -131,6 +131,8 @@ proc toKebabCase*(name: string): string =
 # Forward declarations
 proc evalBlock*(eval: Evaluator, vals: seq[KtgValue], ctx: KtgContext): KtgValue
 proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int, ctx: KtgContext): KtgValue
+proc composeWalk*(eval: Evaluator, blk: seq[KtgValue], ctx: KtgContext,
+                  deep: bool, only: bool): seq[KtgValue]
 proc callCallable*(eval: Evaluator, fn: KtgValue, vals: seq[KtgValue],
                    pos: var int, ctx: KtgContext, selfVal: KtgValue = nil): KtgValue
 
@@ -868,7 +870,7 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
         typeVal.customType = ct
         return typeVal
 
-      # #compose — block composition with paren interpolation
+      # @compose — block composition with paren interpolation
       # Default: splice block results. /only: insert as single element.
       # /deep: recurse into nested blocks.
       if val.wordName == "compose" or val.wordName.startsWith("compose/"):
@@ -878,24 +880,24 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
         let arg = eval.evalNext(vals, pos, ctx)
         if arg.kind != vkBlock:
           raise KtgError(kind: "type", msg: "@compose expects a block", data: nil)
-        proc composeBlock(eval: Evaluator, blk: seq[KtgValue], ctx: KtgContext,
-                          deep: bool, only: bool): seq[KtgValue] =
-          var results: seq[KtgValue] = @[]
-          for v in blk:
-            if v.kind == vkParen:
-              let val = eval.evalBlock(v.parenVals, ctx)
-              if val.kind == vkBlock and not only:
-                # Splice block contents
-                for item in val.blockVals:
-                  results.add(item)
-              else:
-                results.add(val)
-            elif deep and v.kind == vkBlock:
-              results.add(ktgBlock(composeBlock(eval, v.blockVals, ctx, deep, only)))
-            else:
-              results.add(v)
-          results
-        return ktgBlock(composeBlock(eval, arg.blockVals, ctx, deep, only))
+        return ktgBlock(composeWalk(eval, arg.blockVals, ctx, deep, only))
+
+      # @emit — splice a block into the enclosing @preprocess output stream,
+      # auto-interpolating parens (compose/deep semantics). Only valid while
+      # a @preprocess block is active; outside, raises.
+      if val.wordName == "emit":
+        if eval.emitStack.len == 0:
+          raise KtgError(kind: "emit",
+            msg: "@emit is only valid inside a @preprocess block", data: nil)
+        let arg = eval.evalNext(vals, pos, ctx)
+        let queue = eval.emitStack[^1]
+        if arg.kind == vkBlock:
+          let walked = composeWalk(eval, arg.blockVals, ctx, deep = true, only = false)
+          for v in walked:
+            queue[].add(v)
+        elif arg.kind != vkNone:
+          queue[].add(arg)
+        return ktgNone()
 
       # lifecycle hooks — for now return self
       return val
@@ -913,6 +915,25 @@ proc evalBlock*(eval: Evaluator, vals: seq[KtgValue],
     except KtgError as e:
       discard e.attachLine(startLine)
       raise
+
+
+proc composeWalk*(eval: Evaluator, blk: seq[KtgValue], ctx: KtgContext,
+                  deep: bool, only: bool): seq[KtgValue] =
+  ## Walker shared by @compose and @emit. Parens evaluate and
+  ## (unless `only`) splice their block results; `deep` recurses into
+  ## nested blocks. Non-paren elements pass through as AST.
+  for v in blk:
+    if v.kind == vkParen:
+      let val = eval.evalBlock(v.parenVals, ctx)
+      if val.kind == vkBlock and not only:
+        for item in val.blockVals:
+          result.add(item)
+      else:
+        result.add(val)
+    elif deep and v.kind == vkBlock:
+      result.add(ktgBlock(composeWalk(eval, v.blockVals, ctx, deep, only)))
+    else:
+      result.add(v)
 
 
 proc matchesCustomTypeByName*(eval: Evaluator, value: KtgValue, typeName: string, ctx: KtgContext): bool
@@ -1260,30 +1281,20 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue],
   result = @[]
   var i = 0
   while i < ast.len:
-    # @preprocess [block]
+    # @preprocess [block] — evaluate at compile time; @emit inside splices
+    # AST into the surrounding output stream.
     if ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
        ast[i].wordName == "preprocess" and i + 1 < ast.len and
        ast[i + 1].kind == vkBlock:
       let ppCtx = eval.global.child
-      var emitted: seq[KtgValue] = @[]
-
-      ppCtx.set("emit", KtgValue(kind: vkNative,
-        nativeFn: KtgNative(name: "emit", arity: 1, fn: proc(
-            args: seq[KtgValue], ep: pointer): KtgValue =
-          if args[0].kind == vkBlock:
-            for v in args[0].blockVals:
-              emitted.add(v)
-          else:
-            emitted.add(args[0])
-          ktgNone()
-        ),
-        line: 0))
-
-      discard eval.evalBlock(ast[i + 1].blockVals, ppCtx)
-
-      for v in emitted:
+      let queue = new(seq[KtgValue])
+      eval.emitStack.add(queue)
+      try:
+        discard eval.evalBlock(ast[i + 1].blockVals, ppCtx)
+      finally:
+        discard eval.emitStack.pop()
+      for v in queue[]:
         result.add(v)
-
       i += 2
 
     # @template name: [spec] [body]                — declarative compile-time

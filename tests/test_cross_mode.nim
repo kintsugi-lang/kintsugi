@@ -552,7 +552,7 @@ suite "cross-mode: templates":
       @preprocess [
         loop [
           for [n] in [1 2 3] do [
-            emit @compose/deep [print (n)]
+            @emit [print (n)]
           ]
         ]
       ]
@@ -565,14 +565,14 @@ suite "cross-mode: templates":
     let eval = makeEval()
     discard eval.evalString("""
       @preprocess [
-        if system/platform = 'script [emit [print "script"]]
+        if system/platform = 'script [@emit [print "script"]]
       ]
     """)
     check eval.output == @["script"]
 
     let compiled = compileOutput("""
       @preprocess [
-        if system/platform = 'lua [emit [print "compiled"]]
+        if system/platform = 'lua [@emit [print "compiled"]]
       ]
     """)
     check compiled == @["compiled"]

@@ -30,7 +30,7 @@ proc makeEval(): Evaluator =
 suite "Preprocess — emit injects code":
   test "emit injects code":
     let eval = makeEval()
-    discard eval.evalString("@preprocess [emit [x: 42]]")
+    discard eval.evalString("@preprocess [@emit [x: 42]]")
     check $eval.evalString("x") == "42"
 
   test "conditional emit (platform = script)":
@@ -38,9 +38,9 @@ suite "Preprocess — emit injects code":
     discard eval.evalString("""
       @preprocess [
         either system/platform = 'script [
-          emit [target: "script"]
+          @emit [target: "script"]
         ] [
-          emit [target: "other"]
+          @emit [target: "other"]
         ]
       ]
     """)
@@ -50,8 +50,8 @@ suite "Preprocess — emit injects code":
     let eval = makeEval()
     discard eval.evalString("""
       @preprocess [
-        emit [a: 1]
-        emit [b: 2]
+        @emit [a: 1]
+        @emit [b: 2]
       ]
     """)
     check $eval.evalString("a") == "1"
@@ -63,7 +63,7 @@ suite "Preprocess — emit injects code":
       @preprocess [
         loop [
           for [field] in [name age email] do [
-            emit @compose/deep [
+            @emit [
               (to set-word! rejoin ["get-" field]) function [obj] [
                 select obj (to lit-word! field)
               ]
@@ -80,7 +80,7 @@ suite "Preprocess — emit injects code":
     let eval = makeEval()
     discard eval.evalString("""
       @preprocess [
-        emit [
+        @emit [
           max-connections: 100
         ]
       ]
@@ -92,7 +92,7 @@ suite "Preprocess — emit injects code":
     let eval = makeEval()
     discard eval.evalString("""
       @preprocess [
-        emit [
+        @emit [
           build-date: 2026-03-15
         ]
       ]

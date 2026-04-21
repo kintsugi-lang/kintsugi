@@ -1554,9 +1554,9 @@ with-timing "test" [
 
 @preprocess [
   either system/platform = 'script [
-    emit [print "Running in Script mode"]
+    @emit [print "Running in Script mode"]
   ] [
-    emit [print "Running on Lua"]
+    @emit [print "Running on Lua"]
   ]
 ]
 
@@ -1564,7 +1564,7 @@ with-timing "test" [
 @preprocess [
   loop [
     for [field] in [name age email] do [
-      emit @compose [
+      @emit [
         (to set-word! rejoin ["get-" field]) function [obj] [
           select obj (to lit-word! field)
         ]

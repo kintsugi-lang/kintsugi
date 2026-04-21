@@ -28,7 +28,7 @@ suite "preprocess":
     let eval = makeEval()
     let r = eval.evalString("""
       @preprocess [
-        emit [x: 42]
+        @emit [x: 42]
       ]
       x
     """)
@@ -39,7 +39,7 @@ suite "preprocess":
     let r = eval.evalString("""
       @preprocess [
         if system/platform = 'script [
-          emit [result: "on-script"]
+          @emit [result: "on-script"]
         ]
       ]
       result
@@ -55,8 +55,8 @@ suite "preprocess":
     let eval = makeEval()
     let r = eval.evalString("""
       @preprocess [
-        emit [a: 1]
-        emit [b: 2]
+        @emit [a: 1]
+        @emit [b: 2]
       ]
       a + b
     """)
@@ -66,8 +66,57 @@ suite "preprocess":
     let eval = makeEval()
     let r = eval.evalString("""
       @preprocess [
-        emit [base: 100]
+        @emit [base: 100]
       ]
       base + 5
     """)
     check $r == "105"
+
+suite "@emit":
+  test "@emit splices a literal block like emit":
+    let eval = makeEval()
+    let r = eval.evalString("""
+      @preprocess [
+        @emit [x: 10]
+      ]
+      x
+    """)
+    check $r == "10"
+
+  test "@emit auto-interpolates top-level parens":
+    let eval = makeEval()
+    let r = eval.evalString("""
+      @preprocess [
+        v: 42
+        @emit [val: (v)]
+      ]
+      val
+    """)
+    check $r == "42"
+
+  test "@emit auto-interpolates deep into nested blocks":
+    let eval = makeEval()
+    let r = eval.evalString("""
+      @preprocess [
+        v: 7
+        @emit [outer: [(v) (v + 1)]]
+      ]
+      first outer
+    """)
+    check $r == "7"
+
+  test "@emit splices block values (default compose semantics)":
+    let eval = makeEval()
+    let r = eval.evalString("""
+      @preprocess [
+        items: [1 2 3]
+        @emit [result: [0 (items) 4]]
+      ]
+      result
+    """)
+    check $r == "[0 1 2 3 4]"
+
+  test "@emit outside @preprocess raises":
+    let eval = makeEval()
+    expect KtgError:
+      discard eval.evalString("@emit [foo]")
