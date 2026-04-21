@@ -183,7 +183,7 @@ A closure holds a reference to the enclosing context, not a copy. It can read pa
 
 A dialect is a block where words change meaning. `loop [for [x] in series do [body]]` — inside that block, `for`, `in`, `do` have loop-specific semantics. The parent evaluator hands the entire block to the dialect as data. The dialect walks it with its own rules.
 
-**Why:** Dialects and templates are complementary. Templates (`@template`, `@compose`) generate code — they produce blocks that get spliced at the call site. Dialects interpret data — they receive blocks and walk them with custom rules. Dialects are not "more powerful" than templates; they solve a different problem. Use templates when you need code generation. Use dialects when you need a custom vocabulary for a domain.
+**Why:** Dialects and templates are complementary. Templates (`@template`) generate code — they produce blocks that get spliced at the call site. Dialects interpret data — they receive blocks and walk them with custom rules. Dialects are not "more powerful" than templates; they solve a different problem. Use templates when you need code generation. Use dialects when you need a custom vocabulary for a domain.
 
 ### Five System Dialects
 
@@ -322,7 +322,7 @@ Helpers are tree-shaken: only helpers actually used by the entrypoint and its tr
 
 ### Interpreter-Only Features
 
-`@compose` raises a compile error outside of `@template` and `@preprocess` (it's a compile-time primitive, not a runtime operation). `@enter` and `@exit` raise compile errors at expression position — block-scoped lifecycle hooks are interpreter-only; place pre/post code at the top/bottom of the function body instead. Six interpreter-only natives raise compile errors with specific hints when referenced from compiled code: `read`, `write`, `save`, `dir?`, `file?` (filesystem IO), and `exit` (not portable across targets). Everything else compiles.
+`@enter` and `@exit` raise compile errors at expression position — block-scoped lifecycle hooks are interpreter-only; place pre/post code at the top/bottom of the function body instead. Six interpreter-only natives raise compile errors with specific hints when referenced from compiled code: `read`, `write`, `save`, `dir?`, `file?` (filesystem IO), and `exit` (not portable across targets). Everything else compiles.
 
 **Why the IO + exit natives are uncompileable despite having Lua analogues:** The analogues are not portable across our three targets. LOVE2D sandboxes filesystem access through `love.filesystem`; Playdate uses `playdate.file`; standalone Lua uses `io`/`os`. Rather than silently emit a target-specific form that breaks on the other two, the emitter refuses and the user binds the right target API explicitly via the `bindings [...]` escape hatch. The same logic applies to `exit` (LOVE2D = `love.event.quit`, Playdate = no exit). Both `InterpreterOnlyNatives` in `src/emit/lua.nim` and the `compilable: false` flag on the corresponding `KtgNative` registrations in `src/eval/natives*.nim` enforce this; the two lists must agree.
 
@@ -354,7 +354,7 @@ Built-in type checks (`is? integer! x`, `integer?`, `string?`, etc.) emit Lua `t
 
 No intermediate representation. Both the interpreter and emitter walk the same `seq[KtgValue]`. The pipeline is: parse, prescan, infer, emit — all operating on the same data structure.
 
-**Why:** Homoiconic design. Code-as-data templates (`@compose`) work naturally. No IR translation bugs. One representation to understand, not two.
+**Why:** Homoiconic design. Code-as-data templates (`@template`) work naturally. No IR translation bugs. One representation to understand, not two.
 
 ---
 
@@ -396,7 +396,7 @@ Side effects are allowed and common. Blocks are mutable. No persistent data stru
 Types exist for documentation and runtime checking in the interpreter. They are erased in compiled output. There is no type inference pass that affects semantics. Types are a contract, not a proof.
 
 ### Not extensible at the syntax level
-No user-defined operators. No reader macros. No custom syntax. The grammar is fixed. Extensions happen through dialects (semantic, not syntactic) and `@compose` (code generation, not parsing).
+No user-defined operators. No reader macros. No custom syntax. The grammar is fixed. Extensions happen through dialects (semantic, not syntactic) and `@template`/`@preprocess` (code generation, not parsing).
 
 ### Not backwards-compatible with REBOL or Red
 Influenced by, not compatible with. Key divergences:
