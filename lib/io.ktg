@@ -1,0 +1,48 @@
+Kintsugi [name: 'io]
+
+; Multi-target filesystem bindings.
+;
+; Each compile target exposes a different native FS namespace:
+;   love2d   -> love.filesystem
+;   playdate -> playdate.file
+;   lua      -> io, os
+;
+; Rather than fake a portable wrapper, this module binds each
+; namespace to a short local name AND registers the common
+; functions under that name with correct arity. User code reaches
+; through the alias directly. Portability is the caller's
+; responsibility — write the target-specific path behind a
+; Kintsugi function when portable behaviour matters.
+;
+; The interpreter installs no-op placeholders for these entries;
+; real FS access requires compilation.
+
+bindings [
+  love2d [
+    love-fs          "love.filesystem"                'alias
+    love-fs/read     "love.filesystem.read"           'call 1
+    love-fs/write    "love.filesystem.write"          'call 2
+    love-fs/getInfo  "love.filesystem.getInfo"        'call 1
+    love-fs/remove   "love.filesystem.remove"         'call 1
+    love-fs/getDirectoryItems "love.filesystem.getDirectoryItems" 'call 1
+  ]
+
+  playdate [
+    pd-file          "playdate.file"                  'alias
+    pd-file/exists   "playdate.file.exists"           'call 1
+    pd-file/open     "playdate.file.open"             'call 2
+    pd-file/delete   "playdate.file.delete"           'call 1
+    pd-file/listFiles "playdate.file.listFiles"       'call 1
+    pd-file/mkdir    "playdate.file.mkdir"            'call 1
+  ]
+
+  lua [
+    lua-io           "io"                             'alias
+    lua-io/open      "io.open"                        'call 2
+    lua-io/read      "io.read"                        'call 1
+    lua-os           "os"                             'alias
+    lua-os/time      "os.time"                        'call 0
+    lua-os/date      "os.date"                        'call 1
+    lua-os/exit      "os.exit"                        'call 0
+  ]
+]
