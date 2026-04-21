@@ -3194,8 +3194,6 @@ proc emitExprTyped(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
       # nothing rather than `nil` — predicates are looked up by name.
       if metaName == "type" or metaName.startsWith("type/"):
         result = lxLit("")
-      elif metaName == "const":
-        result = lxLit("")
       else:
         # Unknown meta-words (@template, @inline, @preprocess) - silently
         # erase. Compile-time machinery handles these elsewhere.
@@ -3579,15 +3577,6 @@ proc findLastStmtStart(e: LuaEmitter, vals: seq[KtgValue]): int =
        val.wordName in ["bindings", "exports"]:
       pos += 1
       if pos < vals.len and vals[pos].kind == vkBlock: pos += 1
-      continue
-    # @const prefix
-    if val.kind == vkWord and val.wordKind == wkMetaWord and
-       val.wordName == "const":
-      pos += 1
-      if pos < vals.len and vals[pos].kind == vkWord and
-         vals[pos].wordKind == wkSetWord:
-        pos += 1
-        advanceExprWithChain(e, vals, pos)
       continue
     # Set-word
     if val.kind == vkWord and val.wordKind == wkSetWord:
@@ -3986,14 +3975,6 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
           e.locals = savedLocals
           e.ln("end")
           continue
-
-      # @const value — emit binding with <const> annotation.
-      if pos < vals.len and vals[pos].kind == vkWord and
-         vals[pos].wordKind == wkMetaWord and vals[pos].wordName == "const":
-        pos += 1
-        let expr = e.emitExprWithChain(vals, pos)
-        e.ln(prefix & name & " <const> = " & expr)
-        continue
 
       # @type / @type/where / @type/enum — declarations are verification-only.
       # Emit nothing. Rules live in the prescan table; is? inlines them at

@@ -940,12 +940,6 @@ print is? valid-score! 85               ; true
 print is? valid-score! -5               ; false
 print is? valid-score! "N/A"            ; true
 
-; --- @const annotation ---
-; Marks a binding as constant. In interpreter: normal assignment.
-; In Lua 5.4 target: emits the <const> attribute.
-MAX-SPEED: @const 100
-print MAX-SPEED                          ; 100
-
 ; --- Math utilities ---
 print min 3 7                           ; 3
 print max 3 7                           ; 7

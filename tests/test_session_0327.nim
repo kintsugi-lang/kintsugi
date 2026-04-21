@@ -65,23 +65,6 @@ suite "dynamic paths":
     """))
     check "items[i]" in code
 
-# --- @const prefix ---
-
-suite "@const annotation":
-  test "@const binds value via post-set-word form":
-    let eval = makeEval()
-    let r = eval.evalString("""
-      x: @const 42
-      x
-    """)
-    check $r == "42"
-
-  test "@const compiles with <const> annotation":
-    let code = emitLua(parseSource("""
-      x: @const 42
-    """))
-    check "local x <const> = 42" in code
-
 # --- @inline [] block splicing ---
 
 suite "inline preprocess block splicing":

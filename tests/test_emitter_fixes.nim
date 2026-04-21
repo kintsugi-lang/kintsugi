@@ -79,12 +79,6 @@ suite "emitter: last":
     let code = emitLua(parseSource("f: function [n] [[1 2 3]]\nlast (f 1)"))
     check "local _t" in code
 
-suite "emitter: @const":
-  test "const emits <const> annotation":
-    let code = emitLua(parseSource("x: @const 42"))
-    check "<const>" in code
-    check "= 42" in code
-
 suite "emitter: inline make":
   test "make inlines defaults with overrides":
     let code = emitLua(parseSource("""
