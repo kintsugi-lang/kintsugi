@@ -902,7 +902,13 @@ proc emitCustomTypePredicateDecl(e: var LuaEmitter, typeName: string): string =
     var parts: seq[string]
     for m in rule.enumMembers:
       parts.add("string.lower(it) == \"" & m & "\"")
-    let body = if parts.len == 0: "false" else: parts.join(" or ")
+    # Guard against non-string inputs: string.lower throws when `it` is
+    # a table (e.g. _NONE) or nil. Enum predicates are called from
+    # match-pattern and is? dispatch, both of which can hand arbitrary
+    # values. Bail early when the shape is wrong.
+    let body =
+      if parts.len == 0: "false"
+      else: "type(it) == \"string\" and (" & parts.join(" or ") & ")"
     "function " & fnName & "(it)\n  return " & body & "\nend"
 
   of ctWhere:
@@ -922,8 +928,12 @@ proc emitCustomTypePredicateDecl(e: var LuaEmitter, typeName: string): string =
     e.indent = savedIndent
     e.locals = savedLocals
 
+    # Wrap baseCheck in parens: `not` binds tighter than `==` / `and` in
+    # Lua, so `not type(it) == "number" and ...` would parse as
+    # `((not type(it)) == "number") and ...` — silently truthy for any
+    # value. Always parenthesize the subject of `not`.
     "function " & fnName & "(it)\n" &
-      "  if not " & baseCheck & " then return false end\n" &
+      "  if not (" & baseCheck & ") then return false end\n" &
       guardBody.strip(chars = {'\n'}) & "\nend"
 
 # --- is? — unified type checking ---
@@ -2056,6 +2066,11 @@ proc buildPatternMatch(e: var LuaEmitter, pattern: seq[KtgValue], valueExpr: str
         # User-declared @type: route through synthesized predicate.
         e.usedTypeChecks.incl(kebab)
         conditions.add(customTypePredicateName(kebab) & "(" & valueExpr & ")")
+      elif p.typeName == "none!":
+        # none! values flow as the _NONE sentinel table at runtime;
+        # `type(v) == "nil"` misses them.
+        e.useHelper("_is_none")
+        conditions.add("_is_none(" & valueExpr & ")")
       else:
         conditions.add("type(" & valueExpr & ") == " & ktgTypeToLuaType(p.typeName))
     of vkWord:
@@ -2093,6 +2108,9 @@ proc buildPatternMatch(e: var LuaEmitter, pattern: seq[KtgValue], valueExpr: str
         if kebab in e.customTypeRules:
           e.usedTypeChecks.incl(kebab)
           conditions.add(customTypePredicateName(kebab) & "(" & elemExpr & ")")
+        elif p.typeName == "none!":
+          e.useHelper("_is_none")
+          conditions.add("_is_none(" & elemExpr & ")")
         else:
           conditions.add("type(" & elemExpr & ") == " & ktgTypeToLuaType(p.typeName))
       of vkWord:
@@ -3922,6 +3940,12 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
       # compileability check already ran in prescan (validateAllGuards).
       # Emission is identical to `function`; the isGuard flag is interpreter
       # state with no Lua representation.
+      #
+      # Unlike ordinary `function`, a @type/guard user fn may be called at
+      # runtime from a synthesized @type predicate in prelude.lua. Those
+      # predicates are globals in the prelude chunk and cannot see locals
+      # declared in the source chunk. Emit the guard as a Lua global
+      # (omit `local`) so predicate bodies can reach it.
       if pos < vals.len and vals[pos].kind == vkWord and
          vals[pos].wordKind == wkMetaWord and vals[pos].wordName == "type/guard":
         pos += 1
@@ -3935,7 +3959,7 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
           if isPath or isBound:
             e.ln(name & " = function(" & params.join(", ") & ")")
           else:
-            e.ln(prefix & "function " & name & "(" & params.join(", ") & ")")
+            e.ln("function " & name & "(" & params.join(", ") & ")")
           let savedLocals = e.locals
           e.locals = savedLocals
           for n in e.moduleNames:

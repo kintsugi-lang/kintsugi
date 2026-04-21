@@ -1022,8 +1022,10 @@ suite "emitter: meta-word emission":
       pos?: @type/guard [x] [x > 0]
       print pos? 5
     """))
-    check "local function" in code
-    check "function" in code
+    # @type/guard user fns emit as globals (no `local`) so synthesized
+    # @type predicates in the prelude chunk can reach them at runtime.
+    check "function is_pos(x)" in code
+    check "local function is_pos" notin code
     check "x > 0" in code
 
 # =============================================================================

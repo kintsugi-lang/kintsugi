@@ -4,6 +4,8 @@ import std/[unittest, strutils]
 import ../src/core/types
 import ../src/eval/[dialect, evaluator, natives]
 import ../src/dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect]
+import ../src/parse/parser
+import ./emit_test_helper
 
 proc makeEval(): Evaluator =
   let eval = newEvaluator()
@@ -413,6 +415,48 @@ suite "Custom types in match":
       ]
     """) == "other"
 
+  test "match dispatches on @type/where guard (was: wrongly fell through)":
+    let eval = makeEval()
+    discard eval.evalString("""positive!: @type/where [integer!] [it > 0]""")
+    check $eval.evalString("""
+      match 7 [
+        [positive!] ["positive"]
+        [_]         ["other"]
+      ]
+    """) == "positive"
+    check $eval.evalString("""
+      match -5 [
+        [positive!] ["positive"]
+        [_]         ["other"]
+      ]
+    """) == "other"
+
+  test "match dispatches on @type/enum in typeEnv":
+    let eval = makeEval()
+    discard eval.evalString("""mood!: @type/enum ['happy | 'calm]""")
+    check $eval.evalString("""
+      match 'happy [
+        [mood!] ["mood"]
+        [_]     ["other"]
+      ]
+    """) == "mood"
+
+  test "match dispatches on @type/enum singleton (mood/happy!)":
+    let eval = makeEval()
+    discard eval.evalString("""mood!: @type/enum ['happy | 'calm]""")
+    check $eval.evalString("""
+      match 'happy [
+        [mood/happy!] ["happy!"]
+        [_]           ["other"]
+      ]
+    """) == "happy!"
+    check $eval.evalString("""
+      match 'calm [
+        [mood/happy!] ["happy!"]
+        [_]           ["other"]
+      ]
+    """) == "other"
+
 # =============================================================================
 # Native compilable flag (Step 1 of type-erasure plan)
 # =============================================================================
@@ -471,6 +515,20 @@ suite "@type/guard fn constructor":
     check eval.evalString(""":plain?""").fn.isGuard == false
     check eval.evalString(""":guarded?""").fn.isGuard == true
     check $eval.evalString("""plain? 5""") == $eval.evalString("""guarded? 5""")
+
+  test "@type/guard user fn emits as global so prelude predicates can call it":
+    # Synthesized @type predicates live in the prelude chunk. User
+    # @type/guard fns must be emitted as Lua globals (not locals) or the
+    # predicate can't reach them at runtime.
+    let code = emitLua(parseSource("""
+      non-empty-string?: @type/guard [s] [(length s) > 0]
+      label!: @type/where [string!] [non-empty-string? it]
+      print is? label! "hi"
+    """))
+    # Must NOT emit `local function is_non_empty_string` — predicate in
+    # prelude would see it as undefined global.
+    check "local function is_non_empty_string" notin code
+    check "function is_non_empty_string" in code
 
 # =============================================================================
 # Return-type enforcement (Step 7 of type-erasure plan)
