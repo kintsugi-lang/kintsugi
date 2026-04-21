@@ -347,7 +347,15 @@ The other value types lower trivially without shims:
 
 ### Type Checking in Compiled Output
 
-Built-in type checks (`is? integer! x`, `integer?`, `string?`, etc.) emit Lua `type()` checks — Lua can verify these natively. `@type`-declared custom type checks (`is? positive! x`, `match` patterns on `[positive!]`) route through synthesized `_positive_p(x)` functions emitted in the prelude on demand. `object!` instance checks (e.g., `is? Person p` against an `object`-based type) emit `_type` tag checks — `make` stamps instances with a `_type` string field. `@type` and `object!` are independent today; unification deferred. `freeze` is a no-op in compiled output (returns its argument unchanged). `frozen?` always returns `false` in compiled output (Lua tables are always mutable).
+Built-in type checks (`is? integer! x`, `integer?`, `string?`, etc.) emit Lua `type()` checks — Lua can verify these natively. `@type`-declared custom type checks (`is? positive! x`, `match` patterns on `[positive!]`) route through synthesized `_positive_p(x)` functions emitted in the prelude on demand. `object!` instance checks (e.g., `is? Person p` against an `object`-based type) emit `_type` tag checks — `make` stamps instances with a `_type` string field. `@type` and `object!` are independent today; unification deferred.
+
+### Mutability Tracking Is Interpreter-Only
+
+> **Compiled Lua does not track frozen/mutable status.** `freeze` is a no-op in compiled output (returns its argument unchanged). `frozen?` always returns `false` in compiled output. Any logic that branches on `frozen?` at runtime, or that relies on `freeze` to prevent mutation of a compiled-mode value, will behave differently between interpreter and Lua targets.
+
+**Why:** Lua tables are unconditionally mutable. There is no read-only table primitive in standard Lua; emulating one requires a `__newindex` metatable guard on every frozen value, which penalizes every `object!` instance for a defensive feature most programs never read. Kintsugi ships the interpreter-side guarantee so code under test fails loudly on illegal mutation, and deliberately erases the tracking in compiled output so hot-path code pays nothing.
+
+**How to apply:** If a program depends on runtime frozen-ness — e.g. asserting `frozen? obj` as a precondition, or expecting `freeze` to harden a shared value — mark the program `target: 'interpreter` or restructure so the invariant is encoded structurally (distinct variable names, context isolation, careful `make`-time initialization) rather than behaviorally. In particular: the `object!` vs `context!` distinction exists in the interpreter but collapses in Lua; don't write code whose correctness depends on the difference being observable at runtime in compiled mode.
 
 ### AST Is the IR
 
