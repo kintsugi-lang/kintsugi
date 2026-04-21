@@ -441,18 +441,6 @@ suite "type errors":
         f 1
       """)
 
-suite "@exit error guarantee":
-  test "@exit runs even when body throws":
-    let eval = makeEval()
-    discard eval.evalString("""
-      cleanup-ran: false
-      try [
-        @exit [cleanup-ran: true]
-        error "test" "deliberate error" none
-      ]
-    """)
-    check $eval.evalString("cleanup-ran") == "true"
-
 suite "lexer errors":
   test "invalid date month":
     let eval = makeEval()

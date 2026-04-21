@@ -305,20 +305,6 @@ suite "Lexer: Directives":
     check tokens[0].wordName == "preprocess"
 
 suite "Lexer: Meta-Words":
-  test "lex enter hook":
-    let tokens = tokenize("@enter")
-    check tokens.len == 1
-    check tokens[0].kind == vkWord
-    check tokens[0].wordKind == wkMetaWord
-    check tokens[0].wordName == "enter"
-
-  test "lex exit hook":
-    let tokens = tokenize("@exit")
-    check tokens.len == 1
-    check tokens[0].kind == vkWord
-    check tokens[0].wordKind == wkMetaWord
-    check tokens[0].wordName == "exit"
-
   test "lex meta word add":
     let tokens = tokenize("@add")
     check tokens.len == 1

@@ -9,62 +9,6 @@ proc makeEval(): Evaluator =
   eval.registerDialect(newLoopDialect())
   eval
 
-suite "lifecycle hooks":
-  test "@enter runs before body":
-    let eval = makeEval()
-    eval.clearOutput()
-    discard eval.evalString("""
-      @enter [log: "entered"]
-      result: log
-    """)
-    check $eval.evalString("result") == "entered"
-
-  test "@exit runs after body":
-    let eval = makeEval()
-    discard eval.evalString("""
-      @exit [cleanup: "done"]
-      x: 1
-    """)
-    check $eval.evalString("cleanup") == "done"
-
-  test "@enter and @exit together":
-    let eval = makeEval()
-    eval.clearOutput()
-    discard eval.evalString("""
-      order: []
-      scope [
-        @enter [append order "enter"]
-        @exit [append order "exit"]
-        append order "body"
-      ]
-    """)
-    check $eval.evalString("first order") == "enter"
-    check $eval.evalString("pick order 2") == "body"
-    check $eval.evalString("last order") == "exit"
-
-  test "multiple @enter hooks run in order":
-    let eval = makeEval()
-    discard eval.evalString("""
-      order: []
-      scope [
-        @enter [append order "a"]
-        @enter [append order "b"]
-        append order "body"
-      ]
-    """)
-    check $eval.evalString("first order") == "a"
-    check $eval.evalString("pick order 2") == "b"
-    check $eval.evalString("last order") == "body"
-
-  test "@exit runs even if body has no hooks otherwise":
-    let eval = makeEval()
-    discard eval.evalString("""
-      cleaned: false
-      @exit [cleaned: true]
-      x: 42
-    """)
-    check $eval.evalString("cleaned") == "true"
-
 suite "compose":
   test "compose evaluates parens in block":
     let eval = makeEval()

@@ -1,5 +1,5 @@
 import std/[strutils, tables, math, sets]
-import ../core/[types, equality, lifecycle]
+import ../core/[types, equality]
 import ../parse/parser
 import dialect, stdlib_registry
 
@@ -903,40 +903,16 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
 
 proc evalBlock*(eval: Evaluator, vals: seq[KtgValue],
                 ctx: KtgContext): KtgValue =
-  # Check for @enter / @exit lifecycle hooks. Partitioning logic shared
-  # with the Lua emitter via src/core/lifecycle.nim.
-  let lc = partitionLifecycle(vals)
-  if lc.hasHooks:
-    # Run @enter hooks
-    for blk in lc.enterBlocks:
-      discard eval.evalBlock(blk, ctx)
-
-    # Run body with finally for @exit
+  result = ktgNone()
+  var pos = 0
+  while pos < vals.len:
+    let startLine = vals[pos].line
     try:
-      result = ktgNone()
-      var pos = 0
-      while pos < lc.body.len:
-        let startLine = lc.body[pos].line
-        try:
-          result = eval.evalNext(lc.body, pos, ctx)
-          eval.applyInfix(result, lc.body, pos, ctx)
-        except KtgError as e:
-          discard e.attachLine(startLine)
-          raise
-    finally:
-      for blk in lc.exitBlocks:
-        discard eval.evalBlock(blk, ctx)
-  else:
-    result = ktgNone()
-    var pos = 0
-    while pos < vals.len:
-      let startLine = vals[pos].line
-      try:
-        result = eval.evalNext(vals, pos, ctx)
-        eval.applyInfix(result, vals, pos, ctx)
-      except KtgError as e:
-        discard e.attachLine(startLine)
-        raise
+      result = eval.evalNext(vals, pos, ctx)
+      eval.applyInfix(result, vals, pos, ctx)
+    except KtgError as e:
+      discard e.attachLine(startLine)
+      raise
 
 
 proc matchesCustomTypeByName*(eval: Evaluator, value: KtgValue, typeName: string, ctx: KtgContext): bool

@@ -127,7 +127,7 @@ my-paren: (1 + 2)                       ; paren! evaluates immediately: 3
 ;   word:   - set-word (bind a value)
 ;   :word   - get-word (get without calling)
 ;   'word   - lit-word (the symbol itself)
-;   @word   - meta-word (lifecycle hooks / metadata)
+;   @word   - meta-word (compile-time / structural)
 ;
 ; Path syntax mirrors words:
 ;   path/to          - evaluate / lookup
@@ -152,7 +152,7 @@ my-variable!: 42
 ; Word prefixes (change how the word evaluates):
 ;   :    - get-word   (retrieve value without calling)
 ;   '    - lit-word   (the symbol itself, unevaluated)
-;   @    - meta-word  (lifecycle hooks, compile-time hooks)
+;   @    - meta-word  (compile-time / structural)
 ;
 ; Word suffixes (naming conventions enforced by type):
 ;   :    - set-word   (bind a value)
@@ -478,20 +478,6 @@ scope [
   print x-outer                         ; visible
 ]
 ; y-inner does not exist here
-
-; --- Lifecycle hooks: @enter / @exit ---
-; @enter runs before the block body. @exit runs after, always,
-; even on error propagation through the block.
-
-scope [
-  @enter [print "entering scope"]
-  @exit  [print "exiting scope"]
-  print "inside scope"
-]
-; entering scope
-; inside scope
-; exiting scope
-
 
 ; ============================================================
 ; SERIES OPERATIONS

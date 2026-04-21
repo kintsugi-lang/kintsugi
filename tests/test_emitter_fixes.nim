@@ -998,60 +998,6 @@ suite "emitter: meta-word emission":
     check "function" in code
     check "x > 0" in code
 
-  test "@enter at module scope partitions and runs as setup":
-    # Module-level @enter blocks are hoisted to the top of the module
-    # per lifecycle partition semantics (matches interpreter).
-    let code = emitLua(parseSource("""
-      @enter [print "setup"]
-      print "body"
-    """))
-    let enterPos = code.find("print(\"setup\")")
-    let bodyPos = code.find("print(\"body\")")
-    check enterPos >= 0
-    check bodyPos > enterPos
-
-  test "@exit at module scope runs after body":
-    let code = emitLua(parseSource("""
-      print "body"
-      @exit [print "cleanup"]
-    """))
-    let bodyPos = code.find("print(\"body\")")
-    let exitPos = code.find("print(\"cleanup\")")
-    check bodyPos >= 0
-    check exitPos > bodyPos
-
-  test "@enter inside a function body runs once per call":
-    let code = emitLua(parseSource("""
-      f: function [] [
-        @enter [print "setup"]
-        print "work"
-      ]
-    """))
-    check "print(\"setup\")" in code
-    check "print(\"work\")" in code
-
-  test "@exit in implicit-return function captures result via IIFE":
-    # When a function has @exit, the body's implicit return must happen
-    # AFTER the exit block runs. Emitter uses an IIFE to capture.
-    let code = emitLua(parseSource("""
-      f: function [] [
-        @exit [print "done"]
-        42
-      ]
-    """))
-    check "local _body_result" in code
-    check "print(\"done\")" in code
-    check "return _body_result" in code
-
-  test "@enter in a paren group is a compile error":
-    # Partition only runs on blocks. @enter/@exit in a paren group is
-    # malformed — the partition pass can't see it, so the emitter
-    # refuses rather than silently dropping.
-    expect EmitError:
-      discard emitLua(parseSource("""
-        x: (@enter [1] 42)
-      """))
-
 # =============================================================================
 # emitLuaSplit returns prelude + source separately (Step 1 of prelude split)
 # =============================================================================

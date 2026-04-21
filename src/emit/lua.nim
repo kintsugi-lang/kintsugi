@@ -17,7 +17,7 @@
 import std/[strutils, tables, sequtils, sets]
 when not defined(js):
   import std/os
-import ../core/[types, natives_shared, lifecycle]
+import ../core/[types, natives_shared]
 import ../parse/parser
 import ../eval/[stdlib_registry, evaluator]
 import ./prelude_consts
@@ -3177,17 +3177,6 @@ proc emitExprTyped(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
         compileError("@compose",
           "@compose is a compile-time feature; use it inside @template or @preprocess",
           val.line)
-      # @enter / @exit lifecycle hooks are partitioned out by emitBlock
-      # (src/core/lifecycle.nim). Reaching one at expression position
-      # means it appeared outside a block context (e.g. inside a paren
-      # group) where the partition pass can't see it — refuse rather
-      # than silently drop.
-      if metaName == "enter" or metaName == "exit":
-        compileError("@" & metaName,
-          "@" & metaName & " must appear at block statement position " &
-          "(module, function body, scope block); not valid in a paren " &
-          "group or expression position.",
-          val.line)
       # Type-system meta-words are consumed by prescan (`name!: @type ...`,
       # `name: @type/guard ...`). Reaching them at expression position means
       # the form was malformed (e.g. an `@type` not in a set-word RHS). Emit
@@ -3700,33 +3689,6 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
   ## Emit a block of values as statements. If asReturn, the last expression
   ## gets an implicit `return`.
   if vals.len == 0: return
-
-  # Partition out @enter / @exit lifecycle hooks. Matches interpreter
-  # semantics (src/core/lifecycle.nim). Narrow-semantics emission: enter,
-  # then body, then exit — no pcall. See roadmap-unified-dispatch-and-luaexpr
-  # for the upgrade path if finally-on-error becomes needed.
-  #
-  # asReturn needs an IIFE so exit runs BEFORE the enclosing scope's
-  # return — without it, the body's implicit return would short-circuit
-  # past the exit blocks.
-  let lc = partitionLifecycle(vals)
-  if lc.hasHooks:
-    for blk in lc.enterBlocks:
-      e.emitBlock(blk)
-    if asReturn:
-      e.ln("local _body_result = (function()")
-      e.indent += 1
-      e.emitBlock(lc.body, asReturn = true)
-      e.indent -= 1
-      e.ln("end)()")
-      for blk in lc.exitBlocks:
-        e.emitBlock(blk)
-      e.ln("return _body_result")
-    else:
-      e.emitBlock(lc.body)
-      for blk in lc.exitBlocks:
-        e.emitBlock(blk)
-    return
 
   if asReturn:
     let lastStart = e.findLastStmtStart(vals)

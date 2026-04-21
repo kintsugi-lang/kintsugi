@@ -440,69 +440,6 @@ suite "Compose and code generation":
   # NOTE: "bind do scoped execution" test removed — bind is no longer a native word
 
 # =============================================================================
-# lifecycle.test.ts — @enter / @exit hooks
-# =============================================================================
-
-suite "Lifecycle hooks":
-  test "lifecycle enter before body":
-    let eval = makeEval()
-    eval.clearOutput
-    discard eval.evalString("""
-      if true [
-        @enter [print "enter"]
-        print "body"
-      ]
-    """)
-    check eval.output == @["enter", "body"]
-
-  test "lifecycle exit after body":
-    let eval = makeEval()
-    eval.clearOutput
-    discard eval.evalString("""
-      if true [
-        print "body"
-        @exit [print "exit"]
-      ]
-    """)
-    check eval.output == @["body", "exit"]
-
-  test "lifecycle enter and exit":
-    let eval = makeEval()
-    eval.clearOutput
-    discard eval.evalString("""
-      if true [
-        @enter [print "enter"]
-        @exit [print "exit"]
-        print "body"
-      ]
-    """)
-    check eval.output == @["enter", "body", "exit"]
-
-  test "lifecycle exit on error":
-    let eval = makeEval()
-    eval.clearOutput
-    discard eval.evalString("""
-      result: try [
-        @enter [print "enter"]
-        @exit [print "exit"]
-        error 'fail "boom"
-      ]
-    """)
-    check eval.output == @["enter", "exit"]
-    check $eval.evalString("none? result/kind") == "false"
-
-  test "lifecycle exit sees bindings":
-    let eval = makeEval()
-    eval.clearOutput
-    discard eval.evalString("""
-      if true [
-        @exit [print x]
-        x: 42
-      ]
-    """)
-    check eval.output == @["42"]
-
-# =============================================================================
 # Additional spec-driven tests
 # =============================================================================
 
