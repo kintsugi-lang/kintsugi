@@ -321,6 +321,20 @@ Helpers are tree-shaken: only helpers actually used by the entrypoint and its tr
 
 **Why:** Game runtimes (Playdate, LÖVE2D) have constrained environments — no package manager, no external dependencies. Splitting prelude from source keeps user code readable on its own; the prelude only loads once per program; the compiled source is short enough to read top-to-bottom without scrolling past 50 lines of helpers.
 
+### Target Runtime Capabilities
+
+Kintsugi's three compile targets run on different Lua implementations, so some capabilities are target-specific. When a program needs one of these, bind it through `bindings [...]` rather than expecting a portable native.
+
+| Capability | LOVE2D (LuaJIT) | Playdate (Lua 5.4) | Standalone (Lua 5.4) |
+|---|---|---|---|
+| Bitwise ops | `bit.band`/`bit.bor`/`bit.bxor`/`bit.lshift`/`bit.rshift` (LuaJIT `bit` lib) | Native operators `&` `|` `~` `<<` `>>`; Playdate also adds compound assignments `&=` `|=` `<<=` `>>=` | Native operators `&` `|` `~` `<<` `>>` |
+| Integer type | Number (double) only | `integer` and `float` subtypes | `integer` and `float` subtypes |
+| Filesystem | `love.filesystem.*` (sandboxed) | `playdate.file.*` | `io.*` / `os.*` |
+| Process exit | `love.event.quit()` | No exit — program ends when `update` stops | `os.exit()` |
+| Coroutines | `coroutine.*` (standard) | `coroutine.*` (standard) | `coroutine.*` (standard) |
+
+**Kintsugi's stance:** if your program needs bitwise operations, coroutines, or filesystem calls, declare the binding you need in the target's sub-block inside `bindings [...]`. Kintsugi does not currently ship bitwise operators as primitives because they are trivially target-bindable and adding them would require three parallel codegen paths (LuaJIT function calls vs Lua 5.4 operators) for a feature whose ergonomics are already good at the binding layer.
+
 ### Interpreter-Only Features
 
 Six interpreter-only natives raise compile errors with specific hints when referenced from compiled code: `read`, `write`, `save`, `dir?`, `file?` (filesystem IO), and `exit` (not portable across targets). Everything else compiles.
