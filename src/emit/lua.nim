@@ -3776,6 +3776,19 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
               emitter.ln("local " & luaName(bnameName) & constAttr & " = " & bpathStr)
         let blk = vals[pos].blockVals
         emitAliases(e, blk)
+        # Second pass: walk target sub-blocks and emit aliases from the one
+        # matching the compile target. Later declarations shadow earlier
+        # same-name aliases.
+        var tpos = 0
+        while tpos < blk.len:
+          if tpos + 1 < blk.len and
+             blk[tpos].kind == vkWord and blk[tpos].wordKind == wkWord and
+             blk[tpos + 1].kind == vkBlock:
+            if blk[tpos].wordName == e.target:
+              emitAliases(e, blk[tpos + 1].blockVals)
+            tpos += 2
+          else:
+            tpos += 1
         pos += 1
       continue
 
@@ -4378,7 +4391,10 @@ proc applyBindingEntries(e: var LuaEmitter, blk: seq[KtgValue]) =
     of "alias":
       # Alias emits a local declaration; no nameMap entry needed since
       # the local variable name matches the Kintsugi name via luaName.
+      # Register the local so strict-globals accepts references to the
+      # alias and to paths rooted at it (`gfx/drawLine 0 0 10 10`).
       e.bindingKinds[name] = bkAlias
+      e.locals.incl(luaName(name))
     of "assign":
       e.nameMap[name] = luaPath
       e.bindings[name] = bindingFunc(1)
@@ -4486,7 +4502,19 @@ proc expandIncludes(e: LuaEmitter, specBlock: seq[KtgValue]): seq[KtgValue] =
     pos += 1
 
 proc prescanBindings(e: var LuaEmitter, blk: seq[KtgValue]) =
+  # Outer entries always apply. Target sub-blocks (bare word + block
+  # pair) apply only when the word matches the compile target.
   applyBindingEntries(e, blk)
+  var pos = 0
+  while pos < blk.len:
+    if pos + 1 < blk.len and
+       blk[pos].kind == vkWord and blk[pos].wordKind == wkWord and
+       blk[pos + 1].kind == vkBlock:
+      if blk[pos].wordName == e.target:
+        applyBindingEntries(e, blk[pos + 1].blockVals)
+      pos += 2
+    else:
+      pos += 1
 
 proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
   ## Recursively scan a block for function definitions and value bindings.
@@ -5094,7 +5122,8 @@ proc expandStdlibIntoPrelude(e: var LuaEmitter): string =
       nameMap: initTable[string, string](),
       bindingKinds: initTable[string, BindingKind](),
       sourceDir: e.sourceDir,
-      moduleNames: collectModuleNames(fnsAst)
+      moduleNames: collectModuleNames(fnsAst),
+      target: e.target,
     )
     sub.prescanBlock(fnsAst)
     sub.inferReturnArities(fnsAst)
