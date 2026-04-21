@@ -931,6 +931,21 @@ suite "emitter: synthesized type predicates":
         print dir/nroth
       """))
 
+  test "alias binding emits plain local on default target":
+    let code = emitLua(parseSource("""
+      Kintsugi []
+      bindings [gfx "playdate.graphics" 'alias]
+    """))
+    check "local gfx = playdate.graphics" in code
+    check "<const>" notin code
+
+  test "alias binding emits <const> on playdate target":
+    let code = emitLua(parseSource("""
+      Kintsugi [target: 'playdate]
+      bindings [gfx "playdate.graphics" 'alias]
+    """))
+    check "local gfx <const> = playdate.graphics" in code
+
   test "transitive composition pulls in dependency predicates":
     let code = emitLua(parseSource("""
       positive!: @type/where [integer!] [it > 0]

@@ -63,6 +63,10 @@ type
     bindingKinds: Table[string, BindingKind]
     ## Source directory for resolving require paths.
     sourceDir: string
+    ## Target name from the module's Kintsugi header (e.g. "playdate",
+    ## "love2d"); empty when no target declared. Drives target-specific
+    ## emission shape (e.g. alias bindings become <const> on playdate).
+    target: string
     ## Modules currently being compiled (cycle detection).
     compiling: HashSet[string]
     ## Track which prelude helpers are actually used.
@@ -3768,7 +3772,8 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
               if bpos < entries.len and entries[bpos].kind == vkInteger:
                 bpos += 1  # skip second arity (max)
             if bkindName == "alias":
-              emitter.ln("local " & luaName(bnameName) & " = " & bpathStr)
+              let constAttr = if emitter.target == "playdate": " <const>" else: ""
+              emitter.ln("local " & luaName(bnameName) & constAttr & " = " & bpathStr)
         let blk = vals[pos].blockVals
         emitAliases(e, blk)
         pos += 1
@@ -4892,6 +4897,23 @@ proc collectModuleNames(vals: seq[KtgValue]): HashSet[string] =
 
 proc validatePass(e: var LuaEmitter, vals: seq[KtgValue])
 
+proc extractHeaderTarget(ast: seq[KtgValue]): string =
+  ## Read `target: 'foo` from the leading Kintsugi [...] header, if any.
+  ## Empty string when no header, no block, or no target field.
+  if ast.len < 2 or ast[0].kind != vkWord or
+     not ast[0].wordName.startsWith("Kintsugi") or
+     ast[1].kind != vkBlock:
+    return ""
+  let header = ast[1].blockVals
+  var i = 0
+  while i < header.len:
+    if header[i].kind == vkWord and header[i].wordKind == wkSetWord and
+       header[i].wordName == "target" and i + 1 < header.len and
+       header[i + 1].kind == vkWord and header[i + 1].wordKind == wkLitWord:
+      return header[i + 1].wordName
+    i += 1
+  ""
+
 proc emitLuaModuleEx(ast: seq[KtgValue], sourceDir: string,
                      compiling: HashSet[string],
                      eval: Evaluator = nil):
@@ -4910,7 +4932,8 @@ proc emitLuaModuleEx(ast: seq[KtgValue], sourceDir: string,
     sourceDir: sourceDir,
     compiling: compiling,
     moduleNames: collectModuleNames(ast),
-    eval: eval
+    eval: eval,
+    target: extractHeaderTarget(ast),
   )
   e.prescanBlock(ast)
   e.inferReturnArities(ast)
@@ -5103,14 +5126,15 @@ proc emitLuaSplit*(ast: seq[KtgValue], sourceDir: string = "",
     bindingKinds: initTable[string, BindingKind](),
     sourceDir: sourceDir,
     moduleNames: collectModuleNames(ast),
-    eval: eval
+    eval: eval,
+    target: extractHeaderTarget(ast),
   )
   e.prescanBlock(ast)
   e.inferReturnArities(ast)
   e.validateAllGuards()
   e.validatePass(ast)
-  
-  
+
+
   e.emitBlock(ast)
   let prelude = e.buildPrelude()
   var source = e.output
