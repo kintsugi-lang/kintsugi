@@ -142,10 +142,12 @@ Blocks and strings are both sequential. Operations that make semantic sense on b
 
 - **Access:** `first`, `second`, `last`, `pick`
 - **Length:** `length`, `empty?`
-- **Search:** `find`, `has?`
+- **Search:** `find`, `has?`, `starts-with?`, `ends-with?`
 - **Transform:** `reverse`, `sort`, `subset`
 - **Iterate:** `for/in` yields elements (block) or characters (string)
 - **Build (immutable forms):** `insert`, `remove` return a new value when applied to strings
+
+**String-specific builders (all return new strings):** `split`, `join`, `rejoin`, `trim`, `uppercase`, `lowercase`, `replace` (with `/first` refinement).
 
 Mutation (`append`, in-place `insert`, in-place `remove`) only applies to blocks. For strings, `insert` and `remove` return a new string — matching the `replace`/`rejoin`/`uppercase` pattern.
 
