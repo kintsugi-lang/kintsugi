@@ -31,9 +31,14 @@ suite "match":
     let eval = makeEval()
     check $eval.evalString("""match 99 [[1] ["one"] default ["other"]]""") == "other"
 
-  test "no match returns none":
+  test "no matching arm raises match error":
     let eval = makeEval()
-    check $eval.evalString("""match 99 [[1] ["one"] [2] ["two"]]""") == "none"
+    expect KtgError:
+      discard eval.evalString("""match 99 [[1] ["one"] [2] ["two"]]""")
+
+  test "default none preserves opt-in fallthrough":
+    let eval = makeEval()
+    check $eval.evalString("""match 99 [[1] ["one"] default [none]]""") == "none"
 
   test "type match":
     let eval = makeEval()

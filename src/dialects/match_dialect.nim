@@ -217,7 +217,10 @@ proc registerMatch*(eval: Evaluator) =
           # Guard passed (or no guard) — evaluate handler
           return eval.evalBlock(handler.blockVals, handlerCtx)
 
-      # No match found, no default
-      ktgNone()
+      # No arm matched and no default: exhaustiveness violation.
+      # Opt-in fallthrough = explicit `default [none]`.
+      raise KtgError(kind: "match",
+        msg: "match had no arm covering value",
+        data: value)
     ),
     line: 0))

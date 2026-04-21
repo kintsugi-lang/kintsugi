@@ -116,13 +116,14 @@ suite "Match tests":
       ]
     """) == "42"
 
-  test "returns none when nothing matches":
+  test "raises error when nothing matches":
     let eval = makeEval()
-    check $eval.evalString("""
-      match [99] [
-        [1] [42]
-      ]
-    """) == "none"
+    expect KtgError:
+      discard eval.evalString("""
+        match [99] [
+          [1] [42]
+        ]
+      """)
 
   # -- destructuring --
 
