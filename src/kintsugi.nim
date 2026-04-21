@@ -14,6 +14,7 @@ import parse/parser
 import eval/[dialect, evaluator, natives]
 import emit/lua
 import dialects/[loop_dialect, match_dialect, object_dialect, attempt_dialect]
+import analyze/exhaustiveness
 import core/version
 
 ## Header stripping is done on the parsed AST via `parseSourceStripped`
@@ -134,7 +135,9 @@ proc runSingleFile(path: string, eval: Evaluator = nil) =
   let e = if eval != nil: eval else: setupEval()
 
   try:
-    discard e.evalBlock(e.preprocess(ast), e.global)
+    let processed = e.preprocess(ast)
+    checkExhaustiveness(processed, e)
+    discard e.evalBlock(processed, e.global)
   except ExitSignal as e:
     quit(e.code)
   except KtgError as ke:
@@ -184,6 +187,7 @@ proc compileOne(path: string, outPath: string = "") =
   let (ast, isEntrypoint) = parseSourceStripped(content)
   let eval = setupEval()
   let processed = eval.preprocess(ast, forCompilation = true)
+  checkExhaustiveness(processed, eval)
   let sourceDir = parentDir(absolutePath(path))
 
   let resolvedOut = if outPath.len > 0: outPath
@@ -229,6 +233,7 @@ proc dryRunPath(path: string) =
     let (ast, isEntrypoint) = parseSourceStripped(content)
     let eval = setupEval()
     let processed = eval.preprocess(ast, forCompilation = true)
+    checkExhaustiveness(processed, eval)
     let sourceDir = parentDir(absolutePath(f))
     if isEntrypoint:
       let (preludeLua, sourceLua, _) =
