@@ -50,20 +50,13 @@ proc matchSingleValue(pattern: KtgValue, value: KtgValue,
 
   # Type match: integer!, string!, etc.
   of vkType:
-    # Check for custom type first
+    # Embedded customType (rare — when a literal @type expression appears
+    # in a pattern position).
     if pattern.customType != nil:
       return eval.matchesCustomType(value, pattern.customType, ctx)
-    # Check if it's a known custom type in context
-    if ctx.has(pattern.typeName):
-      let typeVal = ctx.get(pattern.typeName)
-      if typeVal.customType != nil:
-        return eval.matchesCustomType(value, typeVal.customType, ctx)
-    # Built-in type match
-    let actual = typeName(value)
-    if actual == pattern.typeName:
-      return true
-    # Also check built-in type unions
-    return typeMatchesBuiltin(actual, pattern.typeName)
+    # Unified dispatch: handles builtin aliases, typeEnv lookups,
+    # enum namespace singletons, and legacy predicate-fn fallback.
+    return eval.typeMatches(typeName(value), pattern.typeName, value, ctx)
 
   # Paren: evaluate and match result literally
   of vkParen:
