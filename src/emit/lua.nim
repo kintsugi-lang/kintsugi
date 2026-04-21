@@ -3184,7 +3184,7 @@ proc emitExprTyped(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
       if metaName == "type" or metaName.startsWith("type/"):
         result = lxLit("")
       else:
-        # Unknown meta-words (@template, @inline, @preprocess) - silently
+        # Unknown meta-words (@template, @preprocess) - silently
         # erase. Compile-time machinery handles these elsewhere.
         result = lxLit("")
 

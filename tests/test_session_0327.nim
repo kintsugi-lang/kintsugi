@@ -1,5 +1,5 @@
 ## Tests for features built 2026-03-27/28:
-## dynamic paths, @const prefix, @inline [] block splicing, strict equality,
+## dynamic paths, strict equality,
 ## raw, import (rename from require), refinement syntax
 
 import std/[unittest, strutils]
@@ -64,33 +64,6 @@ suite "dynamic paths":
       print items/:i
     """))
     check "items[i]" in code
-
-# --- @inline [] block splicing ---
-
-suite "inline preprocess block splicing":
-  test "single value splice":
-    let eval = makeEval()
-    let r = eval.evalString("""
-      x: @inline [1 + 2]
-      x
-    """)
-    check $r == "3"
-
-  test "block result splices contents":
-    let eval = makeEval()
-    let r = eval.evalString("""
-      @inline [@compose [(to set-word! "my-var") 42]]
-      my-var
-    """)
-    check $r == "42"
-
-  test "block splice generates function":
-    let eval = makeEval()
-    let r = eval.evalString("""
-      @inline [@compose [(to set-word! "dbl") function [x] [x * 2]]]
-      dbl 5
-    """)
-    check $r == "10"
 
   test "@preprocess only (not @preprocess)":
     let eval = makeEval()

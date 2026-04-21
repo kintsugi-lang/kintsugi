@@ -1547,7 +1547,6 @@ with-timing "test" [
 ; Forms:
 ;   @preprocess [block]  - evaluate block at compile time; emit
 ;                          splices generated code into the output
-;   @inline [expr]       - evaluate expr at compile time, splice result
 ;
 ; Available inside @preprocess:
 ;   system/platform  - 'script (interpreter) or 'lua (compiler)
@@ -1573,14 +1572,6 @@ with-timing "test" [
     ]
   ]
 ]
-
-; Inline preprocess -- inject a single value
-pp-val: @inline [1 + 2]                 ; pp-val = 3 at preprocess time
-print pp-val                            ; 3
-
-; Block splicing -- @compose a whole function definition inline
-@inline [@compose [(to set-word! "pp-double") function [x] [x * 2]]]
-print pp-double 5                       ; 10
 
 ; --- system: platform and environment ---
 ; system is a mutable context available everywhere (not just preprocess).

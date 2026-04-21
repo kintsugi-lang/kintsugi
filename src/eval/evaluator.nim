@@ -1226,7 +1226,6 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue],
                  forCompilation: bool = false): seq[KtgValue] =
   ## Walk the AST looking for:
   ##   @preprocess [block]  - evaluate block, splice emitted values
-  ##   @inline [expr]       - evaluate expr, splice result
   ##   @template name: ...  - register template (expanded at call site)
   ##   template calls       - expand and splice
   ## When forCompilation=true, system/platform is set to 'lua.
@@ -1235,8 +1234,8 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue],
   var hasWork = false
   for v in ast:
     if v.kind == vkWord and v.wordKind == wkMetaWord and
-       v.wordName in ["preprocess", "inline", "game",
-                      "template", "template/deep", "template/only"]:
+       v.wordName in ["preprocess", "template",
+                      "template/deep", "template/only"]:
       hasWork = true
       break
     if forCompilation and v.kind == vkWord and v.wordKind == wkWord and
@@ -1261,21 +1260,8 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue],
   result = @[]
   var i = 0
   while i < ast.len:
-    # @inline [expr]
-    if ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
-       ast[i].wordName == "inline" and i + 1 < ast.len and
-       ast[i + 1].kind == vkBlock:
-      let value = eval.evalBlock(ast[i + 1].blockVals, eval.global)
-      if value != nil and value.kind != vkNone:
-        if value.kind == vkBlock:
-          for v in value.blockVals:
-            result.add(v)
-        else:
-          result.add(value)
-      i += 2
-
     # @preprocess [block]
-    elif ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
+    if ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
        ast[i].wordName == "preprocess" and i + 1 < ast.len and
        ast[i + 1].kind == vkBlock:
       let ppCtx = eval.global.child

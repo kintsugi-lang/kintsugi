@@ -82,26 +82,6 @@ suite "match: lit-word case insensitivity":
 
 
 
-# --- 4. Inline preprocess @inline [expr] ---
-
-suite "inline preprocess @inline [expr]":
-  test "@inline [1 + 2] evaluates to 3":
-    let eval = makeEval()
-    let result = eval.evalString("""
-      x: @inline [1 + 2]
-      x
-    """)
-    check $result == "3"
-
-  test "@inline [expression] with string":
-    let eval = makeEval()
-    let result = eval.evalString("""
-      x: @inline [join ["hello" " world"]]
-      x
-    """)
-    check $result == "hello world"
-
-
 # --- 5. Module isolation ---
 
 suite "module isolation":

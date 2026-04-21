@@ -558,11 +558,6 @@ suite "cross-mode: templates":
       ]
     """)
 
-  test "inline preprocess":
-    crossCheck("""
-      val: @inline [2 + 3]
-      print val
-    """)
 
   test "preprocess platform is lua when compiling":
     # Interpreter sees 'script, compiler sees 'lua
