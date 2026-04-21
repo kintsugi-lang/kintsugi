@@ -9,20 +9,6 @@ proc makeEval(): Evaluator =
   eval.registerDialect(newLoopDialect())
   eval
 
-suite "compose":
-  test "compose evaluates parens in block":
-    let eval = makeEval()
-    let r = eval.evalString("""
-      x: 10
-      @compose [a (x + 1) b]
-    """)
-    check $r == "[a 11 b]"
-
-  test "compose leaves non-parens alone":
-    let eval = makeEval()
-    let r = eval.evalString("""@compose [1 "hello" [nested]]""")
-    check $r == """[1 hello [nested]]"""
-
 suite "preprocess":
   test "basic preprocess emits values":
     let eval = makeEval()

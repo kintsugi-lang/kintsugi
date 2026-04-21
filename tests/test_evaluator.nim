@@ -366,7 +366,7 @@ suite "series access safety":
       discard eval.evalString("second [1]")
 
 suite "@template":
-  test "@template wraps body in @compose":
+  test "@template interpolates parens":
     let eval = makeEval()
     check $eval.evalString("""
       @template unless: [cond body [block!]] [
@@ -377,7 +377,7 @@ suite "@template":
       result
     """) == "42"
 
-  test "@template/deep uses @compose/deep":
+  test "@template/deep recurses into nested blocks":
     let eval = makeEval()
     check $eval.evalString("""
       @template/deep make-adder: [n [integer!]] [
@@ -387,7 +387,7 @@ suite "@template":
       add5 10
     """) == "15"
 
-  test "@template/only uses @compose/only":
+  test "@template/only inserts paren values without splicing":
     let eval = makeEval()
     check $eval.evalString("""
       @template/only defn: [name [string!] params [block!] body [block!]] [

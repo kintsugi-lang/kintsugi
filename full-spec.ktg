@@ -1484,36 +1484,13 @@ print first r                           ; 11
 print second r                          ; 20
 print third-pick: pick r 3              ; hello
 
-; --- @compose: template with paren interpolation ---
-; Evaluates parens inside the block. A block result is spliced
-; (Rebol convention). Use /only to insert as a single element.
-; /deep recurses into nested blocks.
-
-val: 42
-code: @compose [print (val)]             ; => [print 42]
-print second code                       ; 42
-
-; Splice vs /only
-items-c: [1 2 3]
-probe @compose [before (items-c) after]         ; [before 1 2 3 after]
-probe @compose/only [before (items-c) after]    ; [before [1 2 3] after]
-
-; /deep -- evaluates parens inside nested blocks too
-inner-val: "nested"
-deep-code: @compose/deep [outer [(inner-val)] done]
-probe second deep-code                  ; [nested]
-
-
 ; ============================================================
 ; TEMPLATES
 ; ============================================================
-; @template declares a compile-time macro: the body is
-; auto-wrapped in @compose, so (paren) interpolation splices
-; arguments into the produced block. Expansion happens at the
-; call site before evaluation.
+; @template declares a compile-time macro. Parens inside the body
+; are interpolated with the call-site arguments when the template
+; expands. Expansion happens at parse time, before evaluation.
 ;
-; @template/deep and @template/only select @compose/deep and
-; @compose/only respectively:
 ;   /deep  - interpolate inside nested blocks
 ;   /only  - treat generated tokens as single elements
 

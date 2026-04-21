@@ -1054,10 +1054,6 @@ suite "Natives tests":
     let eval = makeEval()
     check $eval.evalString("1 + 2") == "3"
 
-  test "compose evaluates parens in block":
-    let eval = makeEval()
-    check $eval.evalString("@compose [1 (2 + 3) 4]") == "[1 5 4]"
-
 # ============================================================
 # STDLIB TESTS (from stdlib.test.ts)
 # ============================================================

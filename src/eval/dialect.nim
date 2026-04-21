@@ -12,8 +12,15 @@ type
     moduleCache*: Table[string, KtgValue]
     moduleLoading*: HashSet[string]
     macros*: HashSet[string]   ## words declared with @template
+    templates*: Table[string, TemplateDef]   ## @template body + mode, keyed by name
     typeEnv*: Table[string, CustomType]  ## phantom type environment; @type registers here
     emitStack*: seq[ref seq[KtgValue]]   ## one queue per active @preprocess; @emit pushes to the top
+
+  TemplateDef* = object
+    params*: seq[ParamSpec]
+    body*: seq[KtgValue]
+    deep*: bool
+    only*: bool
 
   Dialect* = ref object of RootObj
     name*: string

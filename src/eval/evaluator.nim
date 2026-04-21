@@ -870,18 +870,6 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
         typeVal.customType = ct
         return typeVal
 
-      # @compose — block composition with paren interpolation
-      # Default: splice block results. /only: insert as single element.
-      # /deep: recurse into nested blocks.
-      if val.wordName == "compose" or val.wordName.startsWith("compose/"):
-        let parts = val.wordName.split('/')
-        let deep = "deep" in parts
-        let only = "only" in parts
-        let arg = eval.evalNext(vals, pos, ctx)
-        if arg.kind != vkBlock:
-          raise KtgError(kind: "type", msg: "@compose expects a block", data: nil)
-        return ktgBlock(composeWalk(eval, arg.blockVals, ctx, deep, only))
-
       # @emit — splice a block into the enclosing @preprocess output stream,
       # auto-interpolating parens (compose/deep semantics). Only valid while
       # a @preprocess block is active; outside, raises.
@@ -1298,8 +1286,8 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue],
       i += 2
 
     # @template name: [spec] [body]                — declarative compile-time
-    # @template/deep name: [spec] [body]            — @compose/deep body
-    # @template/only name: [spec] [body]            — @compose/only body
+    # @template/deep name: [spec] [body]            — deep paren interpolation
+    # @template/only name: [spec] [body]            — no splicing
     elif ast[i].kind == vkWord and ast[i].wordKind == wkMetaWord and
        (ast[i].wordName == "template" or
         ast[i].wordName == "template/deep" or
@@ -1307,43 +1295,33 @@ proc preprocess*(eval: Evaluator, ast: seq[KtgValue],
        ast[i + 1].kind == vkWord and ast[i + 1].wordKind == wkSetWord and
        ast[i + 2].kind == vkBlock and ast[i + 3].kind == vkBlock:
       let compName = ast[i + 1].wordName
-      let specBlock = ast[i + 2]
-      let userBody = ast[i + 3]
-      let composeName =
-        case ast[i].wordName
-        of "template/deep": "compose/deep"
-        of "template/only": "compose/only"
-        else: "compose"
-      ## Synthesize `function [<spec>] [@compose[/mode] [<body>]]`.
-      let composedBody = ktgBlock(@[
-        ktgWord(composeName, wkMetaWord),
-        userBody,
-      ])
-      var fnAst = @[
-        ktgWord("function", wkWord),
-        specBlock,
-        composedBody,
-      ]
-      var defPos = 0
-      let fnVal = eval.evalNext(fnAst, defPos, eval.global)
+      let spec = parseFuncSpec(ast[i + 2].blockVals)
+      let deep = ast[i].wordName == "template/deep"
+      let only = ast[i].wordName == "template/only"
+      eval.templates[compName] = TemplateDef(
+        params: spec.params,
+        body: ast[i + 3].blockVals,
+        deep: deep,
+        only: only,
+      )
       eval.macros.incl(compName)
-      eval.global.set(compName, fnVal)
       i += 4
 
     # Macro call - expand
     elif ast[i].kind == vkWord and ast[i].wordKind == wkWord and
        ast[i].wordName in eval.macros:
       let macroName = ast[i].wordName
-      let macroFn = eval.global.get(macroName)
-      # Consume the macro's arguments and call it
+      let tmpl = eval.templates[macroName]
+      # Consume arg expressions and bind to params in a child ctx.
       var callPos = i + 1
-      let expanded = eval.callCallable(macroFn, ast, callPos, eval.global)
-      # Splice the result block into the output
-      if expanded.kind == vkBlock:
-        for v in expanded.blockVals:
-          result.add(v)
-      else:
-        result.add(expanded)
+      let callCtx = eval.global.child
+      for p in tmpl.params:
+        let argVal = eval.evalNext(ast, callPos, eval.global)
+        callCtx.set(p.name, argVal)
+      let expanded = composeWalk(eval, tmpl.body, callCtx,
+                                 deep = tmpl.deep, only = tmpl.only)
+      for v in expanded:
+        result.add(v)
       i = callPos
 
     # import 'module / import/using 'module [symbols] - in compilation mode

@@ -3172,11 +3172,6 @@ proc emitExprTyped(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
 
     of wkMetaWord:
       let metaName = val.wordName
-      # Interpreter-only dialect machinery: hard error.
-      if metaName == "compose" or metaName.startsWith("compose/"):
-        compileError("@compose",
-          "@compose is a compile-time feature; use it inside @template or @preprocess",
-          val.line)
       # Type-system meta-words are consumed by prescan (`name!: @type ...`,
       # `name: @type/guard ...`). Reaching them at expression position means
       # the form was malformed (e.g. an `@type` not in a set-word RHS). Emit

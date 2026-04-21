@@ -419,27 +419,6 @@ suite "Words":
     check result.blockVals.len == 2
 
 # =============================================================================
-# homoiconic.test.ts — compose + code generation
-# =============================================================================
-
-suite "Compose and code generation":
-  test "compose set-word builds code":
-    let eval = makeEval()
-    discard eval.evalString("field: \"greeting\"")
-    discard eval.evalString("code: @compose [(to set-word! field) \"hello world\"]")
-    discard eval.evalString("reduce code")
-    check $eval.evalString("greeting") == "hello world"
-
-  test "compose generate function":
-    let eval = makeEval()
-    discard eval.evalString("name: \"double\"")
-    discard eval.evalString("code: @compose [(to set-word! name) function [x] [x * 2]]")
-    discard eval.evalString("reduce code")
-    check $eval.evalString("double 21") == "42"
-
-  # NOTE: "bind do scoped execution" test removed — bind is no longer a native word
-
-# =============================================================================
 # Additional spec-driven tests
 # =============================================================================
 
