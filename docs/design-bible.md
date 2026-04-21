@@ -368,17 +368,11 @@ The `@` sigil means "the language is doing something structural here." A word th
 | `@type/enum` | `name!: @type/enum ['a \| 'b]` | Define an enum over lit-words. Exposes `name/member` as path access to each member value, and `name/member!` as a singleton type matching only that member. Member lookup is case-insensitive; typos raise a typed error. |
 | `@type/where` | `name!: @type/where [spec] [guard]` | Define a type with a validation guard expression. |
 | `@type/guard` | `name?: @type/guard [params] [body]` | Construct a function eligible to be called inside `@type` where-guard bodies. Compiler validates body for compileability. |
-| `@const` | `name: @const value` | Bind a constant. The binding may not be reassigned. Lua emits with the `<const>` attribute. |
-| `@compose` | `@compose [body]` | Evaluate parens inside the block and splice their results. Used to build block values with interpolated data. |
-| `@compose/deep` | `@compose/deep [body]` | Recurse into nested blocks while composing. |
-| `@compose/only` | `@compose/only [body]` | Insert each paren result as a single value instead of splicing block contents. |
-| `@template` | `@template name: [spec] [body]` | Declare a named template. Body is auto-wrapped in `@compose`; arguments splice via paren interpolation at the call site. |
-| `@template/deep` | `@template/deep name: ...` | Same, but body is auto-wrapped in `@compose/deep`. |
-| `@template/only` | `@template/only name: ...` | Same, but body is auto-wrapped in `@compose/only`. |
-| `@preprocess` | `@preprocess [body]` | Evaluate the body at parse time. Inside, `emit [...]` injects code into the source stream. The imperative escape hatch for code generation. |
-| `@inline` | `@inline [expr]` | Evaluate a single expression at parse time and splice the result into the source stream. |
-| `@enter` | `@enter [body]` | Lifecycle hook run when entering the enclosing `scope`/`context`. |
-| `@exit` | `@exit [body]` | Lifecycle hook run on normal or error exit from the enclosing scope. Guaranteed to run. |
+| `@preprocess` | `@preprocess [body]` | Evaluate the body at parse time. Inside, `@emit` injects code into the source stream. The imperative escape hatch for code generation. |
+| `@emit` | `@emit [body]` | Only valid inside `@preprocess`. Splice the block into the enclosing output stream, auto-interpolating parens (deep). |
+| `@template` | `@template name: [spec] [body]` | Declare a named template. Parens in the body interpolate call-site arguments when the template expands at the call site. |
+| `@template/deep` | `@template/deep name: ...` | Recurse into nested blocks during interpolation. |
+| `@template/only` | `@template/only name: ...` | Insert each paren result as a single value instead of splicing block contents. |
 
 ### `@name` in destructuring positions
 
