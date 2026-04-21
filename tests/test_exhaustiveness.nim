@@ -1,6 +1,6 @@
 ## Static exhaustiveness checks for the match dialect.
 
-import std/unittest
+import std/[unittest, strutils]
 import ../src/core/[types, errors]
 import ../src/parse/parser
 import ../src/eval/[dialect, evaluator, natives]
@@ -185,3 +185,73 @@ suite "static exhaustiveness - builtin union":
     """
     expect KtgError:
       checkExhaustiveness(parseSource(src), e)
+
+suite "static exhaustiveness - guards":
+
+  test "variant covered only by guard is flagged with guard-specific message":
+    let e = makeEval()
+    registerEnum(e, "color!: @type/enum ['red | 'green | 'blue]")
+    let src = """
+      describe: function [c [color!]] [
+        match c [
+          ['red]   when [true] ["r"]
+          ['green] ["g"]
+          ['blue]  ["b"]
+        ]
+      ]
+    """
+    try:
+      checkExhaustiveness(parseSource(src), e)
+      check false  # expected to raise
+    except KtgError as ke:
+      check "guarded" in ke.msg
+      check "red" in ke.msg
+
+  test "guarded arm then unguarded arm for same variant is exhaustive":
+    let e = makeEval()
+    registerEnum(e, "color!: @type/enum ['red | 'green | 'blue]")
+    let src = """
+      describe: function [c [color!]] [
+        match c [
+          ['red]   when [true] ["LOUD"]
+          ['red]   ["quiet"]
+          ['green] ["g"]
+          ['blue]  ["b"]
+        ]
+      ]
+    """
+    checkExhaustiveness(parseSource(src), e)
+
+  test "guarded arm after unguarded cover of same variant is unreachable":
+    let e = makeEval()
+    registerEnum(e, "color!: @type/enum ['red | 'green | 'blue]")
+    let src = """
+      describe: function [c [color!]] [
+        match c [
+          ['red]   ["quiet"]
+          ['red]   when [true] ["LOUD"]
+          ['green] ["g"]
+          ['blue]  ["b"]
+        ]
+      ]
+    """
+    try:
+      checkExhaustiveness(parseSource(src), e)
+      check false
+    except KtgError as ke:
+      check "unreachable" in ke.msg
+
+  test "guarded arms + default is exhaustive":
+    let e = makeEval()
+    registerEnum(e, "color!: @type/enum ['red | 'green | 'blue]")
+    let src = """
+      describe: function [c [color!]] [
+        match c [
+          ['red]   when [true] ["LOUD"]
+          ['green] when [true] ["G"]
+          ['blue]  when [true] ["B"]
+          default  ["fallback"]
+        ]
+      ]
+    """
+    checkExhaustiveness(parseSource(src), e)

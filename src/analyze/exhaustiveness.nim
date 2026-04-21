@@ -14,14 +14,18 @@ import ../eval/dialect
 
 type
   ArmCat = enum
-    acCovers      ## covers one named variant
-    acCatchAll    ## catches any remaining variant
-    acGuarded     ## pattern could match but has a guard; do not count
+    acCovers      ## unguarded arm that covers one named variant
+    acCatchAll    ## unguarded pattern that catches any remaining variant
+    acGuarded     ## pattern could match, gated by `when`
     acSkipped     ## unchecked pattern shape (paren, block destructure, etc.)
 
   ArmInfo = object
     cat: ArmCat
-    variant: string  ## populated when cat == acCovers
+    ## Variant name populated for `acCovers` and for `acGuarded` when the
+    ## pattern names a specific variant (lit-word in enum mode, type-word
+    ## in union mode). Empty when the guarded arm is a capture/wildcard,
+    ## since those don't pin down a single variant.
+    variant: string
     line: int
 
 proc isLitWord(v: KtgValue): bool =
@@ -57,16 +61,16 @@ proc classifyArm(pattern: KtgValue, hasGuard: bool,
 
   if enumMode:
     if isLitWord(elem):
+      let v = elem.wordName.toLower
       if hasGuard:
-        return ArmInfo(cat: acGuarded, line: elem.line)
-      return ArmInfo(cat: acCovers, variant: elem.wordName.toLower,
-                     line: elem.line)
+        return ArmInfo(cat: acGuarded, variant: v, line: elem.line)
+      return ArmInfo(cat: acCovers, variant: v, line: elem.line)
   else:
     if isTypeWord(elem):
+      let v = elem.typeName.toLower
       if hasGuard:
-        return ArmInfo(cat: acGuarded, line: elem.line)
-      return ArmInfo(cat: acCovers, variant: elem.typeName.toLower,
-                     line: elem.line)
+        return ArmInfo(cat: acGuarded, variant: v, line: elem.line)
+      return ArmInfo(cat: acCovers, variant: v, line: elem.line)
 
   ArmInfo(cat: acSkipped)
 
@@ -108,7 +112,11 @@ proc parseRules(rules: seq[KtgValue], enumMode: bool): seq[ArmInfo] =
 
 proc checkArms(arms: seq[ArmInfo], variants: seq[string],
                scrutineeType: string, line: int) =
-  var covered: HashSet[string]
+  ## Three-state coverage per variant:
+  ##   absent       -- never mentioned
+  ##   guarded only -- seen via guarded arm(s) only; guard could fail
+  ##   fully        -- seen via unguarded arm; variant is covered
+  var fully, guardedOnly: HashSet[string]
   var caughtAll = false
   for a in arms:
     if caughtAll:
@@ -118,24 +126,42 @@ proc checkArms(arms: seq[ArmInfo], variants: seq[string],
         data: nil, line: a.line)
     case a.cat
     of acCovers:
-      if a.variant in covered:
+      if a.variant in fully:
         raise KtgError(kind: "match",
           msg: "unreachable match arm: variant '" & a.variant &
                "' of " & scrutineeType & " already covered",
           data: nil, line: a.line)
-      covered.incl(a.variant)
-      if not (a.variant in variants):
-        # Literal/type that doesn't belong to the declared union; skip.
-        discard
+      fully.incl(a.variant)
+      guardedOnly.excl(a.variant)
+    of acGuarded:
+      if a.variant.len > 0 and a.variant in fully:
+        raise KtgError(kind: "match",
+          msg: "unreachable match arm: variant '" & a.variant &
+               "' of " & scrutineeType &
+               " already covered by an earlier unguarded arm; " &
+               "the guard is never reached",
+          data: nil, line: a.line)
+      if a.variant.len > 0 and a.variant notin fully:
+        guardedOnly.incl(a.variant)
     of acCatchAll:
       caughtAll = true
-    of acGuarded, acSkipped:
+    of acSkipped:
       discard
 
   if caughtAll: return
-  var missing: seq[string]
+  var missing, guardedMissing: seq[string]
   for v in variants:
-    if v notin covered: missing.add(v)
+    if v in fully: continue
+    if v in guardedOnly: guardedMissing.add(v)
+    else: missing.add(v)
+
+  if guardedMissing.len > 0:
+    raise KtgError(kind: "match",
+      msg: "non-exhaustive match on " & scrutineeType &
+           ": variant(s) " & guardedMissing.join(", ") &
+           " covered only by guarded arm(s). Guards may fall through; " &
+           "add an unguarded arm or `default`",
+      data: nil, line: line)
   if missing.len > 0:
     raise KtgError(kind: "match",
       msg: "non-exhaustive match on " & scrutineeType &
