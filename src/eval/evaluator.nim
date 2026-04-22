@@ -640,11 +640,25 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
               data: nil, line: val.line)
         eval.typeEnv[val.wordName] = rhs.customType
         # Phase-1 consolidation: mirror into typeDefs so `is?` and match
-        # dispatch can route through a single registry.
-        let tk = if rhs.customType.isEnum: tkEnum
-                 elif rhs.customType.isStruct: tkStruct
-                 elif rhs.customType.guard.len > 0: tkGuard
-                 else: tkUnion
+        # dispatch can route through a single registry. Tagged unions
+        # are detected when every `|`-separated rule element is a block
+        # whose head is a lit-word (the variant tag).
+        proc isTaggedUnion(rule: seq[KtgValue]): bool =
+          var sawBlock = false
+          for rv in rule:
+            if rv.kind == vkWord and rv.wordKind == wkWord and rv.wordName == "|":
+              continue
+            if rv.kind != vkBlock or rv.blockVals.len == 0: return false
+            let head = rv.blockVals[0]
+            if head.kind != vkWord or head.wordKind != wkLitWord: return false
+            sawBlock = true
+          sawBlock
+        let tk =
+          if rhs.customType.isEnum: tkEnum
+          elif rhs.customType.isStruct: tkStruct
+          elif rhs.customType.guard.len > 0: tkGuard
+          elif isTaggedUnion(rhs.customType.rule): tkTagged
+          else: tkUnion
         eval.typeDefs[val.wordName] = TypeDef(
           name: val.wordName, line: val.line, kind: tk,
           custom: rhs.customType)
@@ -1085,6 +1099,32 @@ proc matchesTypeDef*(eval: Evaluator, value: KtgValue, td: TypeDef,
   of tkEnum, tkUnion, tkGuard, tkStruct:
     if td.custom == nil: return false
     eval.matchesCustomType(value, td.custom, ctx)
+  of tkTagged:
+    # Tagged union: value must be a block whose head is a lit-word
+    # matching one variant's tag, whose remaining length matches the
+    # variant's arity, and whose remaining elements satisfy the
+    # per-position type of that variant.
+    if td.custom == nil or value.kind != vkBlock or value.blockVals.len == 0:
+      return false
+    let head = value.blockVals[0]
+    if head.kind != vkWord or head.wordKind != wkLitWord: return false
+    for rv in td.custom.rule:
+      if rv.kind == vkWord and rv.wordKind == wkWord and rv.wordName == "|":
+        continue
+      if rv.kind != vkBlock or rv.blockVals.len == 0: continue
+      let vhead = rv.blockVals[0]
+      if vhead.kind != vkWord or vhead.wordKind != wkLitWord: continue
+      if toLower(vhead.wordName) != toLower(head.wordName): continue
+      let fieldTypes = rv.blockVals[1 .. ^1]
+      if value.blockVals.len - 1 != fieldTypes.len: return false
+      for i, ft in fieldTypes:
+        if ft.kind != vkType: continue
+        let actualTypeName = typeName(value.blockVals[i + 1])
+        if not eval.typeMatches(actualTypeName, ft.typeName,
+                                value.blockVals[i + 1], ctx):
+          return false
+      return true
+    false
   of tkObjectRef:
     if td.obj == nil: return false
     if value.kind != vkContext: return false

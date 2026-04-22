@@ -49,6 +49,7 @@ type
     tkUnion      ## @type [integer! | string!]
     tkGuard      ## @type/where [...] [it > 0]
     tkStruct     ## @type ['name [string!] 'age [integer!]]
+    tkTagged     ## @type [['circle float!] | ['rect float! float!]]
     tkObjectRef  ## name: object [...]  -- nominal/structural object type
 
   TypeDef* = ref object

@@ -23,10 +23,14 @@ type
     cat: ArmCat
     ## Variant name populated for `acCovers` and for `acGuarded` when the
     ## pattern names a specific variant (lit-word in enum mode, type-word
-    ## in union mode). Empty when the guarded arm is a capture/wildcard,
-    ## since those don't pin down a single variant.
+    ## in union mode, leading lit-word in tagged mode). Empty when the
+    ## guarded arm is a capture/wildcard, since those don't pin down a
+    ## single variant.
     variant: string
     line: int
+
+  AnalyzerMode = enum
+    amEnum, amUnion, amTagged
 
 proc isLitWord(v: KtgValue): bool =
   v.kind == vkWord and v.wordKind == wkLitWord
@@ -46,12 +50,40 @@ proc unionVariants(ct: CustomType): seq[string] =
     if rv.kind == vkType:
       result.add(rv.typeName.toLower)
 
+proc taggedVariants(ct: CustomType): seq[string] =
+  ## Tagged union variant tags (the leading lit-word of each shape block).
+  for rv in ct.rule:
+    if rv.kind == vkBlock and rv.blockVals.len > 0 and
+       rv.blockVals[0].kind == vkWord and rv.blockVals[0].wordKind == wkLitWord:
+      result.add(rv.blockVals[0].wordName.toLower)
+
 proc classifyArm(pattern: KtgValue, hasGuard: bool,
-                 enumMode: bool): ArmInfo =
+                 mode: AnalyzerMode): ArmInfo =
   ## Inspect a single arm's pattern block and categorize it.
-  if pattern.kind != vkBlock or pattern.blockVals.len != 1:
+  if pattern.kind != vkBlock: return ArmInfo(cat: acSkipped)
+  let elems = pattern.blockVals
+
+  # Tagged mode: multi-element patterns `['circle r]` or `['rect w h]`
+  # where the leading element is a lit-word naming a variant.
+  if mode == amTagged:
+    if elems.len == 0: return ArmInfo(cat: acSkipped)
+    if elems.len == 1:
+      let only = elems[0]
+      if only.kind == vkWord and only.wordKind == wkWord:
+        if hasGuard:
+          return ArmInfo(cat: acGuarded, line: only.line)
+        return ArmInfo(cat: acCatchAll, line: only.line)
+      return ArmInfo(cat: acSkipped)
+    # Multi-element: leading lit-word = variant tag.
+    if isLitWord(elems[0]):
+      let v = elems[0].wordName.toLower
+      if hasGuard:
+        return ArmInfo(cat: acGuarded, variant: v, line: elems[0].line)
+      return ArmInfo(cat: acCovers, variant: v, line: elems[0].line)
     return ArmInfo(cat: acSkipped)
-  let elem = pattern.blockVals[0]
+
+  if elems.len != 1: return ArmInfo(cat: acSkipped)
+  let elem = elems[0]
 
   # Wildcard / bare-word capture catches anything remaining.
   if elem.kind == vkWord and elem.wordKind == wkWord:
@@ -59,22 +91,24 @@ proc classifyArm(pattern: KtgValue, hasGuard: bool,
       return ArmInfo(cat: acGuarded, line: elem.line)
     return ArmInfo(cat: acCatchAll, line: elem.line)
 
-  if enumMode:
+  case mode
+  of amEnum:
     if isLitWord(elem):
       let v = elem.wordName.toLower
       if hasGuard:
         return ArmInfo(cat: acGuarded, variant: v, line: elem.line)
       return ArmInfo(cat: acCovers, variant: v, line: elem.line)
-  else:
+  of amUnion:
     if isTypeWord(elem):
       let v = elem.typeName.toLower
       if hasGuard:
         return ArmInfo(cat: acGuarded, variant: v, line: elem.line)
       return ArmInfo(cat: acCovers, variant: v, line: elem.line)
+  of amTagged: discard  # handled above
 
   ArmInfo(cat: acSkipped)
 
-proc parseRules(rules: seq[KtgValue], enumMode: bool): seq[ArmInfo] =
+proc parseRules(rules: seq[KtgValue], mode: AnalyzerMode): seq[ArmInfo] =
   ## Walk the rules block in arm order. Shape: `[pattern] [when [guard]] [handler]`
   ## or `default [handler]`.
   var pos = 0
@@ -108,7 +142,7 @@ proc parseRules(rules: seq[KtgValue], enumMode: bool): seq[ArmInfo] =
     if pos < rules.len and rules[pos].kind == vkBlock:
       pos += 1
 
-    result.add(classifyArm(pattern, hasGuard, enumMode))
+    result.add(classifyArm(pattern, hasGuard, mode))
 
 proc checkArms(arms: seq[ArmInfo], variants: seq[string],
                scrutineeType: string, line: int) =
@@ -200,19 +234,35 @@ proc walkMatch(scrutinee: KtgValue, rules: seq[KtgValue],
                scopes: seq[FnScope], eval: Evaluator, line: int) =
   let typeName = resolveScrutineeType(scrutinee, scopes)
   if typeName.len == 0: return
-  if typeName notin eval.typeEnv: return
-  let ct = eval.typeEnv[typeName]
+  # Prefer the unified typeDefs registry; fall back to the legacy
+  # typeEnv so phase-1 consolidation isn't required for this pass.
+  var td: TypeDef = nil
+  if typeName in eval.typeDefs: td = eval.typeDefs[typeName]
+  elif typeName in eval.typeEnv:
+    td = TypeDef(name: typeName, kind: tkUnion, custom: eval.typeEnv[typeName])
+    if td.custom.isEnum: td.kind = tkEnum
+    elif td.custom.isStruct: td.kind = tkStruct
+    elif td.custom.guard.len > 0: td.kind = tkGuard
+  if td == nil or td.custom == nil: return
 
-  if ct.isEnum:
-    let variants = enumVariants(ct)
+  case td.kind
+  of tkEnum:
+    let variants = enumVariants(td.custom)
     if variants.len == 0: return
-    let arms = parseRules(rules, enumMode = true)
+    let arms = parseRules(rules, amEnum)
+    checkArms(arms, variants, typeName, line)
+  of tkTagged:
+    let variants = taggedVariants(td.custom)
+    if variants.len == 0: return
+    let arms = parseRules(rules, amTagged)
+    checkArms(arms, variants, typeName, line)
+  of tkUnion:
+    let variants = unionVariants(td.custom)
+    if variants.len == 0: return
+    let arms = parseRules(rules, amUnion)
     checkArms(arms, variants, typeName, line)
   else:
-    let variants = unionVariants(ct)
-    if variants.len == 0: return  # guard-types, structs, etc. skipped
-    let arms = parseRules(rules, enumMode = false)
-    checkArms(arms, variants, typeName, line)
+    discard  # guard / struct / objectRef: no variant set to exhaust
 
 proc walkBlock(vals: seq[KtgValue], scopes: var seq[FnScope],
                eval: Evaluator) =

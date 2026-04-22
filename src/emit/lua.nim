@@ -136,6 +136,11 @@ type
     ctUnion       ## @type [t! | t!]
     ctWhere       ## @type/where [t!] [guard]
     ctEnum        ## @type/enum ['a | 'b]
+    ctTagged      ## @type [['tag t! t!] | ['other t!]]
+
+  TaggedVariant* = object
+    tag*: string            ## lowercased lit-word tag
+    fieldTypes*: seq[string]  ## per-position type names (e.g. "float!")
 
   CustomTypeRule* = object
     case kind*: CustomTypeKind
@@ -147,6 +152,8 @@ type
     of ctEnum:
       enumMembers*: seq[string]     ## lit-word names, stored lowercased for
                                     ## case-insensitive matching
+    of ctTagged:
+      taggedVariants*: seq[TaggedVariant]
 
   SeqType* = enum
     stUnknown
@@ -293,6 +300,8 @@ proc resolvesToScalar(e: LuaEmitter, typeName: string,
     return true
   of ctEnum:
     return true
+  of ctTagged:
+    return false
 
 proc resolvesToScalar(e: LuaEmitter, typeName: string): bool =
   var visited: HashSet[string]
@@ -862,6 +871,10 @@ proc emitCustomTypeCheck(e: var LuaEmitter, typeName, valExpr: string): string =
     for m in rule.enumMembers:
       parts.add(lowered & " == \"" & m & "\"")
     parts.join(" or ")
+  of ctTagged:
+    # Inline form defers to the synthesized predicate; the per-variant
+    # shape check is too branchy for a single expression.
+    customTypePredicateName(typeName) & "(" & valExpr & ")"
 
 proc emitCustomTypePredicateDecl(e: var LuaEmitter, typeName: string): string =
   ## Build a Lua function declaration for the synthesized predicate of a
@@ -928,6 +941,38 @@ proc emitCustomTypePredicateDecl(e: var LuaEmitter, typeName: string): string =
     "function " & fnName & "(it)\n" &
       "  if not (" & baseCheck & ") then return false end\n" &
       guardBody.strip(chars = {'\n'}) & "\nend"
+
+  of ctTagged:
+    # Tagged-union predicate: value must be a table whose first slot
+    # matches one variant's tag, whose remaining length matches that
+    # variant's arity, and whose per-position elements satisfy each
+    # declared field type.
+    var branches: seq[string]
+    for v in rule.taggedVariants:
+      let arity = v.fieldTypes.len
+      var parts: seq[string] = @[
+        "type(it) == \"table\"",
+        "it[1] == \"" & v.tag & "\"",
+        "#it == " & $(arity + 1)
+      ]
+      for j, ft in v.fieldTypes:
+        let base = if ft.endsWith("!"): ft[0 ..< ft.len - 1] else: ft
+        let fieldRef = "it[" & $(j + 2) & "]"
+        let fieldTyped = primitiveTypeCheckTyped(base, fieldRef)
+        let fieldCheck =
+          if fieldTyped.text.len > 0:
+            paren(fieldTyped, luaPrec("and"))
+          elif ft in e.customTypeRules:
+            customTypePredicateName(ft) & "(" & fieldRef & ")"
+          else:
+            "(type(" & fieldRef & ") == \"table\" and " &
+              fieldRef & "._type == \"" & base & "\")"
+        parts.add(fieldCheck)
+      branches.add("(" & parts.join(" and ") & ")")
+    let body =
+      if branches.len == 0: "false"
+      else: branches.join(" or ")
+    "function " & fnName & "(it)\n  return " & body & "\nend"
 
 # --- is? — unified type checking ---
 registerExpr("is?", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
@@ -4287,10 +4332,15 @@ proc closeTypeUsageTransitively(e: var LuaEmitter) =
     for typeName in e.usedTypeChecks:
       if typeName notin e.customTypeRules: continue
       let rule = e.customTypeRules[typeName]
-      let refs = case rule.kind
-        of ctUnion: rule.unionTypes
-        of ctWhere: rule.whereTypes
-        of ctEnum: @[]
+      var refs: seq[string] = @[]
+      case rule.kind
+      of ctUnion: refs = rule.unionTypes
+      of ctWhere: refs = rule.whereTypes
+      of ctEnum: discard
+      of ctTagged:
+        for v in rule.taggedVariants:
+          for ft in v.fieldTypes:
+            refs.add(ft)
       for t in refs:
         let base = if t.endsWith("!"): t[0 ..< t.len - 1] else: t
         if base in e.customTypeRules and base notin e.usedTypeChecks:
@@ -4309,10 +4359,15 @@ proc topoSortTypes(e: LuaEmitter, names: seq[string]): seq[string] =
     visited.incl(name)
     if name notin e.customTypeRules: return
     let rule = e.customTypeRules[name]
-    let refs = case rule.kind
-      of ctUnion: rule.unionTypes
-      of ctWhere: rule.whereTypes
-      of ctEnum: @[]
+    var refs: seq[string] = @[]
+    case rule.kind
+    of ctUnion: refs = rule.unionTypes
+    of ctWhere: refs = rule.whereTypes
+    of ctEnum: discard
+    of ctTagged:
+      for v in rule.taggedVariants:
+        for ft in v.fieldTypes:
+          refs.add(ft)
     for t in refs:
       let base = if t.endsWith("!"): t[0 ..< t.len - 1] else: t
       if base in e.customTypeRules and base != name:
@@ -4802,6 +4857,40 @@ proc prescanBlock(e: var LuaEmitter, vals: seq[KtgValue]) =
                              guardBody: vals[i + 3].blockVals)
             i += 4
             continue
+          # Tagged union: every non-`|` rule element is a block whose
+          # head is a lit-word tag. Predicate: table-shaped, matching
+          # tag with matching arity and per-position type.
+          block detectTagged:
+            var variants: seq[TaggedVariant]
+            var allTagged = ruleBlk.len > 0
+            var sawBlock = false
+            for rv in ruleBlk:
+              if rv.kind == vkWord and rv.wordKind == wkWord and rv.wordName == "|":
+                continue
+              if rv.kind == vkOp and rv.opSymbol == "|":
+                continue
+              if rv.kind != vkBlock or rv.blockVals.len == 0:
+                allTagged = false; break
+              let head = rv.blockVals[0]
+              if head.kind != vkWord or head.wordKind != wkLitWord:
+                allTagged = false; break
+              var fieldTypes: seq[string]
+              for j in 1 ..< rv.blockVals.len:
+                let fv = rv.blockVals[j]
+                if fv.kind != vkType:
+                  allTagged = false; break
+                fieldTypes.add(fv.typeName)
+              if not allTagged: break
+              variants.add(TaggedVariant(
+                tag: head.wordName.toLowerAscii,
+                fieldTypes: fieldTypes))
+              sawBlock = true
+            if allTagged and sawBlock:
+              e.customTypeRules[baseName] =
+                CustomTypeRule(kind: ctTagged, taggedVariants: variants)
+              i += 3
+              continue
+
           # Plain @type: reject 2+ lit-word unions (require @type/enum).
           # Singleton tags and mixed unions pass through.
           block validateLitUnion:
@@ -5077,6 +5166,28 @@ proc matchesCustomRule(e: LuaEmitter, rule: CustomTypeRule, arg: KtgValue): bool
       r.kind == vkLogic and r.boolVal
     except CatchableError:
       true
+  of ctTagged:
+    # Value must be a block whose leading element is a lit-word
+    # matching one variant's tag, with matching arity and each
+    # remaining element matching its declared field type.
+    if arg.kind != vkBlock or arg.blockVals.len == 0: return false
+    let head = arg.blockVals[0]
+    if head.kind != vkWord or head.wordKind != wkLitWord: return false
+    let tag = head.wordName.toLowerAscii
+    for v in rule.taggedVariants:
+      if v.tag != tag: continue
+      if arg.blockVals.len - 1 != v.fieldTypes.len: return false
+      for j, ft in v.fieldTypes:
+        let elem = arg.blockVals[j + 1]
+        let actual = typeName(elem)
+        if actual == ft: continue
+        let base = customTypeBase(ft)
+        if base in e.customTypeRules and
+           e.matchesCustomRule(e.customTypeRules[base], elem):
+          continue
+        return false
+      return true
+    false
 
 proc validatePass(e: var LuaEmitter, vals: seq[KtgValue]) =
   ## Single AST walk that performs all pre-emission validations and scans:
