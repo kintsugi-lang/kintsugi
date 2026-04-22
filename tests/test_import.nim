@@ -54,12 +54,13 @@ suite "import: interpreter":
       discard eval.evalString("import 'nonexistent")
 
 suite "import: compiler":
-  test "import + namespaced call emits lua with clamp":
+  test "import + namespaced call emits flattened clamp, not Lua math.clamp":
     let eval = makeEval()
     let ast = parseSource("import 'math\nprint math/clamp 15 0 10")
     let processed = eval.preprocess(ast, forCompilation = true)
     let code = emitLua(processed)
-    check "clamp" in code
+    check "clamp(15, 0, 10)" in code
+    check "math.clamp" notin code
 
   test "import/using emits flattened function":
     let eval = makeEval()

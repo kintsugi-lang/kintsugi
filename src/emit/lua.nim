@@ -418,6 +418,7 @@ proc isKnownName(e: LuaEmitter, name: string): bool =
   if luaName(name) in e.locals: return true
   if luaName(name) in e.moduleNames: return true
   if name in e.guardFuncs: return true
+  if name in e.usedStdlibSymbols: return true
   if name in LuaStdlibGlobals or sanitized in LuaStdlibGlobals: return true
   false
 
@@ -3015,6 +3016,23 @@ proc resolvePathCall(e: var LuaEmitter, name: string, line: int,
   let path = emitPath(name)
   let fullBinding = e.getBinding(name)
   let headBinding = e.getBinding(head)
+  # Stdlib module path: `math/clamp` where `math` was imported as a
+  # stdlib module and `clamp` is a flattened symbol. Prior to this
+  # check the path would escape into Lua verbatim as `math.clamp`,
+  # which collides with Lua's stdlib namespace. Route to the bare
+  # spliced binding instead.
+  if parts.len == 2 and head in e.usedStdlibSymbols:
+    let symName = parts[1]
+    let symBinding = e.getBinding(symName)
+    if symBinding.isFunction and not symBinding.isUnknown:
+      var args: seq[string] = @[]
+      for i in 0 ..< symBinding.arity:
+        args.add(e.emitExpr(vals, pos))
+      return PathResolution(
+        lua: e.resolvedName(symName) & "(" & args.join(", ") & ")",
+        isFullCall: true)
+    if not symBinding.isUnknown:
+      return PathResolution(lua: e.resolvedName(symName), isFullCall: false)
   if fullBinding.isUnknown and headBinding.isUnknown:
     e.assertKnownName(head, line)
   # Object method dispatch: `obj/method args` where obj is a tracked
