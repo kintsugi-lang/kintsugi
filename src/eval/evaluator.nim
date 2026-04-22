@@ -690,7 +690,7 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
           elif current.kind == vkMap:
             current.mapEntries[lastSeg] = rhs
           elif current.kind == vkObject:
-            raise KtgError(kind: "frozen",
+            raise KtgError(kind: "mutation",
               msg: "cannot mutate object! directly; use `make Type [field: value]` to stamp a mutable context from the template",
               data: nil)
           elif current.kind in {vkPair, vkMoney, vkTuple, vkDate, vkTime}:
@@ -717,7 +717,7 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
               elif holder.kind == vkMap:
                 holder.mapEntries[pKey] = newVal
               elif holder.kind == vkObject:
-                raise KtgError(kind: "frozen",
+                raise KtgError(kind: "mutation",
                   msg: "cannot mutate object! directly; use `make Type [field: value]` to stamp a mutable context from the template",
                 data: nil)
               else:

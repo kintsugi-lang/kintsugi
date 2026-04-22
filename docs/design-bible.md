@@ -212,13 +212,11 @@ Kintsugi does not ship a game dialect. Writing a game means binding the target S
 
 ## Object Protocol
 
-### Objects Are Frozen Templates, Instances Are Mutable Copies
+### Objects Are Templates, Instances Are Mutable Copies
 
-`object [...]` creates an `object!` — a frozen template with field specs, defaults, and methods. `make Object [overrides]` stamps a mutable `context!` from that template. The object is immutable; the instance is mutable. The instance has no link back to the object.
+`object [...]` creates an `object!` — a named template with field specs, defaults, and methods. `make Object [overrides]` stamps a mutable `context!` from that template. The template cannot be mutated directly; the instance is mutable. The instance has no link back to the template.
 
-`freeze` converts a `context!` to an `object!` (one-way). `freeze/deep` does so recursively. `frozen?` returns true for `object!` values.
-
-**Why:** No prototype chains, no delegation, no method resolution order. `make` copies fields into a new context — the result is a complete, independent value. Objects are frozen because they define structure, not state. If you need runtime customization, write a constructor function that calls `make`, modifies the instance, and returns it.
+**Why:** No prototype chains, no delegation, no method resolution order. `make` copies fields into a new context — the result is a complete, independent value. Templates define structure, not state. If you need runtime customization, write a constructor function that calls `make`, modifies the instance, and returns it.
 
 ### `make` Is a Stamp, Not Delegation
 
@@ -228,7 +226,7 @@ Shallow-copies fields, applies overrides, validates required fields, binds `self
 
 ### `merge` Is Mixin Composition
 
-`merge a b` returns a new `context!` with entries from both (b wins on conflicts). `merge/freeze a b` returns an `object!`. Both arguments can be `context!` or `object!`.
+`merge a b` returns a new `context!` with entries from both (b wins on conflicts). Both arguments can be `context!` or `object!`.
 
 ```
 dragon: merge (make Base [hp: 500]) Flying
@@ -254,7 +252,7 @@ No prototype chains. No diamond problem. Just data flowing into a new context.
 
 ### Standard Error Kinds
 
-`'type`, `'arity`, `'undefined`, `'math`, `'range`, `'syntax`, `'parse`, `'loop`, `'attempt`, `'load`, `'frozen`, `'make`, `'self`, `'object`, `'match`, `'dialect`, `'io`, `'stack`, `'user`. Users can raise custom kinds.
+`'type`, `'arity`, `'undefined`, `'math`, `'range`, `'syntax`, `'parse`, `'loop`, `'attempt`, `'load`, `'mutation`, `'make`, `'self`, `'object`, `'match`, `'dialect`, `'io`, `'stack`, `'user`. Users can raise custom kinds.
 
 ### Attempt Pipelines
 
@@ -364,14 +362,6 @@ The other value types lower trivially without shims:
 ### Type Checking in Compiled Output
 
 Built-in type checks (`is? integer! x`, `integer?`, `string?`, etc.) emit Lua `type()` checks — Lua can verify these natively. `@type`-declared custom type checks (`is? positive! x`, `match` patterns on `[positive!]`) route through synthesized `_positive_p(x)` functions emitted in the prelude on demand. `object!` instance checks (e.g., `is? Person p` against an `object`-based type) emit `_type` tag checks — `make` stamps instances with a `_type` string field. `@type` and `object!` are independent today; unification deferred.
-
-### Mutability Tracking Is Interpreter-Only
-
-> **Compiled Lua does not track frozen/mutable status.** `freeze` is a no-op in compiled output (returns its argument unchanged). `frozen?` always returns `false` in compiled output. Any logic that branches on `frozen?` at runtime, or that relies on `freeze` to prevent mutation of a compiled-mode value, will behave differently between interpreter and Lua targets.
-
-**Why:** Lua tables are unconditionally mutable. There is no read-only table primitive in standard Lua; emulating one requires a `__newindex` metatable guard on every frozen value, which penalizes every `object!` instance for a defensive feature most programs never read. Kintsugi ships the interpreter-side guarantee so code under test fails loudly on illegal mutation, and deliberately erases the tracking in compiled output so hot-path code pays nothing.
-
-**How to apply:** If a program depends on runtime frozen-ness — e.g. asserting `frozen? obj` as a precondition, or expecting `freeze` to harden a shared value — mark the program `target: 'interpreter` or restructure so the invariant is encoded structurally (distinct variable names, context isolation, careful `make`-time initialization) rather than behaviorally. In particular: the `object!` vs `context!` distinction exists in the interpreter but collapses in Lua; don't write code whose correctness depends on the difference being observable at runtime in compiled mode.
 
 ### AST Is the IR
 

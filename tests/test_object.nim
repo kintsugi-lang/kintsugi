@@ -99,7 +99,7 @@ suite "object fields":
     check $result == "100"
 
 suite "object immutability":
-  test "object is frozen":
+  test "object template rejects direct mutation":
     let eval = makeEval()
     var caught = false
     try:
@@ -111,7 +111,7 @@ suite "object immutability":
         Point/x: 999
       """)
     except KtgError as e:
-      caught = e.kind == "frozen"
+      caught = e.kind == "mutation"
     check caught
 
   test "instance is mutable":
@@ -219,64 +219,7 @@ suite "object instances":
     """)
     check $eval.evalString("type point!") == "type!"
 
-suite "freeze":
-  test "freeze converts context to object":
-    let eval = makeEval()
-    let r = eval.evalString("""
-      ctx: context [x: 1 y: 2]
-      obj: freeze :ctx
-      frozen? :obj
-    """)
-    check r.boolVal == true
-
-  test "frozen object rejects mutation":
-    let eval = makeEval()
-    var caught = false
-    try:
-      discard eval.evalString("""
-        ctx: context [x: 1]
-        obj: freeze :ctx
-        obj/x: 99
-      """)
-    except KtgError as e:
-      caught = e.kind == "frozen"
-    check caught
-
-  test "freeze/deep recursively freezes nested contexts":
-    let eval = makeEval()
-    let r = eval.evalString("""
-      inner: context [val: 42]
-      outer: context [child: :inner]
-      obj: freeze/deep :outer
-      frozen? obj/child
-    """)
-    check r.boolVal == true
-
-  test "freeze on already-frozen object is no-op":
-    let eval = makeEval()
-    let r = eval.evalString("""
-      Point: object [field/optional [x [integer!] 0]]
-      obj: freeze :Point
-      frozen? :obj
-    """)
-    check r.boolVal == true
-
-  test "frozen? returns false for context":
-    let eval = makeEval()
-    let r = eval.evalString("""
-      ctx: context [x: 1]
-      frozen? :ctx
-    """)
-    check r.boolVal == false
-
-  test "object keyword produces frozen value":
-    let eval = makeEval()
-    let r = eval.evalString("""
-      Point: object [field/optional [x [integer!] 0]]
-      frozen? :Point
-    """)
-    check r.boolVal == true
-
+suite "object templates":
   test "type on a make'd instance reports the object name":
     let eval = makeEval()
     discard eval.evalString("""
@@ -293,7 +236,7 @@ suite "freeze":
     ## Plain contexts still report context!.
     check $eval.evalString("type context [x: 1]") == "context!"
 
-  test "frozen-object mutation error suggests make":
+  test "template mutation error suggests make":
     let eval = makeEval()
     var caught = ""
     try:

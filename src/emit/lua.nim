@@ -12,7 +12,6 @@
 ##   - `object` specializes to table + constructor function.
 ##   - `loop` specializes to Lua for/ipairs loops.
 ##   - `@preprocess` runs at compile time (not in this file).
-##   - `freeze`/`frozen?` are no-ops in compiled output.
 
 import std/[strutils, tables, sequtils, sets]
 when not defined(js):
@@ -639,13 +638,6 @@ registerExpr("block?", typePred("table"))
 registerExpr("context?", typePred("table"))
 registerExpr("object?", typePred("table"))
 registerExpr("map?", typePred("table"))
-
-# Freeze - no-op in compiled output; passthrough preserves the inner shape.
-registerExpr("freeze", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
-  lxOther(e.emitExpr(vals, pos, primary = true)))
-registerExpr("frozen?", proc(e: var LuaEmitter, vals: seq[KtgValue], pos: var int): LuaExpr =
-  discard e.emitExpr(vals, pos, primary = true)
-  lxLit("false"))
 
 # Function types
 registerExpr("function?", typePred("function"))
@@ -3395,7 +3387,7 @@ proc advanceWordCall(e: LuaEmitter, vals: seq[KtgValue], pos: var int,
      "uppercase", "lowercase", "trim", "length", "empty?",
      "integer?", "float?", "string?", "logic?", "number?", "none?",
      "block?", "context?", "object?", "map?", "function?", "native?",
-     "freeze", "frozen?", "odd?", "even?",
+     "odd?", "even?",
      "first", "second", "last", "copy", "copy/deep", "reverse",
      "byte", "char", "sort", "reduce", "type", "raw", "exports",
      "random", "random/int", "random/seed", "random/choice":

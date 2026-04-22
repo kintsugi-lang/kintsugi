@@ -27,7 +27,7 @@ type
     vkMap       ## key-value store
     vkSet       ## unordered unique collection, O(1) membership
     vkContext   ## mutable scope/instance
-    vkObject    ## frozen object/module
+    vkObject    ## object template / module
     vkFunction  ## user-defined function
     vkNative    ## built-in function
     vkOp        ## infix operator

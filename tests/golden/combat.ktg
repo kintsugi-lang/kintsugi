@@ -3,11 +3,11 @@ Kintsugi [name: 'combat]
 ; Turn-Based Combat Sim
 ;
 ; Two teams of 3 units fight until one side is eliminated.
-; Tests: objects, make, match, loop, freeze, merge, contexts,
+; Tests: objects, make, match, loop, merge, contexts,
 ; all?/any?, length, and the full evaluation pipeline.
 
 ; ============================================================
-; Ability definitions (frozen objects)
+; Ability definitions
 ; ============================================================
 
 Ability: object [

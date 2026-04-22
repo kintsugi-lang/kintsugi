@@ -226,12 +226,10 @@ proc registerIoNatives*(eval: Evaluator) =
         arity: 1,
         refinements: @[
           RefinementSpec(name: "eval", params: @[]),
-          RefinementSpec(name: "header", params: @[]),
-          RefinementSpec(name: "freeze", params: @[])
+          RefinementSpec(name: "header", params: @[])
         ],
         fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
           let eval = getEvaluator(ep)
-          let doFreeze = "freeze" in eval.currentRefinements
           let path = case args[0].kind
             of vkString: args[0].strVal
             of vkFile: args[0].filePath
@@ -250,17 +248,7 @@ proc registerIoNatives*(eval: Evaluator) =
             let isoCtx = newContext(eval.global)
             isoCtx.localOnly = true
             discard eval.evalBlock(ast, isoCtx)
-            if doFreeze:
-              return KtgValue(kind: vkObject,
-                obj: newObject(isoCtx.entries), line: 0)
             return KtgValue(kind: vkContext, ctx: isoCtx, line: 0)
-
-          if doFreeze:
-            let isoCtx = newContext(eval.global)
-            isoCtx.localOnly = true
-            discard eval.evalBlock(ast, isoCtx)
-            return KtgValue(kind: vkObject,
-              obj: newObject(isoCtx.entries), line: 0)
 
           return ktgBlock(ast)
       )

@@ -112,7 +112,7 @@ my-paren: (1 + 2)                       ; paren! evaluates immediately: 3
 ;   op!        - operator (infix symbol)
 ;   type!      - type name value (integer!, string!, etc.)
 ;   context!   - mutable key-value scope
-;   object!    - frozen object with typed field specs
+;   object!    - named template with typed field specs
 ;   set!       - unordered unique collection
 ;   map!       - hash-based key-value store
 
@@ -396,15 +396,14 @@ say-hi                                  ; hi
 ; modules, and scopes are all contexts.
 ;
 ;   context!  - mutable key-value scope
-;   object!   - frozen context with typed field specs
+;   object!   - named template with typed field specs (see OBJECT DIALECT)
 ;
 ; Created by:
 ;   context [...]  - mutable context
 ;   function       - parameters and local words
-;   object [...]   - frozen object (see OBJECT DIALECT)
-;   make Object [] - mutable instance stamped from an object
+;   object [...]   - object template (see OBJECT DIALECT)
+;   make Object [] - mutable instance stamped from an object template
 ;   scope [...]    - lexical child context (no value leaks)
-;   freeze ctx     - convert context! to object! (one-way)
 
 ; --- context ---
 point: context [x: 10 y: 20]
@@ -458,7 +457,6 @@ print first deep-clone                  ; [1 2 99]
 ; --- merge ---
 ; merge creates a new context from two sources. Second overwrites first.
 ; Skips none values (useful with capture results).
-; merge/freeze returns an object! instead of context!.
 ; merge/deep copies blocks and contexts instead of sharing.
 
 defaults: context [name: "Unknown" hp: 100 attack: 10]
@@ -815,11 +813,6 @@ print function? :print                  ; true
 print context? context [x: 1]          ; true
 print object? object [field/optional [x [integer!] 0]]  ; true
 
-; frozen? checks if a value is an object! (frozen)
-print frozen? context [x: 1]           ; false
-Point: object [field/optional [x [integer!] 0]]
-print frozen? :Point                    ; true
-
 ; Union predicates
 print number? 3.14                      ; true (integer! or float!)
 print number? 42                        ; true
@@ -1048,7 +1041,7 @@ fetch: function [url] [try [network-call url]]
 ; 'import     - import resolution failure
 ; 'make       - required field missing in make
 ; 'object     - malformed object dialect body
-; 'frozen     - attempt to mutate an object!
+; 'mutation   - attempt to mutate an object template directly
 ; 'self       - attempt to rebind self
 ; 'dialect    - dialect misuse
 ; 'stack      - recursion depth exceeded
@@ -1282,9 +1275,9 @@ print classify 500                      ; huge
 ; ============================================================
 ; OBJECT DIALECT
 ; ============================================================
-; object defines a frozen object with typed fields and methods.
-; make stamps mutable instances (context!) from objects.
-; Objects are immutable -- mutation raises 'frozen error.
+; object defines a named template with typed fields and methods.
+; make stamps mutable instances (context!) from object templates.
+; Templates cannot be mutated directly -- mutation raises 'mutation error.
 ;
 ; Convention: objects use PascalCase (Person, Card, Reader)
 ; to distinguish from regular words.
@@ -1624,7 +1617,6 @@ print lerp 0 100 0.25                   ; 25
 ; load %file             - parse, return block! (AST)
 ; load/eval %file        - evaluate, return context!
 ; load/header %file      - return just the Kintsugi header block
-; load/freeze %file      - evaluate, return frozen object!
 ;
 ; load does NOT cache. Every call reparses the file.
 ; Use import for cached context loading.

@@ -106,16 +106,6 @@ suite "merge":
     """)
     check r.intVal == 2
 
-  test "merge/freeze returns object":
-    let eval = makeEval()
-    let r = eval.evalString("""
-      a: context [x: 1]
-      b: context [y: 2]
-      result: merge/freeze a b
-      frozen? :result
-    """)
-    check r.boolVal == true
-
 suite "std namespace (via CLI)":
   const kintsugi = "bin/kintsugi"
 

@@ -788,13 +788,11 @@ proc registerNatives*(eval: Evaluator) =
       name: "merge",
       arity: 2,
       refinements: @[
-        RefinementSpec(name: "deep", params: @[]),
-        RefinementSpec(name: "freeze", params: @[])
+        RefinementSpec(name: "deep", params: @[])
       ],
       fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
         let eval = getEvaluator(ep)
         let isDeep = "deep" in eval.currentRefinements
-        let doFreeze = "freeze" in eval.currentRefinements
 
         proc getEntries(val: KtgValue): OrderedTable[string, KtgValue] =
           case val.kind
@@ -820,11 +818,7 @@ proc registerNatives*(eval: Evaluator) =
             else:
               merged.set(key, val)
 
-        if doFreeze:
-          KtgValue(kind: vkObject,
-            obj: newObject(merged.entries), line: 0)
-        else:
-          KtgValue(kind: vkContext, ctx: merged, line: 0)
+        KtgValue(kind: vkContext, ctx: merged, line: 0)
     )
     ctx.set("merge", KtgValue(kind: vkNative, nativeFn: mergeNative, line: 0))
 
@@ -838,51 +832,6 @@ proc registerNatives*(eval: Evaluator) =
       discard eval.evalBlock(args[0].blockVals, ctxInner)
       return KtgValue(kind: vkContext, ctx: ctxInner, line: 0)
     raise KtgError(kind: "type", msg: "context expects block!", data: nil)
-  )
-
-  # --- Freeze ---
-
-  block:
-    proc freezeValue(val: KtgValue, deep: bool): KtgValue =
-      case val.kind
-      of vkContext:
-        var entries = initOrderedTable[string, KtgValue]()
-        for key, v in val.ctx.entries:
-          if deep and v.kind == vkContext:
-            entries[key] = freezeValue(v, true)
-          else:
-            entries[key] = v
-        KtgValue(kind: vkObject, obj: newObject(entries), line: val.line)
-      of vkObject:
-        if deep:
-          var entries = initOrderedTable[string, KtgValue]()
-          for key, v in val.obj.entries:
-            if v.kind == vkContext:
-              entries[key] = freezeValue(v, true)
-            else:
-              entries[key] = v
-          KtgValue(kind: vkObject,
-            obj: newObject(entries, val.obj.fieldSpecs, val.obj.name),
-            line: val.line)
-        else:
-          val
-      else:
-        raise KtgError(kind: "type",
-          msg: "freeze expects context! or object!, got " & typeName(val), data: val)
-
-    let freezeNative = KtgNative(
-      name: "freeze",
-      arity: 1,
-      refinements: @[RefinementSpec(name: "deep", params: @[])],
-      fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
-        let eval = getEvaluator(ep)
-        let deep = "deep" in eval.currentRefinements
-        freezeValue(args[0], deep)
-    )
-    ctx.set("freeze", KtgValue(kind: vkNative, nativeFn: freezeNative, line: 0))
-
-  ctx.native("frozen?", 1, proc(args: seq[KtgValue], ep: pointer): KtgValue =
-    ktgLogic(args[0].kind == vkObject)
   )
 
   # --- Function creation ---

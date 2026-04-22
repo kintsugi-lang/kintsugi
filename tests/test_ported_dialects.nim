@@ -563,9 +563,9 @@ suite "Object dialect tests":
     """)
     check $eval.evalString("is? person! p") == "true"
 
-  # -- object immutability --
+  # -- object template immutability --
 
-  test "object is frozen":
+  test "object template rejects direct mutation":
     let eval = makeEval()
     var caught = false
     try:
@@ -577,7 +577,7 @@ suite "Object dialect tests":
         Point/x: 999
       """)
     except KtgError as e:
-      caught = e.kind == "frozen"
+      caught = e.kind == "mutation"
     check caught
 
   # -- instance mutability --
