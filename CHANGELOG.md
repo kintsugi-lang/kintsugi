@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.2
+
+### Fixed
+
+- **`and` / `or` short-circuit in the interpreter.** The interpreter now skips evaluation of the right-hand side when the left-hand side already decides the result, matching the compiled Lua's native short-circuit. Previously both sides always evaluated, so `false and (1 / 0)` raised and RHS side effects (assignments, function calls) always fired. This closes a silent parity gap between interp and compiled output.
+
+### Added
+
+- **`'variadic` binding kind.** Declares a variadic FFI call whose single argument at the call site must be a block literal; contents splice into the emitted Lua call as positional arguments. Targets Lua APIs like `love.graphics.print`, `string.format`, and most SDK draw calls that today force one `'call N` binding per arity. Example: `bindings [rect "love.graphics.rectangle" 'variadic]` lets `rect ["fill" x y w h]` and `rect ["line" 0 0 10 10 3]` both work against the same binding.
+- **`'variadic returns N`.** Declares Lua multi-return for a variadic binding. When the RHS of `set [a b c]` is a `'variadic returns > 1` call, the emitter produces `local a, b, c = lua.path(...)` directly — no temporary table, no indexing. Example: `bindings [rgb-bytes "love.math.colorFromBytes" 'variadic returns 3]` with `set [r g b] rgb-bytes [255 128 0]`. Interpreter placeholders return a block of N `none` values so destructuring stays consistent across targets.
+
 ## 0.5.1 — phase-2 type consolidation
 
 ### Changed
