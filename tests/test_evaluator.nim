@@ -467,3 +467,59 @@ suite "lexer errors":
     expect KtgError:
       discard eval.evalString("x: 12:30:60")
 
+suite "and/or short-circuit":
+  test "and does not evaluate RHS when LHS is falsy":
+    let eval = makeEval()
+    # If RHS evaluated, `1 / 0` would raise a math error.
+    check $eval.evalString("false and (1 / 0)") == "false"
+    check $eval.evalString("none and (1 / 0)") == "none"
+
+  test "or does not evaluate RHS when LHS is truthy":
+    let eval = makeEval()
+    check $eval.evalString("true or (1 / 0)") == "true"
+    check $eval.evalString("42 or (1 / 0)") == "42"
+    check $eval.evalString(""""hi" or (1 / 0)""") == "hi"
+
+  test "and does not run RHS side effects when LHS is falsy":
+    let eval = makeEval()
+    discard eval.evalString("counter: 0")
+    discard eval.evalString("false and (counter: counter + 1)")
+    check $eval.evalString("counter") == "0"
+
+  test "or does not run RHS side effects when LHS is truthy":
+    let eval = makeEval()
+    discard eval.evalString("counter: 0")
+    discard eval.evalString("true or (counter: counter + 1)")
+    check $eval.evalString("counter") == "0"
+
+  test "and evaluates RHS when LHS is truthy":
+    let eval = makeEval()
+    discard eval.evalString("counter: 0")
+    discard eval.evalString("true and (counter: counter + 1)")
+    check $eval.evalString("counter") == "1"
+
+  test "or evaluates RHS when LHS is falsy":
+    let eval = makeEval()
+    discard eval.evalString("counter: 0")
+    discard eval.evalString("false or (counter: counter + 1)")
+    check $eval.evalString("counter") == "1"
+
+  test "and returns LHS when falsy, RHS otherwise":
+    let eval = makeEval()
+    check $eval.evalString("false and true") == "false"
+    check $eval.evalString("true and 42") == "42"
+    check $eval.evalString("none and 42") == "none"
+
+  test "or returns LHS when truthy, RHS otherwise":
+    let eval = makeEval()
+    check $eval.evalString("true or false") == "true"
+    check $eval.evalString("false or 42") == "42"
+    check $eval.evalString("none or 42") == "42"
+
+  test "chained and/or short-circuits":
+    let eval = makeEval()
+    # false and X and (...) - X is never reached
+    check $eval.evalString("false and (1 / 0) and (1 / 0)") == "false"
+    # true or X or (...) - X is never reached
+    check $eval.evalString("true or (1 / 0) or (1 / 0)") == "true"
+

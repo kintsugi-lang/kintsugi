@@ -15,6 +15,10 @@ type
     templates*: Table[string, TemplateDef]   ## @template body + mode, keyed by name
     typeDefs*: Table[string, TypeDef]    ## unified type registry; every @type and object registration writes here
     emitStack*: seq[ref seq[KtgValue]]   ## one queue per active @preprocess; @emit pushes to the top
+    skipMode*: bool   ## true while short-circuiting `and`/`or` RHS: callables,
+                      ## ops, dialects, and set-word binding all become no-ops.
+                      ## Token consumption still advances correctly because
+                      ## evalNext/callCallable walk the same arity spans.
 
   TemplateDef* = object
     params*: seq[ParamSpec]

@@ -327,6 +327,13 @@ proc applyInfix*(eval: Evaluator, result: var KtgValue,
     # chain arrow -> (method call)
     if next.kind == vkWord and next.wordName == "->":
       pos += 1
+      if eval.skipMode:
+        # Consume method name + args count unknown without target eval.
+        # Safe approximation: skip the method-name token. callCallable
+        # under skipMode will then consume any arity it would have taken.
+        if pos < vals.len and vals[pos].kind == vkWord:
+          pos += 1
+        continue
       if pos >= vals.len or vals[pos].kind != vkWord:
         raise KtgError(kind: "type", msg: "-> expects a method name", data: nil)
       let methodName = vals[pos].wordName
@@ -347,6 +354,7 @@ proc applyInfix*(eval: Evaluator, result: var KtgValue,
     if next.kind == vkOp:
       pos += 1
       let right = eval.evalNext(vals, pos, ctx)
+      if eval.skipMode: continue  # consumed RHS span, skip the op
       let opSym = next.opSymbol
       result = eval.applyOp(opSym, result, right)
       continue
@@ -354,15 +362,29 @@ proc applyInfix*(eval: Evaluator, result: var KtgValue,
     # infix words: and, or
     if next.kind == vkWord and next.wordName in ["and", "or"]:
       pos += 1
+      let opName = next.wordName
+      # Short-circuit: if LHS already decides the result, consume RHS
+      # span without executing its side effects. `false and X` and
+      # `true or X` must not run X.
+      let alreadyDecided =
+        eval.skipMode or
+        (opName == "and" and not isTruthy(result)) or
+        (opName == "or" and isTruthy(result))
+      if alreadyDecided:
+        let saved = eval.skipMode
+        eval.skipMode = true
+        try:
+          discard eval.evalNext(vals, pos, ctx)
+        except KtgError:
+          # Under short-circuit, errors inside the skipped RHS (undefined
+          # word, failed type/path navigation) are intentionally silent.
+          # The RHS was never supposed to run.
+          discard
+        finally:
+          eval.skipMode = saved
+        continue
       let right = eval.evalNext(vals, pos, ctx)
-      case next.wordName
-      of "and":
-        if isTruthy(result):
-          result = right
-      of "or":
-        if not isTruthy(result):
-          result = right
-      else: discard
+      result = right
       continue
 
     break
@@ -531,6 +553,7 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
         if pathDialect != nil and pos < vals.len and vals[pos].kind == vkBlock:
           let blk = vals[pos]
           pos += 1
+          if eval.skipMode: return ktgNone()
           return pathDialect.interpret(blk.blockVals, eval, ctx, segments)
 
         # Enum namespace: head is unbound but head! is a registered enum.
@@ -597,6 +620,7 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
       if dialect != nil and pos < vals.len and vals[pos].kind == vkBlock:
         let blk = vals[pos]
         pos += 1
+        if eval.skipMode: return ktgNone()
         return dialect.interpret(blk.blockVals, eval, ctx)
 
       let bound = ctx.get(val.wordName)
@@ -615,6 +639,11 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
       # evaluate RHS with infix
       var rhs = eval.evalNext(vals, pos, ctx)
       eval.applyInfix(rhs, vals, pos, ctx)
+
+      # Short-circuit: skip binding, type registration, and path writes
+      # when a parent `and`/`or` already decided the result.
+      if eval.skipMode:
+        return rhs
 
       # Protect self from rebinding (only in the scope where self is defined)
       if val.wordName == "self" and "self" in ctx.entries:
@@ -1173,6 +1202,21 @@ proc typeMatches*(eval: Evaluator, actual, expected: string, value: KtgValue, ct
 
 proc callCallable*(eval: Evaluator, fn: KtgValue, vals: seq[KtgValue],
                    pos: var int, ctx: KtgContext, selfVal: KtgValue = nil): KtgValue =
+  # Short-circuit: while a parent `and`/`or` is skipping RHS, consume the
+  # callable's argument span without actually invoking it. Each arg eval
+  # stays in skipMode so nested calls fall through the same path.
+  if eval.skipMode:
+    let arity =
+      case fn.kind
+      of vkNative:   fn.nativeFn.arity
+      of vkFunction: fn.fn.params.len
+      else: 0
+    for i in 0 ..< arity:
+      if pos >= vals.len: break
+      var arg = eval.evalNext(vals, pos, ctx)
+      eval.applyInfix(arg, vals, pos, ctx)
+    return ktgNone()
+
   case fn.kind
 
   of vkNative:
