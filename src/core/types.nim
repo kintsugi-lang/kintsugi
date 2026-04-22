@@ -40,6 +40,27 @@ type
     isEnum*: bool              ## true if @type/enum
     isStruct*: bool            ## true if structural type (field validation)
 
+  TypeKind* = enum
+    ## Unified tag for the canonical type-dispatch registry. Every
+    ## name that can appear on the left of `is?` or in a function
+    ## spec resolves to exactly one TypeDef entry; the variant tag
+    ## selects how `matches` handles it.
+    tkEnum       ## @type/enum ['red | 'green]
+    tkUnion      ## @type [integer! | string!]
+    tkGuard      ## @type/where [...] [it > 0]
+    tkStruct     ## @type ['name [string!] 'age [integer!]]
+    tkObjectRef  ## name: object [...]  -- nominal/structural object type
+
+  TypeDef* = ref object
+    ## Canonical entry in `Evaluator.typeDefs`. Backed by the legacy
+    ## CustomType/KtgObject representations during phase-1
+    ## consolidation; phase-2 collapses those into this record.
+    name*: string              ## canonical type name, e.g. "color!"
+    line*: int
+    kind*: TypeKind
+    custom*: CustomType        ## backing for tkEnum/tkUnion/tkGuard/tkStruct
+    obj*: KtgObject            ## backing for tkObjectRef
+
   KtgValue* = ref object
     line*: int              ## source line for error reporting
     boundCtx*: KtgContext   ## context for bind/do — nil means use current

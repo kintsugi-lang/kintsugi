@@ -197,6 +197,11 @@ proc registerNatives*(eval: Evaluator) =
 
       let tn = typeArg.typeName
 
+      # Unified registry: phase-1 consolidation routes dispatch through
+      # typeDefs; CustomType/KtgObject remain the backing storage.
+      if tn in eval.typeDefs:
+        return ktgLogic(eval.matchesTypeDef(value, eval.typeDefs[tn], eval.currentCtx))
+
       # Phantom custom type: look in typeEnv first.
       if tn in eval.typeEnv:
         return ktgLogic(eval.matchesCustomType(value, eval.typeEnv[tn], eval.currentCtx))
@@ -253,6 +258,14 @@ proc registerNatives*(eval: Evaluator) =
 
     # Case 3: object! — e.g., is? :Person p
     if typeArg.kind == vkObject:
+      # Route through typeDefs when the object has a registered name;
+      # keeps `is? :Person p` and `is? person! p` on the same code
+      # path post-consolidation.
+      if typeArg.obj != nil and typeArg.obj.name.len > 0:
+        let key = typeArg.obj.name.toLower & "!"
+        if key in eval.typeDefs:
+          return ktgLogic(eval.matchesTypeDef(value, eval.typeDefs[key],
+                                              eval.currentCtx))
       # Structural check: value must be a context with all fields from object
       if value.kind != vkContext:
         return ktgLogic(false)

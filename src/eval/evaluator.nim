@@ -156,7 +156,8 @@ proc newEvaluator*(): Evaluator =
     dialects: @[],
     moduleCache: initTable[string, KtgValue](),
     moduleLoading: initHashSet[string](),
-    typeEnv: initTable[string, CustomType]()
+    typeEnv: initTable[string, CustomType](),
+    typeDefs: initTable[string, TypeDef]()
   )
 
 proc registerDialect*(eval: Evaluator, d: Dialect) =
@@ -638,6 +639,15 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
                    "' — name already bound",
               data: nil, line: val.line)
         eval.typeEnv[val.wordName] = rhs.customType
+        # Phase-1 consolidation: mirror into typeDefs so `is?` and match
+        # dispatch can route through a single registry.
+        let tk = if rhs.customType.isEnum: tkEnum
+                 elif rhs.customType.isStruct: tkStruct
+                 elif rhs.customType.guard.len > 0: tkGuard
+                 else: tkUnion
+        eval.typeDefs[val.wordName] = TypeDef(
+          name: val.wordName, line: val.line, kind: tk,
+          custom: rhs.customType)
         return rhs
 
       # set-path: word/field/field: value
@@ -746,6 +756,11 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
         # Register the type name
         if not ctx.has(customType):
           ctx.set(customType, ktgType(customType))
+
+        # Phase-1 consolidation: mirror into typeDefs.
+        eval.typeDefs[customType] = TypeDef(
+          name: customType, line: val.line, kind: tkObjectRef,
+          obj: rhs.obj)
 
         # Register type predicate function: checks if value has all fields
         let predicateName = lowerName & "?"
@@ -1061,10 +1076,29 @@ proc resolveEnumSingleton*(eval: Evaluator, typeName: string): CustomType =
   raise KtgError(kind: "type",
     msg: "'" & memberStr & "' is not a member of " & parentName, data: nil)
 
+proc matchesTypeDef*(eval: Evaluator, value: KtgValue, td: TypeDef,
+                     ctx: KtgContext): bool =
+  ## Unified dispatch against a TypeDef. Handles every registered
+  ## variant; the legacy CustomType/KtgObject paths back this call
+  ## during phase-1 consolidation.
+  case td.kind
+  of tkEnum, tkUnion, tkGuard, tkStruct:
+    if td.custom == nil: return false
+    eval.matchesCustomType(value, td.custom, ctx)
+  of tkObjectRef:
+    if td.obj == nil: return false
+    if value.kind != vkContext: return false
+    for fs in td.obj.fieldSpecs:
+      if fs.name notin value.ctx.entries:
+        return false
+    true
+
 proc matchesCustomTypeByName*(eval: Evaluator, value: KtgValue, typeName: string, ctx: KtgContext): bool =
   ## Phantom type lookup. typeEnv is authoritative. Legacy fallbacks handle
   ## object auto-gen (predicate function) and pre-phantom code that still
   ## stores a customType as a value.
+  if typeName in eval.typeDefs:
+    return eval.matchesTypeDef(value, eval.typeDefs[typeName], ctx)
   if typeName in eval.typeEnv:
     return eval.matchesCustomType(value, eval.typeEnv[typeName], ctx)
   let singleton = eval.resolveEnumSingleton(typeName)
