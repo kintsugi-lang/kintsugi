@@ -1,0 +1,25 @@
+# Changelog
+
+## 0.5.0 — "No Ghosts"
+
+### Language
+
+- **Exhaustive match by default.** A `match` with no covering arm now raises `'match` instead of silently returning `none!`. Opt out with an explicit `default [none]` arm.
+- **Static exhaustiveness pass.** Typed scrutinees (enum, builtin union, tagged union) are checked at compile time for missing variants, unreachable arms (after a catch-all or duplicate literal), and guard-only coverage. Guarded arms do not count toward coverage; coverage only by guard surfaces as a distinct error with a guard-specific message.
+- **Tagged unions.** New syntax `@type [['circle float!] | ['rect float! float!]]` declares a nominal-by-tag union with positional field types. Match destructures by leading lit-word (`['rect w h]`) and the exhaustiveness pass treats each tag as a variant.
+- **Coroutine stdlib.** `import/using 'coroutine [create resume yield status wrap]` exposes path-refined bindings that emit direct `coroutine.*` calls in compiled Lua. Interpreter raises; the module is Lua-target only.
+- **Color stdlib.** `rgb`, `rgba`, `hex`, `hsl`, `lighten`, `darken`, `mix`, `apply` — 0..1 float blocks sized for LOVE2D's `setColor` and friends.
+- **io stdlib.** (Landed from work alongside the 0.4 -> 0.5 cycle.) Multi-target filesystem bindings under `import/using 'io`.
+
+### Removed
+
+- **`freeze` / `frozen?`.** User-facing surface gone. Objects are still protected against direct template mutation; the error kind renamed from `'frozen` to `'mutation`. No semantic divergence between interpreter and Lua target anymore.
+
+### Fixed
+
+- **Stdlib module path routing.** `import 'math` followed by `math/clamp 15 0 10` used to silently route through Lua's `math.*` namespace (to a nonexistent `math.clamp`), because `math` shadows a Lua stdlib global. The emitter now resolves stdlib-module paths to the flattened spliced symbol and calls it directly. Every stdlib module that shares a name with a Lua global benefits.
+
+### Under the hood
+
+- **Unified type registry (phase 1).** Every `@type` and `object` registration mirrors into a single `Evaluator.typeDefs` table. `is?` and match dispatch route through it; legacy `CustomType` / `KtgObject` storage still backs each entry. Phase 2 (collapse the backings, flip object dispatch to nominal-by-tag) is deferred.
+- **`analyze/` package.** New home for static analysis passes; exhaustiveness is the first tenant.

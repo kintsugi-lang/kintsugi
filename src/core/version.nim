@@ -1,3 +1,3 @@
-const VERSION* = "0.4.3"
-const CODENAME* = "Sorta-Kinda REBOL"
+const VERSION* = "0.5.0"
+const CODENAME* = "No Ghosts"
 const BUILD_DATE* = CompileDate
