@@ -31,6 +31,7 @@ type
     bkAssign  ## callback assignment target
     bkOverride ## function definition: emits `function lua.path(...)` form
     bkMethod  ## method call: emits obj:method(args) with : syntax
+    bkVariadic ## call taking one block literal whose contents splice as args
 
   RefinementInfo* = object
     name*: string
@@ -60,6 +61,11 @@ type
     nameMap: Table[string, string]
     ## Track the kind for each binding entry.
     bindingKinds: Table[string, BindingKind]
+    ## Return-count for `'variadic` bindings. Defaults to 1 when unspecified.
+    ## N > 1 enables direct Lua multi-return when the call is the RHS of a
+    ## `set [...]` destructure; in any other position Lua's own truncation
+    ## rules apply and the emitter leaves the call shape alone.
+    variadicReturns: Table[string, int]
     ## Source directory for resolving require paths.
     sourceDir: string
     ## Target name from the module's Kintsugi header (e.g. "playdate",
@@ -384,6 +390,8 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
               primary: bool = false): string
 proc emitExprTyped(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
                    primary: bool = false): LuaExpr
+proc emitVariadicArgs(e: var LuaEmitter, name: string, line: int,
+                      vals: seq[KtgValue], pos: var int): string
 proc emitBody(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false)
 proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false)
 proc emitMatchExpr(e: var LuaEmitter, valueExpr: string, rulesBlock: seq[KtgValue]): string
@@ -3095,6 +3103,13 @@ proc resolvePathCall(e: var LuaEmitter, name: string, line: int,
             lua: luaName(head) & ":" & f.name & "(" & args.join(", ") & ")",
             isFullCall: true)
   if fullBinding.isFunction and not fullBinding.isUnknown:
+    # Variadic path bindings splice the block literal's contents in place
+    # of the single declared arity-1 arg. Without this branch the block
+    # literal would emit as a Lua table (`{...}`) and wrap itself into a
+    # one-arg call, defeating the splice.
+    if name in e.bindingKinds and e.bindingKinds[name] == bkVariadic:
+      let argText = e.emitVariadicArgs(name, line, vals, pos)
+      return PathResolution(lua: path & "(" & argText & ")", isFullCall: true)
     var args: seq[string] = @[]
     for i in 0 ..< fullBinding.arity:
       args.add(e.emitExpr(vals, pos))
@@ -3128,6 +3143,33 @@ proc emitExpr(e: var LuaEmitter, vals: seq[KtgValue], pos: var int,
   ## Back-compat projection: most call sites still concatenate strings.
   emitExprTyped(e, vals, pos, primary).text
 
+proc emitVariadicArgs(e: var LuaEmitter, name: string, line: int,
+                      vals: seq[KtgValue], pos: var int): string =
+  ## Consume the block-literal argument of a `'variadic` binding and splice
+  ## its contents into a comma-joined Lua arg list. Each element is emitted
+  ## as its own expression using the normal `emitExpr` walker, so nested
+  ## calls, paren-grouped sub-expressions, and word references all resolve
+  ## through the same strict-globals + binding-kind logic as any other
+  ## expression position. A non-block arg is a compile error — the block
+  ## literal is the whole point of the variadic shape.
+  if pos >= vals.len or vals[pos].kind != vkBlock:
+    raise EmitError(
+      msg: "======== COMPILE ERROR ========\n" &
+           "Variadic binding '" & name & "' expects a block literal " &
+           "at the call site" &
+           (if line > 0: " @ line " & $line else: "") & "\n" &
+           "  hint: wrap the arguments in [...]. Runtime splicing of a " &
+           "block value is not supported; the emitter rewrites the call " &
+           "at compile time."
+    )
+  let blk = vals[pos].blockVals
+  pos += 1
+  var argParts: seq[string] = @[]
+  var bp = 0
+  while bp < blk.len:
+    argParts.add(e.emitExpr(blk, bp))
+  argParts.join(", ")
+
 proc emitGenericCall(e: var LuaEmitter, name: string, line: int,
                      vals: seq[KtgValue], pos: var int): LuaExpr =
   ## Fallback wkWord arm: a bare name, known function, or method call.
@@ -3140,6 +3182,10 @@ proc emitGenericCall(e: var LuaEmitter, name: string, line: int,
   let resolvedLua = e.resolvedName(name)
   let info = e.getBinding(name)
   let isMethod = name in e.bindingKinds and e.bindingKinds[name] == bkMethod
+  let isVariadic = name in e.bindingKinds and e.bindingKinds[name] == bkVariadic
+  if isVariadic:
+    let argText = e.emitVariadicArgs(name, line, vals, pos)
+    return lxCall(resolvedLua & "(" & argText & ")")
   let a = e.arity(name)
   if a < 0:
     return lxLit(resolvedLua)
@@ -3886,6 +3932,26 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
             names.add(n)
             e.locals.incl(n)
         let tmp = "_set_tmp"
+        # Detect RHS = multi-return variadic binding and emit the Lua
+        # multi-assign form directly (`local a, b, c = path(...)`), which
+        # skips the `_set_tmp` table indexing used for block-shaped RHS.
+        # Only fires when the binding declared `returns > 1`; returns 1
+        # falls through to the generic path and single-assigns.
+        if pos < vals.len and vals[pos].kind == vkWord and
+           vals[pos].wordKind == wkWord and
+           vals[pos].wordName in e.bindingKinds and
+           e.bindingKinds[vals[pos].wordName] == bkVariadic:
+          let bname = vals[pos].wordName
+          let retCount = e.variadicReturns.getOrDefault(bname, 1)
+          if retCount > 1 and names.len > 0:
+            let resolvedLua = e.resolvedName(bname)
+            pos += 1
+            let argText = e.emitVariadicArgs(bname, vals[pos - 1].line,
+                                             vals, pos)
+            e.ln("local " & names.join(", ") & " = " &
+                 resolvedLua & "(" & argText & ")")
+            continue
+
         # Detect RHS = loop/collect|fold|partition and emit the loop inline
         # rather than letting emitExpr wrap it in an IIFE.
         if pos < vals.len and vals[pos].kind == vkWord and
@@ -3935,6 +4001,10 @@ proc emitBlock(e: var LuaEmitter, vals: seq[KtgValue], asReturn: bool = false) =
         # assign binding: consume 1 arg and emit as assignment
         let arg = e.emitExpr(vals, pos)
         e.ln(resolvedLua & " = " & arg)
+        continue
+      elif name in e.bindingKinds and e.bindingKinds[name] == bkVariadic:
+        let argText = e.emitVariadicArgs(name, val.line, vals, pos)
+        e.ln(resolvedLua & "(" & argText & ")")
         continue
       elif a > 0:
         let isMethod = name in e.bindingKinds and e.bindingKinds[name] == bkMethod
@@ -4502,6 +4572,20 @@ proc applyBindingEntries(e: var LuaEmitter, blk: seq[KtgValue]) =
         e.bindings[name] = bindingFunc(arity)
       else:
         e.bindings[name] = bindingFunc(0)
+    of "variadic":
+      # Fixed arity 1 from the evaluator's view: the one arg is the block
+      # literal whose contents splice. Optional `returns N` follows.
+      e.nameMap[name] = luaPath
+      e.bindingKinds[name] = bkVariadic
+      e.bindings[name] = bindingFunc(1)
+      var returns = 1
+      if pos < blk.len and blk[pos].kind == vkWord and
+         blk[pos].wordKind == wkWord and blk[pos].wordName == "returns":
+        pos += 1
+        if pos < blk.len and blk[pos].kind == vkInteger:
+          returns = int(blk[pos].intVal)
+          pos += 1
+      e.variadicReturns[name] = returns
     else:
       discard
 

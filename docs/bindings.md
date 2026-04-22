@@ -43,8 +43,51 @@ Every outer or sub-block entry is a tuple: `name "lua.path" 'kind [extra]`.
 | `'assign` | `name "lua.path" 'assign` | Declare an assignment target. `name: value` emits as `lua.path = value`. Use for callback slots (`love/update: function [...] [...]`). |
 | `'override` | `name "lua.path" 'override` | Reserved / internal; do not rely on it for user code today. |
 | `'method` | `name "lua.path" 'method N` | Declare a method of arity `N`. At Kintsugi call sites, `name receiver a b ...` emits `receiver:path(a, b, ...)` (colon-call). Use when the Lua API expects method-call syntax. |
+| `'variadic` | `name "lua.path" 'variadic [returns N]` | Declare a variadic call. At the call site, the one argument **must** be a block literal; its contents splice into the Lua call as positional arguments. Optional `returns N` declares Lua multi-return; combined with `set [a b c] name [...]`, the emitter produces `local a, b, c = lua.path(...)` directly. |
 
 The `name` is a plain word. The `lua.path` is a string — dotted paths are supported (`"love.graphics.print"`). The `'kind` is a lit-word.
+
+### Variadic bindings
+
+Fixed-arity bindings (`'call N`, `'method N`) force you to pre-commit to a specific arg count per binding name. For variadic Lua APIs (`love.graphics.print`, `string.format`, most SDK draw calls) declare `'variadic`:
+
+```
+bindings [
+  lg/rectangle "love.graphics.rectangle" 'variadic
+  lg/print    "love.graphics.print"      'variadic
+]
+
+lg/rectangle ["fill" x y w h]       ; -> love.graphics.rectangle("fill", x, y, w, h)
+lg/rectangle ["line" 0 0 10 10 3]   ; -> love.graphics.rectangle("line", 0, 0, 10, 10, 3)
+```
+
+The block argument is spliced at compile time, so each element becomes an independent Lua expression:
+
+- Literals and word references pass through as-is.
+- Paren-wrapped sub-expressions evaluate normally (`(x + 1)`).
+- Nested variadic calls compose: `outer ["a" (inner [1 2]) "b"]` → `outer("a", inner(1, 2), "b")`.
+- An empty block emits a zero-arg call: `quit []` → `os.exit()`.
+
+**Block literal required at the call site.** Runtime splicing (passing a variable that holds a block) is *not* supported — the emitter rewrites calls at compile time, and would need `table.unpack` plus a runtime helper to dynamically spread. Hand-construct the call, or generate it via `@preprocess` / `@template` for code-gen.
+
+**Caution: Lua multi-return truncation.** When a call that returns multiple values is used in a non-tail position of another call's argument list, Lua truncates its return to one value. This rule is Lua's, not Kintsugi's; the emitter preserves the call shape 1:1. Destructure explicitly at the boundary with `set [...]` if the extra values matter.
+
+### Variadic with `returns N` (multi-return)
+
+Declare the return arity when a Lua call returns multiple values:
+
+```
+bindings [
+  rgb-bytes "love.math.colorFromBytes" 'variadic returns 3
+]
+
+set [r g b] rgb-bytes [255 128 0]
+; -> local r, g, b = love.math.colorFromBytes(255, 128, 0)
+```
+
+The emitter specializes the `set [...]` destructure into a direct Lua multi-assign when the RHS is a `'variadic returns > 1` binding call. No `_set_tmp` table, no indexing — Lua's own multi-return mechanism carries the values. `returns 1` is the default and behaves like a normal single-value call.
+
+In the interpreter, `'variadic returns N` placeholders return a block of N `none` values so `set [...]` destructures without diverging from the compiled shape. The interpreter never executes the foreign call — bindings are compile-time escape hatches.
 
 ## Runtime vs Compile Behavior
 

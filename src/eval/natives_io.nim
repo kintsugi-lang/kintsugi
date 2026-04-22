@@ -486,6 +486,28 @@ proc registerIoNatives*(eval: Evaluator) =
               fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
                 ktgNone()
             ), line: 0))
+        of "variadic":
+          # Placeholder arity 1: the one arg is a block, contents splice
+          # at compile time. At interp time we return a block of `returns`
+          # none values so `set [a b c] variadic-call [...]` destructures
+          # cleanly without diverging from the compiled shape.
+          var returns = 1
+          if pos < blk.len and blk[pos].kind == vkWord and
+             blk[pos].wordKind == wkWord and blk[pos].wordName == "returns":
+            pos += 1
+            if pos < blk.len and blk[pos].kind == vkInteger:
+              returns = int(blk[pos].intVal)
+              pos += 1
+          let capturedName = name
+          let capturedReturns = returns
+          eval.currentCtx.set(name, KtgValue(kind: vkNative,
+            nativeFn: KtgNative(name: capturedName, arity: 1,
+              fn: proc(args: seq[KtgValue], ep: pointer): KtgValue =
+                if capturedReturns <= 1: return ktgNone()
+                var slots: seq[KtgValue] = @[]
+                for i in 0 ..< capturedReturns: slots.add(ktgNone())
+                ktgBlock(slots)
+            ), line: 0))
         of "const":
           eval.currentCtx.set(name, ktgNone())
         of "alias":
