@@ -72,3 +72,26 @@ suite "typeDef-backed dispatch":
     discard e.evalString("goblin: make Enemy [hp: 30]")
     check $e.evalString("is? enemy! goblin") == "true"
     check $e.evalString("is? :Enemy goblin") == "true"
+
+  test "object dispatch is nominal: plain context with matching fields fails":
+    let e = makeEval()
+    discard e.evalString("""
+      Enemy: object [
+        field/required [hp [integer!]]
+      ]
+    """)
+    # Not stamped via `make`: no instanceOf tag, so nominal dispatch
+    # rejects even though the shape overlaps.
+    check $e.evalString("""is? enemy! context [hp: 30]""") == "false"
+    check $e.evalString("""is? :Enemy context [hp: 30]""") == "false"
+
+  test "nominal is? survives make cloning":
+    let e = makeEval()
+    discard e.evalString("""
+      Enemy: object [
+        field/required [hp [integer!]]
+      ]
+    """)
+    discard e.evalString("a: make Enemy [hp: 1]")
+    discard e.evalString("b: make a [hp: 2]")
+    check $e.evalString("is? enemy! b") == "true"

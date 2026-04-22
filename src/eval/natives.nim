@@ -197,14 +197,9 @@ proc registerNatives*(eval: Evaluator) =
 
       let tn = typeArg.typeName
 
-      # Unified registry: phase-1 consolidation routes dispatch through
-      # typeDefs; CustomType/KtgObject remain the backing storage.
+      # Unified registry: typeDefs is the single source of truth.
       if tn in eval.typeDefs:
         return ktgLogic(eval.matchesTypeDef(value, eval.typeDefs[tn], eval.currentCtx))
-
-      # Phantom custom type: look in typeEnv first.
-      if tn in eval.typeEnv:
-        return ktgLogic(eval.matchesCustomType(value, eval.typeEnv[tn], eval.currentCtx))
 
       # Enum-namespace singleton: parent/member! where parent! is an enum.
       # Raises on invalid member (typo safety).

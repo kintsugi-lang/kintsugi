@@ -234,16 +234,9 @@ proc walkMatch(scrutinee: KtgValue, rules: seq[KtgValue],
                scopes: seq[FnScope], eval: Evaluator, line: int) =
   let typeName = resolveScrutineeType(scrutinee, scopes)
   if typeName.len == 0: return
-  # Prefer the unified typeDefs registry; fall back to the legacy
-  # typeEnv so phase-1 consolidation isn't required for this pass.
-  var td: TypeDef = nil
-  if typeName in eval.typeDefs: td = eval.typeDefs[typeName]
-  elif typeName in eval.typeEnv:
-    td = TypeDef(name: typeName, kind: tkUnion, custom: eval.typeEnv[typeName])
-    if td.custom.isEnum: td.kind = tkEnum
-    elif td.custom.isStruct: td.kind = tkStruct
-    elif td.custom.guard.len > 0: td.kind = tkGuard
-  if td == nil or td.custom == nil: return
+  if typeName notin eval.typeDefs: return
+  let td = eval.typeDefs[typeName]
+  if td.custom == nil: return
 
   case td.kind
   of tkEnum:

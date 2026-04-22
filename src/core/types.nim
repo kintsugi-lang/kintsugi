@@ -53,13 +53,14 @@ type
     tkObjectRef  ## name: object [...]  -- nominal/structural object type
 
   TypeDef* = ref object
-    ## Canonical entry in `Evaluator.typeDefs`. Backed by the legacy
-    ## CustomType/KtgObject representations during phase-1
-    ## consolidation; phase-2 collapses those into this record.
+    ## Canonical entry in `Evaluator.typeDefs`. CustomType and
+    ## KtgObject are the data containers (rule block, field specs)
+    ## that back each variant, but TypeDef is the single dispatch
+    ## surface for `is?`, match, and the exhaustiveness analyzer.
     name*: string              ## canonical type name, e.g. "color!"
     line*: int
     kind*: TypeKind
-    custom*: CustomType        ## backing for tkEnum/tkUnion/tkGuard/tkStruct
+    custom*: CustomType        ## backing for tkEnum/tkUnion/tkGuard/tkStruct/tkTagged
     obj*: KtgObject            ## backing for tkObjectRef
 
   KtgValue* = ref object

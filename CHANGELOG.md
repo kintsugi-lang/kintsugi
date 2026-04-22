@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.1 — phase-2 type consolidation
+
+### Changed
+
+- **Objects dispatch nominally.** `is? :SomeObject v` and `is? some-object! v` now check that `v` was stamped by `make SomeObject [...]` (its `instanceOf` tag matches) instead of structurally comparing fields. Plain contexts that happen to share the field shape no longer match. Structural matching is still available via `@type ['name [t!] ...]`, which registers a `tkStruct` type distinct from the nominal object path.
+- **`make` clones propagate nominal identity.** `make existing-instance [overrides]` now inherits `instanceOf` and field specs, so cloning preserves type.
+
+### Removed
+
+- **`typeEnv` legacy table.** Everything that read `Evaluator.typeEnv` now reads the unified `typeDefs` registry. One source of truth for `is?`, match, and the exhaustiveness analyzer.
+
 ## 0.5.0 — "No Ghosts"
 
 ### Language

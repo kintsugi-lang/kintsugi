@@ -54,7 +54,7 @@ proc matchSingleValue(pattern: KtgValue, value: KtgValue,
     # in a pattern position).
     if pattern.customType != nil:
       return eval.matchesCustomType(value, pattern.customType, ctx)
-    # Unified dispatch: handles builtin aliases, typeEnv lookups,
+    # Unified dispatch: handles builtin aliases, typeDefs lookups,
     # enum namespace singletons, and legacy predicate-fn fallback.
     return eval.typeMatches(typeName(value), pattern.typeName, value, ctx)
 

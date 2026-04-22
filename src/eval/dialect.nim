@@ -13,7 +13,6 @@ type
     moduleLoading*: HashSet[string]
     macros*: HashSet[string]   ## words declared with @template
     templates*: Table[string, TemplateDef]   ## @template body + mode, keyed by name
-    typeEnv*: Table[string, CustomType]  ## phantom type environment; @type registers here
     typeDefs*: Table[string, TypeDef]    ## unified type registry; every @type and object registration writes here
     emitStack*: seq[ref seq[KtgValue]]   ## one queue per active @preprocess; @emit pushes to the top
 

@@ -285,6 +285,7 @@ proc registerObjectDialect*(eval: Evaluator) =
         fieldSpecs = source.obj.fieldSpecs
       of vkContext:
         sourceEntries = source.ctx.entries
+        fieldSpecs = source.ctx.fieldSpecs
       else:
         raise KtgError(kind: "type",
           msg: "make expects an object! or context! as first argument, got " & typeName(source),
@@ -293,9 +294,14 @@ proc registerObjectDialect*(eval: Evaluator) =
       let instance = newContext(eval.global)
       ## Tag the instance with its source object's name so `type` can
       ## report it as the user-declared type instead of bare `context!`.
+      ## Cloning an existing instance propagates both the nominal tag
+      ## and the field specs so nominal `is?` continues to match.
       if source.kind == vkObject and source.obj.name.len > 0:
         instance.instanceOf = source.obj.name
         instance.fieldSpecs = source.obj.fieldSpecs
+      elif source.kind == vkContext and source.ctx.instanceOf.len > 0:
+        instance.instanceOf = source.ctx.instanceOf
+        instance.fieldSpecs = source.ctx.fieldSpecs
 
       # Step 1: Shallow copy all entries from source
       for key, val in sourceEntries:

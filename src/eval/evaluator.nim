@@ -156,7 +156,6 @@ proc newEvaluator*(): Evaluator =
     dialects: @[],
     moduleCache: initTable[string, KtgValue](),
     moduleLoading: initHashSet[string](),
-    typeEnv: initTable[string, CustomType](),
     typeDefs: initTable[string, TypeDef]()
   )
 
@@ -540,10 +539,10 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
         # rather than silently returning undefined.
         if segments.len == 1 and not ctx.has(head):
           let enumParentName = head & "!"
-          if enumParentName in eval.typeEnv and
-             eval.typeEnv[enumParentName].isEnum:
+          if enumParentName in eval.typeDefs and
+             eval.typeDefs[enumParentName].kind == tkEnum:
             let seg = segments[0]
-            let parent = eval.typeEnv[enumParentName]
+            let parent = eval.typeDefs[enumParentName].custom
             for rv in parent.rule:
               if rv.kind == vkWord and rv.wordKind == wkLitWord and
                  toLower(rv.wordName) == toLower(seg):
@@ -623,9 +622,9 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
           msg: "cannot rebind self",
           data: nil)
 
-      # Phantom types: `name!: @type ...` registers the rule in typeEnv and
-      # does NOT bind the name as a runtime value. `name!` tokens lex as
-      # vkType literals, so `is? name! v` picks up the rule via typeEnv.
+      # Phantom types: `name!: @type ...` registers the rule in typeDefs
+      # and does NOT bind the name as a runtime value. `name!` tokens lex
+      # as vkType literals, so `is? name! v` picks up the rule via typeDefs.
       if rhs.kind == vkType and rhs.customType != nil and
          val.wordName.endsWith("!") and not val.wordName.contains('/'):
         # Enum namespaces reuse the parent's name-without-! for path access
@@ -638,11 +637,9 @@ proc evalNext*(eval: Evaluator, vals: seq[KtgValue], pos: var int,
               msg: "cannot register enum namespace '" & nsName &
                    "' — name already bound",
               data: nil, line: val.line)
-        eval.typeEnv[val.wordName] = rhs.customType
-        # Phase-1 consolidation: mirror into typeDefs so `is?` and match
-        # dispatch can route through a single registry. Tagged unions
-        # are detected when every `|`-separated rule element is a block
-        # whose head is a lit-word (the variant tag).
+        # Register in typeDefs. Tagged unions are detected when every
+        # `|`-separated rule element is a block whose head is a
+        # lit-word (the variant tag).
         proc isTaggedUnion(rule: seq[KtgValue]): bool =
           var sawBlock = false
           for rv in rule:
@@ -1079,9 +1076,10 @@ proc resolveEnumSingleton*(eval: Evaluator, typeName: string): CustomType =
   let parts = typeName.split('/')
   if parts.len != 2: return nil
   let parentName = parts[0] & "!"
-  if parentName notin eval.typeEnv: return nil
-  let parent = eval.typeEnv[parentName]
-  if not parent.isEnum: return nil
+  if parentName notin eval.typeDefs: return nil
+  if eval.typeDefs[parentName].kind != tkEnum: return nil
+  let parent = eval.typeDefs[parentName].custom
+  if parent == nil: return nil
   let memberStr = parts[1][0 ..< parts[1].len - 1]  # strip trailing !
   for rv in parent.rule:
     if rv.kind == vkWord and rv.wordKind == wkLitWord and
@@ -1093,8 +1091,8 @@ proc resolveEnumSingleton*(eval: Evaluator, typeName: string): CustomType =
 proc matchesTypeDef*(eval: Evaluator, value: KtgValue, td: TypeDef,
                      ctx: KtgContext): bool =
   ## Unified dispatch against a TypeDef. Handles every registered
-  ## variant; the legacy CustomType/KtgObject paths back this call
-  ## during phase-1 consolidation.
+  ## variant; CustomType / KtgObject supply the data (rule block,
+  ## field specs) but all dispatch flows through here.
   case td.kind
   of tkEnum, tkUnion, tkGuard, tkStruct:
     if td.custom == nil: return false
@@ -1126,21 +1124,21 @@ proc matchesTypeDef*(eval: Evaluator, value: KtgValue, td: TypeDef,
       return true
     false
   of tkObjectRef:
-    if td.obj == nil: return false
+    # Nominal dispatch: value is a context stamped by `make Name [...]`
+    # whose instanceOf matches the type name. Plain contexts that
+    # merely share the same field shape do NOT match -- use a
+    # structural `@type ['name [t!] ...]` if that's what you want.
     if value.kind != vkContext: return false
-    for fs in td.obj.fieldSpecs:
-      if fs.name notin value.ctx.entries:
-        return false
-    true
+    if value.ctx.instanceOf.len == 0: return false
+    toKebabCase(value.ctx.instanceOf) & "!" == td.name
 
 proc matchesCustomTypeByName*(eval: Evaluator, value: KtgValue, typeName: string, ctx: KtgContext): bool =
-  ## Phantom type lookup. typeEnv is authoritative. Legacy fallbacks handle
-  ## object auto-gen (predicate function) and pre-phantom code that still
-  ## stores a customType as a value.
+  ## Phantom type lookup. typeDefs is the single source of truth
+  ## post phase-2 consolidation; remaining fallbacks handle ad-hoc
+  ## path access (`direction/north` enum singletons) and predicate
+  ## functions auto-generated for legacy object-style types.
   if typeName in eval.typeDefs:
     return eval.matchesTypeDef(value, eval.typeDefs[typeName], ctx)
-  if typeName in eval.typeEnv:
-    return eval.matchesCustomType(value, eval.typeEnv[typeName], ctx)
   let singleton = eval.resolveEnumSingleton(typeName)
   if singleton != nil:
     return eval.matchesCustomType(value, singleton, ctx)
