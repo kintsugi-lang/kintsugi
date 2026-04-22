@@ -6,6 +6,7 @@ import ../src/core/types
 import ../src/parse/[lexer, parser]
 import ../src/emit/lua
 import ../src/emit/helpers
+import ../src/eval/[dialect, evaluator, natives]
 import ./emit_test_helper
 
 suite "emitter: LuaExpr typed expressions":
@@ -945,6 +946,32 @@ suite "emitter: synthesized type predicates":
       bindings [gfx "playdate.graphics" 'alias]
     """))
     check "local gfx <const> = playdate.graphics" in code
+
+  test "color module imports rgb into prelude":
+    let eval = newEvaluator()
+    eval.registerNatives()
+    let ast = parseSource("""
+      Kintsugi []
+      import/using 'color [rgb]
+      red: rgb 255 0 0
+    """)
+    let processed = eval.preprocess(ast, forCompilation = true)
+    let code = emitLua(processed, eval = eval)
+    check "function rgb(" in code
+    check "rgb(255, 0, 0)" in code
+
+  test "color/apply splices four channels into a call":
+    let eval = newEvaluator()
+    eval.registerNatives()
+    let ast = parseSource("""
+      Kintsugi []
+      import/using 'color [apply]
+      set-color: function [r g b a] [0]
+      apply :set-color [1 0 0 1]
+    """)
+    let processed = eval.preprocess(ast, forCompilation = true)
+    let code = emitLua(processed, eval = eval)
+    check "function apply(" in code
 
   test "coroutine module emits coroutine.* path calls":
     let code = emitLua(parseSource("""

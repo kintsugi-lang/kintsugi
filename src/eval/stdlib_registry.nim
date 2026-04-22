@@ -7,6 +7,7 @@ const stdlibModules* = {
   "collections": staticRead("../../lib/collections.ktg"),
   "coroutine": staticRead("../../lib/coroutine.ktg"),
   "io": staticRead("../../lib/io.ktg"),
+  "color": staticRead("../../lib/color.ktg"),
 }.toTable
 
 proc stripModuleHeader*(source: string): string =

@@ -1,0 +1,109 @@
+Kintsugi [name: 'color]
+
+; Color is represented as a 4-element block of floats [r g b a] in 0..1.
+; LOVE2D's setColor expects four floats in this range; `color/apply`
+; splices a color into a four-arity callable.
+
+; --- Constructors ---
+
+rgb: function [r g b] [
+  reduce [(r / 255.0) (g / 255.0) (b / 255.0) 1.0]
+]
+
+rgba: function [r g b a] [
+  reduce [(r / 255.0) (g / 255.0) (b / 255.0) (a / 255.0)]
+]
+
+; Parse #RRGGBB or #RRGGBBAA (case-insensitive). Alpha defaults to 1.0.
+hex: function [s [string!]] [
+  body: either starts-with? s "#" [subset s 2 (length s) - 1] [s]
+  body: lowercase body
+  digit: function [c] [
+    either (byte c) >= (byte "a") [
+      (byte c) - (byte "a") + 10
+    ] [
+      (byte c) - (byte "0")
+    ]
+  ]
+  pair: function [i] [
+    ((digit subset body i 1) * 16) + (digit subset body i + 1 1)
+  ]
+  either (length body) >= 8 [
+    rgba (pair 1) (pair 3) (pair 5) (pair 7)
+  ] [
+    rgb (pair 1) (pair 3) (pair 5)
+  ]
+]
+
+; --- HSL to RGB ---
+; h in [0, 360), s in [0, 100], l in [0, 100]
+
+_hsl-hue-channel: function [p q t] [
+  tt: either t < 0 [t + 1] [either t > 1 [t - 1] [t]]
+  either (tt * 6) < 1 [return p + ((q - p) * 6 * tt)] [0]
+  either (tt * 2) < 1 [return q] [0]
+  either (tt * 3) < 2 [return p + ((q - p) * ((2.0 / 3.0) - tt) * 6)] [0]
+  p
+]
+
+hsl: function [h s l] [
+  sf: s / 100.0
+  lf: l / 100.0
+  either sf = 0 [
+    return reduce [lf lf lf 1.0]
+  ] [0]
+  q: either lf < 0.5 [lf * (1 + sf)] [lf + sf - (lf * sf)]
+  p: (2 * lf) - q
+  hn: (h / 360.0)
+  r: _hsl-hue-channel p q hn + (1.0 / 3.0)
+  g: _hsl-hue-channel p q hn
+  b: _hsl-hue-channel p q hn - (1.0 / 3.0)
+  reduce [r g b 1.0]
+]
+
+; --- Color math ---
+
+lighten: function [c [block!] amount] [
+  cr: pick c 1
+  cg: pick c 2
+  cb: pick c 3
+  ca: pick c 4
+  reduce [
+    cr + ((1.0 - cr) * amount)
+    cg + ((1.0 - cg) * amount)
+    cb + ((1.0 - cb) * amount)
+    ca
+  ]
+]
+
+darken: function [c [block!] amount] [
+  cr: pick c 1
+  cg: pick c 2
+  cb: pick c 3
+  ca: pick c 4
+  reduce [
+    cr * (1.0 - amount)
+    cg * (1.0 - amount)
+    cb * (1.0 - amount)
+    ca
+  ]
+]
+
+mix: function [a [block!] b [block!] t] [
+  ar: pick a 1  ag: pick a 2  ab: pick a 3  aa: pick a 4
+  br: pick b 1  bg: pick b 2  bb: pick b 3  ba: pick b 4
+  reduce [
+    ar + ((br - ar) * t)
+    ag + ((bg - ag) * t)
+    ab + ((bb - ab) * t)
+    aa + ((ba - aa) * t)
+  ]
+]
+
+; --- Apply ---
+; Splice a color into a four-arity callable. Useful for LOVE2D setColor:
+;   color/apply :lg/setColor theme/accent
+
+apply: function [fn c [block!]] [
+  fn (pick c 1) (pick c 2) (pick c 3) (pick c 4)
+]
